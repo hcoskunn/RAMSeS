@@ -37,7 +37,7 @@ P_FIX, G_FIX = 50, 10                   # default for mutation sweep; will auto-
 # Inset (zoom) config for F1 row
 # -----------------------------
 INSET_ENABLED = True
-INSET_YLIM = (0.75, .85)     # nominal F1 zoom band
+INSET_YLIM = (0.76, .81)     # nominal F1 zoom band
 INSET_WIDTH = "40%"           # relative to parent axes
 INSET_HEIGHT = "45%"
 INSET_LOC = "center right"     # 'upper left' | 'upper right' | 'lower left' | 'lower right'
