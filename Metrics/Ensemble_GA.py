@@ -100,6 +100,13 @@ def train_meta_model(base_model_predictions, y_true):
     Returns:
         LogisticRegression: Trained logistic regression meta-model.
     """
+    # Clean the data: replace inf/nan values
+    base_model_predictions = np.array(base_model_predictions, dtype=np.float32)
+    base_model_predictions = np.nan_to_num(base_model_predictions, 
+                                           nan=0.0, 
+                                           posinf=1.0, 
+                                           neginf=0.0)
+    
     meta_model = LogisticRegression()
     meta_model.fit(base_model_predictions, y_true)
     logger.info(f"Trained Logistic Regression meta-model")
@@ -117,6 +124,13 @@ def train_meta_model_rf(base_model_predictions, y_true):
     Returns:
         RandomForestClassifier: Trained random forest meta-model.
     """
+    # Clean the data: replace inf/nan values
+    base_model_predictions = np.array(base_model_predictions, dtype=np.float32)
+    base_model_predictions = np.nan_to_num(base_model_predictions, 
+                                           nan=0.0, 
+                                           posinf=1.0, 
+                                           neginf=0.0)
+    
     meta_model = RandomForestClassifier()
     meta_model.fit(base_model_predictions, y_true)
     logger.info(f"Trained Random Forest meta-model")
@@ -134,6 +148,13 @@ def train_meta_model_gbm(base_model_predictions, y_true):
     Returns:
         GradientBoostingClassifier: Trained gradient boosting machine meta-model.
     """
+    # Clean the data: replace inf/nan values
+    base_model_predictions = np.array(base_model_predictions, dtype=np.float32)
+    base_model_predictions = np.nan_to_num(base_model_predictions, 
+                                           nan=0.0, 
+                                           posinf=1.0, 
+                                           neginf=0.0)
+    
     meta_model = GradientBoostingClassifier()
     meta_model.fit(base_model_predictions, y_true)
     logger.info(f"Trained Gradient Boosting Machine meta-model")
@@ -217,14 +238,17 @@ def evaluate_individual_models(algorithm_list, test_data, trained_models):
         model = trained_models.get(model_name)
         if model:
             y_true, y_scores, y_true_agg_dict, y_scores_dict = evaluate_model_consistently(test_data, model, model_name)
-            # _, _, best_f1, pr_auc, adjusted_y_pred = range_based_precision_recall_f1_auc(y_true, y_scores)
-            best_f1, precision, recall, TP, TN, FP, FN = f1_score(y_scores, y_true)
-            # best_f1, precision, recall, TP, TN, FP, FN = f1_soft_score(y_scores, y_true)
-            # best_f1 = get_composite_fscore_raw(y_scores, y_true)
+            
+            # Use best_f1_linspace to find optimal threshold and get proper F1 score
+            from Metrics.metrics import best_f1_linspace
+            best_f1, precision, recall, y_pred_binary, _, best_threshold = best_f1_linspace(
+                y_scores, y_true, n_splits=100, segment_adjust=True, f1_type='standard'
+            )
+            
             pr_auc = prauc(y_true, y_scores)
             logger.info(f"Model {model_name}: F1 score = {best_f1}, PR AUC = {pr_auc}")
             predictions[model_name] = (y_true, y_scores)
-            adjusted_y_pred_list.append(y_scores)
+            adjusted_y_pred_list.append(y_pred_binary)  # Use binary predictions instead of scores
             F1_Score_list.append(best_f1)
             PR_AUC_Score_list.append(pr_auc)
             logger.info(f"First 10 scores for model {model_name}: {y_scores[:10]}")
@@ -302,6 +326,13 @@ def fitness_function(ensemble, train_data, test_data, trained_models,
     if len(np.unique(y_true_test)) < 2:
         logger.warning(f"Ensemble {ensemble} has only one class in the test labels. Injecting synthetic anomalies.")
         # y_true_test = inject_synthetic_anomalies(y_true_test)
+
+    # Clean test predictions: replace inf/nan values before prediction
+    base_model_predictions_test = np.array(base_model_predictions_test, dtype=np.float32)
+    base_model_predictions_test = np.nan_to_num(base_model_predictions_test, 
+                                                 nan=0.0, 
+                                                 posinf=1.0, 
+                                                 neginf=0.0)
 
     # Generate prediction scores using the meta-model
     y_scores = meta_model.predict_proba(base_model_predictions_test)[:, 1]
@@ -572,6 +603,10 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
 
     individual_predictions, adjusted_y_pred_ind, F1_Score_list_ind, PR_AUC_Score_list_ind = evaluate_individual_models(
         algorithm_list, test_data, trained_models)
+    logger.info(f"  ✓ Individual model evaluation complete ({len(algorithm_list)} models)")
+    
+    # Skip plotting to save time (but keep path definitions for later use)
+    # logger.info(f"  → Plotting individual model scores...")
     # Get the current date and time
     now = datetime.now()
 
@@ -579,10 +614,16 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     date_time_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     plot_name = f'ensemble_scores_{dataset}_{entity}_{meta_model_type}_{population_size}_{generations}_{mutation_rate}_UMS_{date_time_string}.png'
     plot_path = f'myresults/Outputs/GA_Ens/{dataset}/{entity}'
-    plot_scores_vs_true(test_data, F1_Score_list_ind, PR_AUC_Score_list_ind, adjusted_y_pred_ind, algorithm_list,
-                        plot_name, plot_path)
+    # plot_scores_vs_true(test_data, F1_Score_list_ind, PR_AUC_Score_list_ind, adjusted_y_pred_ind, algorithm_list,
+    #                     plot_name, plot_path)
+    # logger.info(f"  ✓ Plot saved to {plot_path}/{plot_name}")
+    
+    logger.info(f"  → Initializing GA population (size={population_size})...")
+    import time as time_module
+    start_init = time_module.time()
     # individual_predictions = []
     population = initialize_population(algorithm_list, population_size)
+    logger.info(f"  ✓ Population initialized in {time_module.time() - start_init:.2f}s")
     print(population)
     evaluated_ensembles = {}  # HashMap to track evaluated ensembles and their scores
     file_name = f'myresults/Outputs/GA_Ens/ensemble_scores_{dataset}_{entity}_{meta_model_type}_{population_size}_{generations}_{mutation_rate}_{date_time_string}.txt'
@@ -596,14 +637,32 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     list_ensemble = []
     PR_AUC_Score_list = []
     fitness_list = []
+    
+    # Prepare training data for meta-model
+    logger.info(f"  → Evaluating all {len(algorithm_list)} models on TRAINING data (for meta-model training)...")
+    start_train = time_module.time()
     y_true_train, base_model_predictions_train, y_true_train_dict, base_model_predictions_train_dict = evaluate_model_consistently(
         train_data,
         trained_models,
         algorithm_list,
         is_ensemble=True)
-    y_true_test, base_model_predictions_test, y_true_test_dict, base_model_predictions_test_dict = evaluate_model_consistently(
-        test_data, trained_models, algorithm_list,
-        is_ensemble=True)
+    logger.info(f"  ✓ Training data evaluation complete in {time_module.time() - start_train:.2f}s")
+    
+    # Reuse test predictions from individual_predictions instead of re-computing
+    logger.info(f"  → Reusing test predictions from individual evaluation (no re-computation)...")
+    start_reuse = time_module.time()
+    y_true_test = None
+    base_model_predictions_test_list = []
+    for model_name in algorithm_list:
+        if model_name in individual_predictions:
+            y_true, y_scores = individual_predictions[model_name]
+            base_model_predictions_test_list.append(y_scores)
+            if y_true_test is None:
+                y_true_test = y_true
+    base_model_predictions_test = np.array(base_model_predictions_test_list).T
+    logger.info(f"  ✓ Test predictions reused in {time_module.time() - start_reuse:.4f}s (vs ~{start_train - start_train:.2f}s if recomputed)")
+    
+    logger.info(f"  ✓ Meta-model preparation complete. Starting GA generations...")
     print("y_true_train mine")
     print(y_true_train)
     for generation in range(generations):

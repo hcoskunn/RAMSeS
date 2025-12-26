@@ -1,0 +1,42 @@
+# General parameters
+random_seed: 13
+n_jobs: 5
+overwrite: False
+
+# Dataset and Entity Configuration
+# Specify which dataset(s) and entity/entities to process
+# For single dataset/entity: use string (e.g., 'SKAB', '2')
+# For multiple entities: use list (e.g., ['1', '2', '3'])
+# NOTE: Dataset names are case-insensitive - system will find correct directory
+#       (SKAB, skab, Skab all work and will find the actual SKAB directory)
+dataset: 'SKAB'
+entity: '2'  # Can be a single entity '2' or list ['1', '2', '3']
+
+# Model training parameters
+downsampling: 10
+trained_model_path: "/home/maxoud/local-storage/projects/RAMSeS/Mononito/trained_models"
+dataset_path: "/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets"
+
+min_length: 256
+verbose: True
+training_size: 1
+model_architectures: 'all'
+
+# Model evaluation parameters
+normalize: True
+results_path: "/home/maxoud/local-storage/projects/RAMSeS/Mononito/results"
+
+n_repeats: 2
+split: 'test'
+synthetic_ranking_criterion: 'f1'
+n_validation_splits: 5
+n_neighbors: [2, 4, 6]
+n_splits: 100
+evaluation_metric: 'Best F-1'
+sliding_window: !!null
+metric: 'influence'
+top_k: 3
+use_all_ranks: False
+top_kr: !!null
+
+abn_type_list: ['spikes', 'contextual', 'flip', 'speedup', 'noise', 'cutoff', 'scale', 'wander', 'average']

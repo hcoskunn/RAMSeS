@@ -25,8 +25,8 @@ import matplotlib.pyplot as plt
 # -----------------------------
 
 # EXACT PATHS (as requested)
-TRAINED_MODELS_DIR = "/home/maxoud/projects/RAMS-TSAD/Mononito/trained_models/skab/1"
-DATASET_FILE       = "/home/maxoud/projects/RAMS-TSAD/Mononito/datasets/skab/1.csv"
+TRAINED_MODELS_DIR = "/home/maxoud/local-storage/projects/RAMSeS/Mononito/trained_models/skab/1"
+DATASET_FILE       = "/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets/skab/1.csv"
 
 # Dataset identity (we’ll stage the single CSV into a folder layout the loader expects)
 DATASET_NAME = "skab"

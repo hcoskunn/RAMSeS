@@ -1,0 +1,218 @@
+================================================================================
+RAMSeS Testbed Report - Domain: SKAB
+Generated: 2025-12-25 22:35:36
+================================================================================
+
+================================================================================
+OVERALL STATISTICS
+================================================================================
+
+Total Datasets Processed: 19
+Total Computational Time: 6524.84s (108.75 min)
+Average Runtime per Dataset: 343.41s
+Average Memory Usage: 16.32 MB
+Average Peak Memory: 16.41 MB
+Maximum Peak Memory: 104.25 MB
+
+================================================================================
+AVERAGE MODULE COMPUTATIONAL OVERHEAD
+================================================================================
+
+  1_Genetic_Algorithm            :    58.1460s
+  2_Thompson_Sampling            :   214.9918s
+  3_GAN_Robustness               :    14.9793s
+  4_Borderline_Sensitivity       :     5.5021s
+  5_Monte_Carlo                  :    19.7531s
+  6_Rank_Aggregation             :     0.0621s
+--------------------------------------------------
+  End-to-End (Average)           :   313.4363s
+
+================================================================================
+AVERAGE F1 SCORES BY MODULE
+================================================================================
+
+  ga                   : 0.991626 ± 0.006034
+  thompson             : 0.754629 ± 0.132149
+  gan                  : 0.999989 ± 0.000003
+  borderline           : 0.999989 ± 0.000003
+  monte_carlo          : 0.947358 ± 0.121546
+  final_selected       : 0.996033 ± 0.004288
+
+================================================================================
+PER-DATASET RESULTS
+================================================================================
+
+Dataset: 5.csv
+  Entity: 5
+  Runtime: 109.69s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.982988
+    Final (single): 0.999990
+
+Dataset: 2.csv
+  Entity: 2
+  Runtime: 2048.52s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.984144
+    Final (ensemble): 0.984144
+
+Dataset: 14.csv
+  Entity: 14
+  Runtime: 2349.80s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.994905
+    Final (single): 0.999992
+
+Dataset: 13.csv
+  Entity: 13
+  Runtime: 104.26s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.983488
+    Final (single): 0.999985
+
+Dataset: 12.csv
+  Entity: 12
+  Runtime: 107.64s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.993614
+    Final (ensemble): 0.993614
+
+Dataset: 15.csv
+  Entity: 15
+  Runtime: 101.58s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.992216
+    Final (ensemble): 0.992216
+
+Dataset: 3.csv
+  Entity: 3
+  Runtime: 96.25s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.995345
+    Final (ensemble): 0.995345
+
+Dataset: 4.csv
+  Entity: 4
+  Runtime: 102.41s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.989239
+    Final (ensemble): 0.989239
+
+Dataset: 11.csv
+  Entity: 11
+  Runtime: 97.95s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.996473
+    Final (single): 0.999992
+
+Dataset: 9.csv
+  Entity: 9
+  Runtime: 100.85s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.998140
+    Final (ensemble): 0.998140
+
+Dataset: 7.csv
+  Entity: 7
+  Runtime: 103.92s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.994375
+    Final (ensemble): 0.994375
+
+Dataset: 0.csv
+  Entity: 0
+  Runtime: 107.34s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.996566
+    Final (single): 0.999992
+
+Dataset: 1.csv
+  Entity: 1
+  Runtime: 93.06s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.996127
+    Final (ensemble): 0.996127
+
+Dataset: 6.csv
+  Entity: 6
+  Runtime: 104.03s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.996007
+    Final (ensemble): 0.996007
+
+Dataset: 10.csv
+  Entity: 10
+  Runtime: 96.52s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.998778
+    Final (ensemble): 0.998778
+
+Dataset: 8.csv
+  Entity: 8
+  Runtime: 101.47s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.994423
+    Final (ensemble): 0.994423
+
+Dataset: 17.csv
+  Entity: 17
+  Runtime: 225.80s
+  Avg Memory: 102.21 MB
+  Peak Memory: 103.43 MB
+  F1 Scores:
+    GA Ensemble: 0.976821
+    Final (single): 0.999992
+
+Dataset: 18.csv
+  Entity: 18
+  Runtime: 236.39s
+  Avg Memory: 103.68 MB
+  Peak Memory: 104.18 MB
+  F1 Scores:
+    GA Ensemble: 0.992285
+    Final (ensemble): 0.992285
+
+Dataset: 19.csv
+  Entity: 19
+  Runtime: 237.35s
+  Avg Memory: 104.19 MB
+  Peak Memory: 104.25 MB
+  F1 Scores:
+    GA Ensemble: 0.984966
+    Final (single): 0.999985
+
+================================================================================
+END OF REPORT
+================================================================================

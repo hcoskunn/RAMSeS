@@ -1,0 +1,47 @@
+[
+  {
+    "dataset_file": "skab_3.csv",
+    "domain": "skab",
+    "entity": "3",
+    "total_runtime": 96.2455,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 35.5043,
+        "2_Thompson_Sampling": 16.6427,
+        "3_GAN_Robustness": 15.3318,
+        "4_Borderline_Sensitivity": 6.1718,
+        "5_Monte_Carlo": 22.585,
+        "6_Rank_Aggregation": 0.0087,
+        "end_to_end": 96.2455
+      },
+      "ga": {
+        "f1": 0.995345,
+        "pr_auc": 0.028846
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.333331
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "monte_carlo": {
+        "f1": 0.66666,
+        "pr_auc": 0.291664
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.995345,
+        "selected": "ensemble",
+        "selected_f1": 0.995345
+      }
+    }
+  }
+]

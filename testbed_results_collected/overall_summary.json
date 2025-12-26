@@ -1,0 +1,40 @@
+{
+  "total_domains": 1,
+  "total_datasets": 1,
+  "total_time": 96.2455,
+  "domains": {
+    "skab": {
+      "total_datasets": 1,
+      "total_runtime": 96.2455,
+      "avg_runtime": 96.2455,
+      "avg_memory_mb": 0.0,
+      "peak_memory_mb": 0.0,
+      "max_peak_memory_mb": 0,
+      "avg_module_times": {
+        "1_Genetic_Algorithm": 35.5043,
+        "2_Thompson_Sampling": 16.6427,
+        "3_GAN_Robustness": 15.3318,
+        "4_Borderline_Sensitivity": 6.1718,
+        "5_Monte_Carlo": 22.585,
+        "6_Rank_Aggregation": 0.0087,
+        "end_to_end": 96.2455
+      },
+      "avg_f1_scores": {
+        "ga": 0.995345,
+        "thompson": 0.799992,
+        "gan": 0.99999,
+        "borderline": 0.99999,
+        "monte_carlo": 0.66666,
+        "final_selected": 0.995345
+      },
+      "std_f1_scores": {
+        "ga": 0.0,
+        "thompson": 0.0,
+        "gan": 0.0,
+        "borderline": 0.0,
+        "monte_carlo": 0.0,
+        "final_selected": 0.0
+      }
+    }
+  }
+}

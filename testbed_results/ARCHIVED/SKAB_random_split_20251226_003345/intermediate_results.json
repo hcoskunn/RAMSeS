@@ -1,0 +1,857 @@
+[
+  {
+    "dataset_file": "5.csv",
+    "domain": "SKAB",
+    "entity": "5",
+    "total_runtime": 109.6869,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 49.0174,
+        "2_Thompson_Sampling": 16.4269,
+        "3_GAN_Robustness": 15.2444,
+        "4_Borderline_Sensitivity": 5.9864,
+        "5_Monte_Carlo": 23.0012,
+        "6_Rank_Aggregation": 0.0087,
+        "end_to_end": 109.6869
+      },
+      "ga": {
+        "f1": 0.982988,
+        "pr_auc": 0.051724
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.333331
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "final_decision": {
+        "single_f1": 0.99999,
+        "ensemble_f1": 0.982988,
+        "selected": "single",
+        "selected_f1": 0.99999
+      }
+    }
+  },
+  {
+    "dataset_file": "2.csv",
+    "domain": "SKAB",
+    "entity": "2",
+    "total_runtime": 2048.5248,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 206.6392,
+        "2_Thompson_Sampling": 1797.3833,
+        "3_GAN_Robustness": 15.4317,
+        "4_Borderline_Sensitivity": 6.1616,
+        "5_Monte_Carlo": 22.8983,
+        "6_Rank_Aggregation": 0.0084,
+        "end_to_end": 2048.5248
+      },
+      "ga": {
+        "f1": 0.984144,
+        "pr_auc": 0.009257
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.416663
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.984144,
+        "selected": "ensemble",
+        "selected_f1": 0.984144
+      }
+    }
+  },
+  {
+    "dataset_file": "14.csv",
+    "domain": "SKAB",
+    "entity": "14",
+    "total_runtime": 2349.7994,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 268.4224,
+        "2_Thompson_Sampling": 2037.0988,
+        "3_GAN_Robustness": 15.4034,
+        "4_Borderline_Sensitivity": 6.3246,
+        "5_Monte_Carlo": 22.5397,
+        "6_Rank_Aggregation": 0.0084,
+        "end_to_end": 2349.7994
+      },
+      "ga": {
+        "f1": 0.994905,
+        "pr_auc": 0.055046
+      },
+      "thompson": {
+        "f1": 0.999992,
+        "pr_auc": 0.0
+      },
+      "gan": {
+        "f1": 0.999992,
+        "pr_auc": 0.0
+      },
+      "borderline": {
+        "f1": 0.999992,
+        "pr_auc": 0.0
+      },
+      "monte_carlo": {
+        "f1": 0.999992,
+        "pr_auc": 0.0
+      },
+      "final_decision": {
+        "single_f1": 0.999992,
+        "ensemble_f1": 0.994905,
+        "selected": "single",
+        "selected_f1": 0.999992
+      }
+    }
+  },
+  {
+    "dataset_file": "13.csv",
+    "domain": "SKAB",
+    "entity": "13",
+    "total_runtime": 104.264,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 45.8795,
+        "2_Thompson_Sampling": 14.1607,
+        "3_GAN_Robustness": 15.7348,
+        "4_Borderline_Sensitivity": 6.1182,
+        "5_Monte_Carlo": 22.3605,
+        "6_Rank_Aggregation": 0.0085,
+        "end_to_end": 104.264
+      },
+      "ga": {
+        "f1": 0.983488,
+        "pr_auc": 0.133333
+      },
+      "thompson": {
+        "f1": 0.666658,
+        "pr_auc": 0.249996
+      },
+      "gan": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "borderline": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "monte_carlo": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "final_decision": {
+        "single_f1": 0.999985,
+        "ensemble_f1": 0.983488,
+        "selected": "single",
+        "selected_f1": 0.999985
+      }
+    }
+  },
+  {
+    "dataset_file": "12.csv",
+    "domain": "SKAB",
+    "entity": "12",
+    "total_runtime": 107.6364,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 45.5058,
+        "2_Thompson_Sampling": 18.0632,
+        "3_GAN_Robustness": 15.6181,
+        "4_Borderline_Sensitivity": 6.2203,
+        "5_Monte_Carlo": 22.2188,
+        "6_Rank_Aggregation": 0.0084,
+        "end_to_end": 107.6364
+      },
+      "ga": {
+        "f1": 0.993614,
+        "pr_auc": 0.035714
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.416663
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "final_decision": {
+        "single_f1": 0.66666,
+        "ensemble_f1": 0.993614,
+        "selected": "ensemble",
+        "selected_f1": 0.993614
+      }
+    }
+  },
+  {
+    "dataset_file": "15.csv",
+    "domain": "SKAB",
+    "entity": "15",
+    "total_runtime": 101.5818,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 40.8999,
+        "2_Thompson_Sampling": 16.0976,
+        "3_GAN_Robustness": 16.4426,
+        "4_Borderline_Sensitivity": 6.0526,
+        "5_Monte_Carlo": 22.0776,
+        "6_Rank_Aggregation": 0.0087,
+        "end_to_end": 101.5818
+      },
+      "ga": {
+        "f1": 0.992216,
+        "pr_auc": 0.038095
+      },
+      "thompson": {
+        "f1": 0.666658,
+        "pr_auc": 0.249996
+      },
+      "gan": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "borderline": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "monte_carlo": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "final_decision": {
+        "single_f1": 0.666658,
+        "ensemble_f1": 0.992216,
+        "selected": "ensemble",
+        "selected_f1": 0.992216
+      }
+    }
+  },
+  {
+    "dataset_file": "3.csv",
+    "domain": "SKAB",
+    "entity": "3",
+    "total_runtime": 96.2455,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 35.5043,
+        "2_Thompson_Sampling": 16.6427,
+        "3_GAN_Robustness": 15.3318,
+        "4_Borderline_Sensitivity": 6.1718,
+        "5_Monte_Carlo": 22.585,
+        "6_Rank_Aggregation": 0.0087,
+        "end_to_end": 96.2455
+      },
+      "ga": {
+        "f1": 0.995345,
+        "pr_auc": 0.028846
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.333331
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "monte_carlo": {
+        "f1": 0.66666,
+        "pr_auc": 0.291664
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.995345,
+        "selected": "ensemble",
+        "selected_f1": 0.995345
+      }
+    }
+  },
+  {
+    "dataset_file": "4.csv",
+    "domain": "SKAB",
+    "entity": "4",
+    "total_runtime": 102.4097,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 43.5737,
+        "2_Thompson_Sampling": 15.3737,
+        "3_GAN_Robustness": 15.4652,
+        "4_Borderline_Sensitivity": 6.0565,
+        "5_Monte_Carlo": 21.9303,
+        "6_Rank_Aggregation": 0.0084,
+        "end_to_end": 102.4097
+      },
+      "ga": {
+        "f1": 0.989239,
+        "pr_auc": 0.049209
+      },
+      "thompson": {
+        "f1": 0.399995,
+        "pr_auc": 0.124998
+      },
+      "gan": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "borderline": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "monte_carlo": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "final_decision": {
+        "single_f1": 0.666658,
+        "ensemble_f1": 0.989239,
+        "selected": "ensemble",
+        "selected_f1": 0.989239
+      }
+    }
+  },
+  {
+    "dataset_file": "11.csv",
+    "domain": "SKAB",
+    "entity": "11",
+    "total_runtime": 97.9513,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 38.6149,
+        "2_Thompson_Sampling": 14.1591,
+        "3_GAN_Robustness": 16.6402,
+        "4_Borderline_Sensitivity": 6.2398,
+        "5_Monte_Carlo": 22.2867,
+        "6_Rank_Aggregation": 0.0085,
+        "end_to_end": 97.9513
+      },
+      "ga": {
+        "f1": 0.996473,
+        "pr_auc": 0.042017
+      },
+      "thompson": {
+        "f1": 0.857136,
+        "pr_auc": 0.374998
+      },
+      "gan": {
+        "f1": 0.999992,
+        "pr_auc": 0.374998
+      },
+      "borderline": {
+        "f1": 0.999992,
+        "pr_auc": 0.374998
+      },
+      "monte_carlo": {
+        "f1": 0.999992,
+        "pr_auc": 0.374998
+      },
+      "final_decision": {
+        "single_f1": 0.999992,
+        "ensemble_f1": 0.996473,
+        "selected": "single",
+        "selected_f1": 0.999992
+      }
+    }
+  },
+  {
+    "dataset_file": "9.csv",
+    "domain": "SKAB",
+    "entity": "9",
+    "total_runtime": 100.8534,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 40.3932,
+        "2_Thompson_Sampling": 16.8594,
+        "3_GAN_Robustness": 15.6355,
+        "4_Borderline_Sensitivity": 6.0527,
+        "5_Monte_Carlo": 21.9026,
+        "6_Rank_Aggregation": 0.0084,
+        "end_to_end": 100.8534
+      },
+      "ga": {
+        "f1": 0.99814,
+        "pr_auc": 0.014815
+      },
+      "thompson": {
+        "f1": 0.66666,
+        "pr_auc": 0.249998
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.99814,
+        "selected": "ensemble",
+        "selected_f1": 0.99814
+      }
+    }
+  },
+  {
+    "dataset_file": "7.csv",
+    "domain": "SKAB",
+    "entity": "7",
+    "total_runtime": 103.9187,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 44.9752,
+        "2_Thompson_Sampling": 14.3543,
+        "3_GAN_Robustness": 15.5063,
+        "4_Borderline_Sensitivity": 6.0185,
+        "5_Monte_Carlo": 22.0148,
+        "6_Rank_Aggregation": 1.048,
+        "end_to_end": 103.9187
+      },
+      "ga": {
+        "f1": 0.994375,
+        "pr_auc": 0.018018
+      },
+      "thompson": {
+        "f1": 0.499994,
+        "pr_auc": 0.166664
+      },
+      "gan": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "borderline": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "monte_carlo": {
+        "f1": 0.666658,
+        "pr_auc": 0.249996
+      },
+      "final_decision": {
+        "single_f1": 0.666658,
+        "ensemble_f1": 0.994375,
+        "selected": "ensemble",
+        "selected_f1": 0.994375
+      }
+    }
+  },
+  {
+    "dataset_file": "0.csv",
+    "domain": "SKAB",
+    "entity": "0",
+    "total_runtime": 107.3426,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 42.4708,
+        "2_Thompson_Sampling": 20.9657,
+        "3_GAN_Robustness": 15.5453,
+        "4_Borderline_Sensitivity": 6.1548,
+        "5_Monte_Carlo": 22.1959,
+        "6_Rank_Aggregation": 0.0084,
+        "end_to_end": 107.3426
+      },
+      "ga": {
+        "f1": 0.996566,
+        "pr_auc": 0.074074
+      },
+      "thompson": {
+        "f1": 0.857136,
+        "pr_auc": 0.374998
+      },
+      "gan": {
+        "f1": 0.999992,
+        "pr_auc": 0.374998
+      },
+      "borderline": {
+        "f1": 0.999992,
+        "pr_auc": 0.374998
+      },
+      "monte_carlo": {
+        "f1": 0.999992,
+        "pr_auc": 0.374998
+      },
+      "final_decision": {
+        "single_f1": 0.999992,
+        "ensemble_f1": 0.996566,
+        "selected": "single",
+        "selected_f1": 0.999992
+      }
+    }
+  },
+  {
+    "dataset_file": "1.csv",
+    "domain": "SKAB",
+    "entity": "1",
+    "total_runtime": 93.055,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 34.9427,
+        "2_Thompson_Sampling": 13.7339,
+        "3_GAN_Robustness": 15.368,
+        "4_Borderline_Sensitivity": 6.041,
+        "5_Monte_Carlo": 22.9606,
+        "6_Rank_Aggregation": 0.0081,
+        "end_to_end": 93.055
+      },
+      "ga": {
+        "f1": 0.996127,
+        "pr_auc": 0.034783
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.416663
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "monte_carlo": {
+        "f1": 0.66666,
+        "pr_auc": 0.416663
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.996127,
+        "selected": "ensemble",
+        "selected_f1": 0.996127
+      }
+    }
+  },
+  {
+    "dataset_file": "6.csv",
+    "domain": "SKAB",
+    "entity": "6",
+    "total_runtime": 104.0348,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 45.2382,
+        "2_Thompson_Sampling": 15.3305,
+        "3_GAN_Robustness": 15.3869,
+        "4_Borderline_Sensitivity": 6.1162,
+        "5_Monte_Carlo": 21.9523,
+        "6_Rank_Aggregation": 0.0087,
+        "end_to_end": 104.0348
+      },
+      "ga": {
+        "f1": 0.996007,
+        "pr_auc": 0.086538
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.333331
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.996007,
+        "selected": "ensemble",
+        "selected_f1": 0.996007
+      }
+    }
+  },
+  {
+    "dataset_file": "10.csv",
+    "domain": "SKAB",
+    "entity": "10",
+    "total_runtime": 96.5236,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 37.4002,
+        "2_Thompson_Sampling": 14.942,
+        "3_GAN_Robustness": 15.2945,
+        "4_Borderline_Sensitivity": 5.9682,
+        "5_Monte_Carlo": 22.908,
+        "6_Rank_Aggregation": 0.0084,
+        "end_to_end": 96.5236
+      },
+      "ga": {
+        "f1": 0.998778,
+        "pr_auc": 0.008696
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.416663
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.499994
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.998778,
+        "selected": "ensemble",
+        "selected_f1": 0.998778
+      }
+    }
+  },
+  {
+    "dataset_file": "8.csv",
+    "domain": "SKAB",
+    "entity": "8",
+    "total_runtime": 101.4746,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 43.3321,
+        "2_Thompson_Sampling": 14.423,
+        "3_GAN_Robustness": 15.5317,
+        "4_Borderline_Sensitivity": 6.2162,
+        "5_Monte_Carlo": 21.9614,
+        "6_Rank_Aggregation": 0.0086,
+        "end_to_end": 101.4746
+      },
+      "ga": {
+        "f1": 0.994423,
+        "pr_auc": 0.026786
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.333331
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.416663
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.994423,
+        "selected": "ensemble",
+        "selected_f1": 0.994423
+      }
+    }
+  },
+  {
+    "dataset_file": "17.csv",
+    "domain": "SKAB",
+    "entity": "17",
+    "total_runtime": 225.79525709152222,
+    "avg_memory_mb": 102.20881039325843,
+    "peak_memory_mb": 103.43359375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 12.5962,
+        "2_Thompson_Sampling": 4.7391,
+        "3_GAN_Robustness": 11.8116,
+        "4_Borderline_Sensitivity": 2.2081,
+        "5_Monte_Carlo": 5.4315,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 36.7892
+      },
+      "ga": {
+        "f1": 0.976821,
+        "pr_auc": 0.072727
+      },
+      "thompson": {
+        "f1": 0.857136,
+        "pr_auc": 0.374998
+      },
+      "gan": {
+        "f1": 0.999992,
+        "pr_auc": 0.45833
+      },
+      "borderline": {
+        "f1": 0.999992,
+        "pr_auc": 0.45833
+      },
+      "monte_carlo": {
+        "f1": 0.999992,
+        "pr_auc": 0.374998
+      },
+      "final_decision": {
+        "single_f1": 0.999992,
+        "ensemble_f1": 0.976821,
+        "selected": "single",
+        "selected_f1": 0.999992
+      }
+    }
+  },
+  {
+    "dataset_file": "18.csv",
+    "domain": "SKAB",
+    "entity": "18",
+    "total_runtime": 236.39146208763123,
+    "avg_memory_mb": 103.67635464449542,
+    "peak_memory_mb": 104.17578125,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 15.4173,
+        "2_Thompson_Sampling": 6.0863,
+        "3_GAN_Robustness": 11.6164,
+        "4_Borderline_Sensitivity": 2.2096,
+        "5_Monte_Carlo": 5.9569,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 41.2893
+      },
+      "ga": {
+        "f1": 0.992285,
+        "pr_auc": 0.0
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.333331
+      },
+      "gan": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "borderline": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "monte_carlo": {
+        "f1": 0.99999,
+        "pr_auc": 0.333331
+      },
+      "final_decision": {
+        "single_f1": 0.666658,
+        "ensemble_f1": 0.992285,
+        "selected": "ensemble",
+        "selected_f1": 0.992285
+      }
+    }
+  },
+  {
+    "dataset_file": "19.csv",
+    "domain": "SKAB",
+    "entity": "19",
+    "total_runtime": 237.34615898132324,
+    "avg_memory_mb": 104.19129142881486,
+    "peak_memory_mb": 104.25,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 13.9509,
+        "2_Thompson_Sampling": 18.0041,
+        "3_GAN_Robustness": 11.5991,
+        "4_Borderline_Sensitivity": 2.2231,
+        "5_Monte_Carlo": 6.1276,
+        "6_Rank_Aggregation": 0.0018,
+        "end_to_end": 51.9092
+      },
+      "ga": {
+        "f1": 0.984966,
+        "pr_auc": 0.02025
+      },
+      "thompson": {
+        "f1": 0.666658,
+        "pr_auc": 0.249996
+      },
+      "gan": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "borderline": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "monte_carlo": {
+        "f1": 0.999985,
+        "pr_auc": 0.249996
+      },
+      "final_decision": {
+        "single_f1": 0.999985,
+        "ensemble_f1": 0.984966,
+        "selected": "single",
+        "selected_f1": 0.999985
+      }
+    }
+  }
+]

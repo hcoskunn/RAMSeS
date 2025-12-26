@@ -33,8 +33,30 @@ def get_args_from_cmdline():
                         default=config_path,
                         required=False,
                         help='path to config file')
-    args = parser.parse_args()
-    args = Config(config_file_path="/home/maxoud/projects/RAMS-TSAD/Configs/config.yml").parse()
+    parser.add_argument('--dataset',
+                        type=str,
+                        default=None,
+                        help='Dataset name (e.g., skab, smd)')
+    parser.add_argument('--entity',
+                        type=str,
+                        default=None,
+                        help='Entity ID (e.g., 3, 5)')
+    
+    cmd_args = parser.parse_args()
+    
+    # Load config from file
+    if cmd_args.config_file_path and os.path.exists(cmd_args.config_file_path):
+        config_file = cmd_args.config_file_path
+    else:
+        config_file = "/home/maxoud/local-storage/projects/RAMSeS/Configs/config.yml"
+    
+    args = Config(config_file_path=config_file).parse()
+    
+    # Override with command line arguments if provided
+    if cmd_args.dataset is not None:
+        args['dataset'] = cmd_args.dataset
+    if cmd_args.entity is not None:
+        args['entity'] = cmd_args.entity
     
     return args
 

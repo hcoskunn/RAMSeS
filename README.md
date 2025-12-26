@@ -103,6 +103,12 @@ python app.py \
   --model_architectures "CBLOF,LOF,LSTMVAE,MD,RM,DGHL, ..."
 ```
 
+To run a whole list of time series:
+```
+./run_testbed.sh testbed/file_list/test_list.csv
+```
+
+
 ## Arguments:
 ```
 --dataset_path (required): root folder where datasets reside (e.g., Mononito).
@@ -115,7 +121,7 @@ python app.py \
 --model_architectures (str): comma-separated list of base detectors to train.
 Trained model path:
 app.py currently loads model instances from a hard-coded save_dir at the top of the file:
-save_dir = "/home/maxoud/projects/RAMS-TSAD/Mononito/trained_models/smd/machine-3-10/"
+save_dir = "/home/maxoud/local-storage/projects/RAMSeS/Mononito/trained_models/smd/machine-3-10/"
 Either (a) change this to your path, or (b) symlink that path to your actual trained models folder. Make sure it contains *.pth files named like the entries in algorithm_list_instances (e.g., CBLOF_1.pth, LOF_3.pth, …).
 ```
 ## 🧪 What gets produced
@@ -185,7 +191,7 @@ matplotlib.use("Agg")
 ```
 ## 📚 Citation
 ```
-If you use RAMSeS / RAMS-TSAD in your work, please cite our paper:
+If you use RAMSeS  in your work, please cite our paper:
 
 If you use the Mononito datasets, please also cite the original authors (see their paper: arXiv:2210.01078).
 ```

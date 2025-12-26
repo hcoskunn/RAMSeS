@@ -1,0 +1,40 @@
+{
+  "total_domains": 1,
+  "total_datasets": 18,
+  "total_time": 19200.61975288391,
+  "domains": {
+    "SKAB": {
+      "total_datasets": 18,
+      "total_runtime": 19200.61975288391,
+      "avg_runtime": 1066.7010973824395,
+      "avg_memory_mb": 103.38856151820828,
+      "peak_memory_mb": 103.46180555555556,
+      "max_peak_memory_mb": 104.69140625,
+      "avg_module_times": {
+        "1_Genetic_Algorithm": 134.6080722222222,
+        "2_Thompson_Sampling": 337.67886666666675,
+        "3_GAN_Robustness": 45.19825,
+        "4_Borderline_Sensitivity": 42.16252777777778,
+        "5_Monte_Carlo": 88.18013333333333,
+        "6_Rank_Aggregation": 0.0023444444444444446,
+        "end_to_end": 647.8337444444445
+      },
+      "avg_f1_scores": {
+        "ga": 0.7813246111111112,
+        "thompson": 0.5476574444444445,
+        "gan": 0.7573997777777779,
+        "borderline": 0.7462887777777778,
+        "monte_carlo": 0.724066777777778,
+        "final_selected": 0.8099775
+      },
+      "std_f1_scores": {
+        "ga": 0.03629175427488682,
+        "thompson": 0.29761140394485003,
+        "gan": 0.36914721731799266,
+        "borderline": 0.3646608720337227,
+        "monte_carlo": 0.35447509467373106,
+        "final_selected": 0.07321438208230979
+      }
+    }
+  }
+}

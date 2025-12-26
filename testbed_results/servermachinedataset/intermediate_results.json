@@ -1,0 +1,1037 @@
+[
+  {
+    "dataset_file": "machine-1-1.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-1-1",
+    "total_runtime": 1805.6886,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 1162.1578,
+        "2_Thompson_Sampling": 488.7124,
+        "3_GAN_Robustness": 53.2272,
+        "4_Borderline_Sensitivity": 33.7325,
+        "5_Monte_Carlo": 67.8551,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 1805.6886
+      },
+      "ga": {
+        "f1": 0.978949,
+        "pr_auc": 0.055688
+      },
+      "thompson": {
+        "f1": 0.936165,
+        "pr_auc": 0.889554
+      },
+      "gan": {
+        "f1": 0.969692,
+        "pr_auc": 0.951775
+      },
+      "borderline": {
+        "f1": 0.957741,
+        "pr_auc": 0.943913
+      },
+      "monte_carlo": {
+        "f1": 0.951044,
+        "pr_auc": 0.925277
+      },
+      "final_decision": {
+        "single_f1": 0.936165,
+        "ensemble_f1": 0.978949,
+        "selected": "ensemble",
+        "selected_f1": 0.978949
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-1-2.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-1-2",
+    "total_runtime": 4179.8788,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 3147.9488,
+        "2_Thompson_Sampling": 797.7324,
+        "3_GAN_Robustness": 69.1219,
+        "4_Borderline_Sensitivity": 54.7077,
+        "5_Monte_Carlo": 110.3625,
+        "6_Rank_Aggregation": 0.0035,
+        "end_to_end": 4179.8788
+      },
+      "ga": {
+        "f1": 0.942619,
+        "pr_auc": 0.130237
+      },
+      "thompson": {
+        "f1": 0.927268,
+        "pr_auc": 0.786285
+      },
+      "gan": {
+        "f1": 0.934574,
+        "pr_auc": 0.88738
+      },
+      "borderline": {
+        "f1": 0.948271,
+        "pr_auc": 0.896532
+      },
+      "monte_carlo": {
+        "f1": 0.948271,
+        "pr_auc": 0.892514
+      },
+      "final_decision": {
+        "single_f1": 0.915249,
+        "ensemble_f1": 0.942619,
+        "selected": "ensemble",
+        "selected_f1": 0.942619
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-1-3.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-1-3",
+    "total_runtime": 1779.492,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 1025.3956,
+        "2_Thompson_Sampling": 592.559,
+        "3_GAN_Robustness": 41.636,
+        "4_Borderline_Sensitivity": 24.8709,
+        "5_Monte_Carlo": 95.0252,
+        "6_Rank_Aggregation": 0.002,
+        "end_to_end": 1779.492
+      },
+      "ga": {
+        "f1": 0.97405,
+        "pr_auc": 0.063564
+      },
+      "thompson": {
+        "f1": 0.886593,
+        "pr_auc": 0.909062
+      },
+      "gan": {
+        "f1": 0.936165,
+        "pr_auc": 0.945873
+      },
+      "borderline": {
+        "f1": 0.905655,
+        "pr_auc": 0.925595
+      },
+      "monte_carlo": {
+        "f1": 0.886593,
+        "pr_auc": 0.906441
+      },
+      "final_decision": {
+        "single_f1": 0.891084,
+        "ensemble_f1": 0.97405,
+        "selected": "ensemble",
+        "selected_f1": 0.97405
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-1-5.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-1-5",
+    "total_runtime": 2794.5396530628204,
+    "avg_memory_mb": 107.77716664805669,
+    "peak_memory_mb": 110.734375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 166.6947,
+        "2_Thompson_Sampling": 110.8983,
+        "3_GAN_Robustness": 19.9106,
+        "4_Borderline_Sensitivity": 92.3873,
+        "5_Monte_Carlo": 166.9004,
+        "6_Rank_Aggregation": 0.0047,
+        "end_to_end": 556.8029
+      },
+      "ga": {
+        "f1": 0.924445,
+        "pr_auc": 0.132454
+      },
+      "thompson": {
+        "f1": 0.923072,
+        "pr_auc": 0.816136
+      },
+      "gan": {
+        "f1": 0.949995,
+        "pr_auc": 0.816253
+      },
+      "borderline": {
+        "f1": 0.959995,
+        "pr_auc": 0.836744
+      },
+      "monte_carlo": {
+        "f1": 0.959995,
+        "pr_auc": 0.838464
+      },
+      "final_decision": {
+        "single_f1": 0.959995,
+        "ensemble_f1": 0.924445,
+        "selected": "single",
+        "selected_f1": 0.959995
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-1-6.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-1-6",
+    "total_runtime": 4807.056283950806,
+    "avg_memory_mb": 109.56310618186538,
+    "peak_memory_mb": 110.734375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 51.7134,
+        "2_Thompson_Sampling": 158.3781,
+        "3_GAN_Robustness": 61.2556,
+        "4_Borderline_Sensitivity": 21.5666,
+        "5_Monte_Carlo": 66.1235,
+        "6_Rank_Aggregation": 0.005,
+        "end_to_end": 359.0448
+      },
+      "ga": {
+        "f1": 0.730171,
+        "pr_auc": 0.291605
+      },
+      "thompson": {
+        "f1": 0.867919,
+        "pr_auc": 0.784355
+      },
+      "gan": {
+        "f1": 0.888884,
+        "pr_auc": 0.779988
+      },
+      "borderline": {
+        "f1": 0.867919,
+        "pr_auc": 0.779711
+      },
+      "monte_carlo": {
+        "f1": 0.837204,
+        "pr_auc": 0.778481
+      },
+      "final_decision": {
+        "single_f1": 0.837204,
+        "ensemble_f1": 0.730171,
+        "selected": "single",
+        "selected_f1": 0.837204
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-1-7.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-1-7",
+    "total_runtime": 3138.5119581222534,
+    "avg_memory_mb": 110.19883020193171,
+    "peak_memory_mb": 111.01171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 143.8774,
+        "2_Thompson_Sampling": 173.217,
+        "3_GAN_Robustness": 84.6791,
+        "4_Borderline_Sensitivity": 37.518,
+        "5_Monte_Carlo": 67.4503,
+        "6_Rank_Aggregation": 0.002,
+        "end_to_end": 506.7485
+      },
+      "ga": {
+        "f1": 0.897383,
+        "pr_auc": 0.14384
+      },
+      "thompson": {
+        "f1": 0.911759,
+        "pr_auc": 0.800623
+      },
+      "gan": {
+        "f1": 0.947363,
+        "pr_auc": 0.808448
+      },
+      "borderline": {
+        "f1": 0.935479,
+        "pr_auc": 0.820151
+      },
+      "monte_carlo": {
+        "f1": 0.935479,
+        "pr_auc": 0.81582
+      },
+      "final_decision": {
+        "single_f1": 0.915249,
+        "ensemble_f1": 0.897383,
+        "selected": "single",
+        "selected_f1": 0.915249
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-1-8.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-1-8",
+    "total_runtime": 2475.343621969223,
+    "avg_memory_mb": 111.08773287259615,
+    "peak_memory_mb": 111.4296875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 109.8126,
+        "2_Thompson_Sampling": 140.2694,
+        "3_GAN_Robustness": 67.427,
+        "4_Borderline_Sensitivity": 16.1032,
+        "5_Monte_Carlo": 140.2185,
+        "6_Rank_Aggregation": 0.0023,
+        "end_to_end": 473.8379
+      },
+      "ga": {
+        "f1": 0.768327,
+        "pr_auc": 0.307379
+      },
+      "thompson": {
+        "f1": 0.888884,
+        "pr_auc": 0.75529
+      },
+      "gan": {
+        "f1": 0.86956,
+        "pr_auc": 0.733998
+      },
+      "borderline": {
+        "f1": 0.897954,
+        "pr_auc": 0.773943
+      },
+      "monte_carlo": {
+        "f1": 0.888884,
+        "pr_auc": 0.772103
+      },
+      "final_decision": {
+        "single_f1": 0.888884,
+        "ensemble_f1": 0.768327,
+        "selected": "single",
+        "selected_f1": 0.888884
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-1.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-1",
+    "total_runtime": 2278.7034413814545,
+    "avg_memory_mb": 111.50470620848628,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 237.7764,
+        "2_Thompson_Sampling": 169.3642,
+        "3_GAN_Robustness": 69.839,
+        "4_Borderline_Sensitivity": 77.8852,
+        "5_Monte_Carlo": 48.4504,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 603.3207
+      },
+      "ga": {
+        "f1": 0.8717,
+        "pr_auc": 0.258812
+      },
+      "thompson": {
+        "f1": 0.901955,
+        "pr_auc": 0.775257
+      },
+      "gan": {
+        "f1": 0.959995,
+        "pr_auc": 0.817172
+      },
+      "borderline": {
+        "f1": 0.923072,
+        "pr_auc": 0.819449
+      },
+      "monte_carlo": {
+        "f1": 0.909086,
+        "pr_auc": 0.821609
+      },
+      "final_decision": {
+        "single_f1": 0.923072,
+        "ensemble_f1": 0.8717,
+        "selected": "single",
+        "selected_f1": 0.923072
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-2.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-2",
+    "total_runtime": 2748.6968500614166,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 81.0704,
+        "2_Thompson_Sampling": 290.9402,
+        "3_GAN_Robustness": 24.7116,
+        "4_Borderline_Sensitivity": 14.2718,
+        "5_Monte_Carlo": 50.7538,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 461.753
+      },
+      "ga": {
+        "f1": 0.894514,
+        "pr_auc": 0.23013
+      },
+      "thompson": {
+        "f1": 0.857138,
+        "pr_auc": 0.715215
+      },
+      "gan": {
+        "f1": 0.931029,
+        "pr_auc": 0.767348
+      },
+      "borderline": {
+        "f1": 0.915249,
+        "pr_auc": 0.736073
+      },
+      "monte_carlo": {
+        "f1": 0.857138,
+        "pr_auc": 0.712226
+      },
+      "final_decision": {
+        "single_f1": 0.793098,
+        "ensemble_f1": 0.894514,
+        "selected": "ensemble",
+        "selected_f1": 0.894514
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-3.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-3",
+    "total_runtime": 894.3245184421539,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 59.2443,
+        "2_Thompson_Sampling": 58.3066,
+        "3_GAN_Robustness": 35.3465,
+        "4_Borderline_Sensitivity": 34.6532,
+        "5_Monte_Carlo": 50.8375,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 238.3915
+      },
+      "ga": {
+        "f1": 0.918394,
+        "pr_auc": 0.124609
+      },
+      "thompson": {
+        "f1": 0.862064,
+        "pr_auc": 0.697316
+      },
+      "gan": {
+        "f1": 0.962958,
+        "pr_auc": 0.708347
+      },
+      "borderline": {
+        "f1": 0.945449,
+        "pr_auc": 0.770818
+      },
+      "monte_carlo": {
+        "f1": 0.925921,
+        "pr_auc": 0.768644
+      },
+      "final_decision": {
+        "single_f1": 0.899995,
+        "ensemble_f1": 0.918394,
+        "selected": "ensemble",
+        "selected_f1": 0.918394
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-4.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-4",
+    "total_runtime": 757.0661287307739,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 114.4749,
+        "2_Thompson_Sampling": 43.4014,
+        "3_GAN_Robustness": 19.3698,
+        "4_Borderline_Sensitivity": 11.1585,
+        "5_Monte_Carlo": 23.0671,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 211.4751
+      },
+      "ga": {
+        "f1": 0.835684,
+        "pr_auc": 0.319665
+      },
+      "thompson": {
+        "f1": 0.857138,
+        "pr_auc": 0.725739
+      },
+      "gan": {
+        "f1": 0.877188,
+        "pr_auc": 0.727725
+      },
+      "borderline": {
+        "f1": 0.857138,
+        "pr_auc": 0.728049
+      },
+      "monte_carlo": {
+        "f1": 0.857138,
+        "pr_auc": 0.725739
+      },
+      "final_decision": {
+        "single_f1": 0.785709,
+        "ensemble_f1": 0.835684,
+        "selected": "ensemble",
+        "selected_f1": 0.835684
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-5.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-5",
+    "total_runtime": 798.9355895519257,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 60.5125,
+        "2_Thompson_Sampling": 13.8408,
+        "3_GAN_Robustness": 20.438,
+        "4_Borderline_Sensitivity": 17.4433,
+        "5_Monte_Carlo": 54.909,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 167.1478
+      },
+      "ga": {
+        "f1": 0.90661,
+        "pr_auc": 0.199853
+      },
+      "thompson": {
+        "f1": 0.925921,
+        "pr_auc": 0.737233
+      },
+      "gan": {
+        "f1": 0.923072,
+        "pr_auc": 0.74253
+      },
+      "borderline": {
+        "f1": 0.925921,
+        "pr_auc": 0.84934
+      },
+      "monte_carlo": {
+        "f1": 0.925921,
+        "pr_auc": 0.843249
+      },
+      "final_decision": {
+        "single_f1": 0.81481,
+        "ensemble_f1": 0.90661,
+        "selected": "ensemble",
+        "selected_f1": 0.90661
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-6.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-6",
+    "total_runtime": 6689.163566827774,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 63.7544,
+        "2_Thompson_Sampling": 20.1777,
+        "3_GAN_Robustness": 20.7204,
+        "4_Borderline_Sensitivity": 13.4853,
+        "5_Monte_Carlo": 27.9554,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 146.0965
+      },
+      "ga": {
+        "f1": 0.943051,
+        "pr_auc": 0.122016
+      },
+      "thompson": {
+        "f1": 0.927531,
+        "pr_auc": 0.721192
+      },
+      "gan": {
+        "f1": 0.939389,
+        "pr_auc": 0.804108
+      },
+      "borderline": {
+        "f1": 0.929572,
+        "pr_auc": 0.808733
+      },
+      "monte_carlo": {
+        "f1": 0.929572,
+        "pr_auc": 0.807926
+      },
+      "final_decision": {
+        "single_f1": 0.927531,
+        "ensemble_f1": 0.943051,
+        "selected": "ensemble",
+        "selected_f1": 0.943051
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-7.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-7",
+    "total_runtime": 831.5412933826447,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 96.5827,
+        "2_Thompson_Sampling": 22.0647,
+        "3_GAN_Robustness": 21.5858,
+        "4_Borderline_Sensitivity": 12.3034,
+        "5_Monte_Carlo": 23.1309,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 175.6713
+      },
+      "ga": {
+        "f1": 0.917561,
+        "pr_auc": 0.165822
+      },
+      "thompson": {
+        "f1": 0.782603,
+        "pr_auc": 0.75196
+      },
+      "gan": {
+        "f1": 0.930227,
+        "pr_auc": 0.787542
+      },
+      "borderline": {
+        "f1": 0.925921,
+        "pr_auc": 0.823358
+      },
+      "monte_carlo": {
+        "f1": 0.867919,
+        "pr_auc": 0.778105
+      },
+      "final_decision": {
+        "single_f1": 0.867919,
+        "ensemble_f1": 0.917561,
+        "selected": "ensemble",
+        "selected_f1": 0.917561
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-8.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-8",
+    "total_runtime": 847.5578145980835,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 50.6965,
+        "2_Thompson_Sampling": 120.7666,
+        "3_GAN_Robustness": 19.883,
+        "4_Borderline_Sensitivity": 10.915,
+        "5_Monte_Carlo": 23.5397,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 225.8042
+      },
+      "ga": {
+        "f1": 0.926656,
+        "pr_auc": 0.136975
+      },
+      "thompson": {
+        "f1": 0.893612,
+        "pr_auc": 0.853804
+      },
+      "gan": {
+        "f1": 0.952376,
+        "pr_auc": 0.842911
+      },
+      "borderline": {
+        "f1": 0.956516,
+        "pr_auc": 0.869074
+      },
+      "monte_carlo": {
+        "f1": 0.956516,
+        "pr_auc": 0.869066
+      },
+      "final_decision": {
+        "single_f1": 0.956516,
+        "ensemble_f1": 0.926656,
+        "selected": "single",
+        "selected_f1": 0.956516
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-2-9.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-2-9",
+    "total_runtime": 908.596373796463,
+    "avg_memory_mb": 111.51171875,
+    "peak_memory_mb": 111.51171875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 75.8492,
+        "2_Thompson_Sampling": 112.3526,
+        "3_GAN_Robustness": 24.4726,
+        "4_Borderline_Sensitivity": 27.3435,
+        "5_Monte_Carlo": 50.7596,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 290.7812
+      },
+      "ga": {
+        "f1": 0.836808,
+        "pr_auc": 0.152819
+      },
+      "thompson": {
+        "f1": 0.851058,
+        "pr_auc": 0.690596
+      },
+      "gan": {
+        "f1": 0.909086,
+        "pr_auc": 0.67558
+      },
+      "borderline": {
+        "f1": 0.88461,
+        "pr_auc": 0.713583
+      },
+      "monte_carlo": {
+        "f1": 0.851847,
+        "pr_auc": 0.669841
+      },
+      "final_decision": {
+        "single_f1": 0.833328,
+        "ensemble_f1": 0.836808,
+        "selected": "ensemble",
+        "selected_f1": 0.836808
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-3-1.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-3-1",
+    "total_runtime": 944.1357703208923,
+    "avg_memory_mb": 111.58343671275563,
+    "peak_memory_mb": 111.58984375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 77.0494,
+        "2_Thompson_Sampling": 118.5846,
+        "3_GAN_Robustness": 25.1899,
+        "4_Borderline_Sensitivity": 13.6526,
+        "5_Monte_Carlo": 28.1246,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 262.6052
+      },
+      "ga": {
+        "f1": 0.811096,
+        "pr_auc": 0.091203
+      },
+      "thompson": {
+        "f1": 0.833328,
+        "pr_auc": 0.791382
+      },
+      "gan": {
+        "f1": 0.909086,
+        "pr_auc": 0.792855
+      },
+      "borderline": {
+        "f1": 0.925368,
+        "pr_auc": 0.791421
+      },
+      "monte_carlo": {
+        "f1": 0.925368,
+        "pr_auc": 0.795852
+      },
+      "final_decision": {
+        "single_f1": 0.793098,
+        "ensemble_f1": 0.811096,
+        "selected": "ensemble",
+        "selected_f1": 0.811096
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-3-10.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-3-10",
+    "total_runtime": 1059.711410522461,
+    "avg_memory_mb": 111.70071763926714,
+    "peak_memory_mb": 111.8359375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 78.0493,
+        "2_Thompson_Sampling": 93.7311,
+        "3_GAN_Robustness": 19.8758,
+        "4_Borderline_Sensitivity": 11.097,
+        "5_Monte_Carlo": 23.0031,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 225.7607
+      },
+      "ga": {
+        "f1": 0.847605,
+        "pr_auc": 0.350554
+      },
+      "thompson": {
+        "f1": 0.809518,
+        "pr_auc": 0.6497
+      },
+      "gan": {
+        "f1": 0.933328,
+        "pr_auc": 0.775092
+      },
+      "borderline": {
+        "f1": 0.913038,
+        "pr_auc": 0.776988
+      },
+      "monte_carlo": {
+        "f1": 0.913038,
+        "pr_auc": 0.720154
+      },
+      "final_decision": {
+        "single_f1": 0.809518,
+        "ensemble_f1": 0.847605,
+        "selected": "ensemble",
+        "selected_f1": 0.847605
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-3-11.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-3-11",
+    "total_runtime": 1299.8653144836426,
+    "avg_memory_mb": 111.83969437286966,
+    "peak_memory_mb": 111.83984375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 135.8379,
+        "2_Thompson_Sampling": 183.5466,
+        "3_GAN_Robustness": 45.7845,
+        "4_Borderline_Sensitivity": 37.275,
+        "5_Monte_Carlo": 73.6516,
+        "6_Rank_Aggregation": 0.0018,
+        "end_to_end": 476.0999
+      },
+      "ga": {
+        "f1": 0.857405,
+        "pr_auc": 0.061282
+      },
+      "thompson": {
+        "f1": 0.868416,
+        "pr_auc": 0.752592
+      },
+      "gan": {
+        "f1": 0.942852,
+        "pr_auc": 0.876379
+      },
+      "borderline": {
+        "f1": 0.885709,
+        "pr_auc": 0.889011
+      },
+      "monte_carlo": {
+        "f1": 0.8421,
+        "pr_auc": 0.831094
+      },
+      "final_decision": {
+        "single_f1": 0.857138,
+        "ensemble_f1": 0.857405,
+        "selected": "ensemble",
+        "selected_f1": 0.857405
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-3-2.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-3-2",
+    "total_runtime": 670.7588171958923,
+    "avg_memory_mb": 112.52260448603305,
+    "peak_memory_mb": 112.5390625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 66.9841,
+        "2_Thompson_Sampling": 94.4125,
+        "3_GAN_Robustness": 22.7654,
+        "4_Borderline_Sensitivity": 22.3103,
+        "5_Monte_Carlo": 37.693,
+        "6_Rank_Aggregation": 0.0019,
+        "end_to_end": 244.1706
+      },
+      "ga": {
+        "f1": 0.782403,
+        "pr_auc": 0.212588
+      },
+      "thompson": {
+        "f1": 0.870963,
+        "pr_auc": 0.837195
+      },
+      "gan": {
+        "f1": 0.893612,
+        "pr_auc": 0.822556
+      },
+      "borderline": {
+        "f1": 0.912275,
+        "pr_auc": 0.847522
+      },
+      "monte_carlo": {
+        "f1": 0.857138,
+        "pr_auc": 0.827618
+      },
+      "final_decision": {
+        "single_f1": 0.813554,
+        "ensemble_f1": 0.782403,
+        "selected": "single",
+        "selected_f1": 0.813554
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-3-3.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-3-3",
+    "total_runtime": 907.473569393158,
+    "avg_memory_mb": 112.5390625,
+    "peak_memory_mb": 112.5390625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 74.8097,
+        "2_Thompson_Sampling": 151.0914,
+        "3_GAN_Robustness": 39.4608,
+        "4_Borderline_Sensitivity": 107.7548,
+        "5_Monte_Carlo": 80.6619,
+        "6_Rank_Aggregation": 0.0021,
+        "end_to_end": 453.7852
+      },
+      "ga": {
+        "f1": 0.92222,
+        "pr_auc": 0.160342
+      },
+      "thompson": {
+        "f1": 0.905655,
+        "pr_auc": 0.83559
+      },
+      "gan": {
+        "f1": 0.959995,
+        "pr_auc": 0.874643
+      },
+      "borderline": {
+        "f1": 0.945449,
+        "pr_auc": 0.839397
+      },
+      "monte_carlo": {
+        "f1": 0.945449,
+        "pr_auc": 0.819705
+      },
+      "final_decision": {
+        "single_f1": 0.945449,
+        "ensemble_f1": 0.92222,
+        "selected": "single",
+        "selected_f1": 0.945449
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-3-4.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-3-4",
+    "total_runtime": 804.7053575515747,
+    "avg_memory_mb": 112.5390625,
+    "peak_memory_mb": 112.5390625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 50.0448,
+        "2_Thompson_Sampling": 25.4885,
+        "3_GAN_Robustness": 24.3611,
+        "4_Borderline_Sensitivity": 14.8782,
+        "5_Monte_Carlo": 31.4485,
+        "6_Rank_Aggregation": 0.0019,
+        "end_to_end": 146.2253
+      },
+      "ga": {
+        "f1": 0.832606,
+        "pr_auc": 0.237473
+      },
+      "thompson": {
+        "f1": 0.877188,
+        "pr_auc": 0.745306
+      },
+      "gan": {
+        "f1": 0.923072,
+        "pr_auc": 0.749383
+      },
+      "borderline": {
+        "f1": 0.925921,
+        "pr_auc": 0.738688
+      },
+      "monte_carlo": {
+        "f1": 0.925921,
+        "pr_auc": 0.736838
+      },
+      "final_decision": {
+        "single_f1": 0.88461,
+        "ensemble_f1": 0.832606,
+        "selected": "single",
+        "selected_f1": 0.88461
+      }
+    }
+  },
+  {
+    "dataset_file": "machine-3-5.txt",
+    "domain": "servermachinedataset",
+    "entity": "machine-3-5",
+    "total_runtime": 1064.090883731842,
+    "avg_memory_mb": 112.5390625,
+    "peak_memory_mb": 112.5390625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 103.4139,
+        "2_Thompson_Sampling": 46.2328,
+        "3_GAN_Robustness": 31.0361,
+        "4_Borderline_Sensitivity": 35.6724,
+        "5_Monte_Carlo": 159.9532,
+        "6_Rank_Aggregation": 0.0021,
+        "end_to_end": 376.3147
+      },
+      "ga": {
+        "f1": 0.898213,
+        "pr_auc": 0.117467
+      },
+      "thompson": {
+        "f1": 0.775505,
+        "pr_auc": 0.727193
+      },
+      "gan": {
+        "f1": 0.904756,
+        "pr_auc": 0.868835
+      },
+      "borderline": {
+        "f1": 0.888884,
+        "pr_auc": 0.861752
+      },
+      "monte_carlo": {
+        "f1": 0.86956,
+        "pr_auc": 0.859862
+      },
+      "final_decision": {
+        "single_f1": 0.782603,
+        "ensemble_f1": 0.898213,
+        "selected": "ensemble",
+        "selected_f1": 0.898213
+      }
+    }
+  }
+]

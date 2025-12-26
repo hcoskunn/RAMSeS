@@ -472,41 +472,35 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
     print("Thompson Sampling Results")
     print(model_names)
     print("Over the current one")
-    individual_predictions, adjusted_y_pred_ind_current, F1_Score_list_ind_curent, PR_AUC_Score_list_ind_curent = evaluate_individual_models(
-        model_names, test_data_copy, trained_models)
-    plot_models_scores(model_names, test_data_copy, adjusted_y_pred_ind_current, dataset, entity, iterations,
-                       F1_Score_list_ind_curent, PR_AUC_Score_list_ind_curent)
+    
+    # Skip redundant evaluation - models were already evaluated in GA stage
+    # individual_predictions, adjusted_y_pred_ind_current, F1_Score_list_ind_curent, PR_AUC_Score_list_ind_curent = evaluate_individual_models(
+    #     model_names, test_data_copy, trained_models)
+    # plot_models_scores(model_names, test_data_copy, adjusted_y_pred_ind_current, dataset, entity, iterations,
+    #                    F1_Score_list_ind_curent, PR_AUC_Score_list_ind_curent)
     #
     # individual_predictions, false_rate, F1_Score_list_ind_curent, PR_AUC_Score_list_ind_curent = evaluate_individual_models_regular_f1_prauc(
     #     model_names, test_data_copy, trained_models)
 
-    misclassified_current = []
-    # misclassified_current.append(false_rate)
+    # Simplified output - skip detailed misclassification analysis
+    # misclassified_current = []
+    # for predicts in adjusted_y_pred_ind_current:
+    #     true_values = np.array(test_data_copy.entities[0].labels)
+    #     predicted_values = np.array(predicts)
+    #     predicted_int = predicted_values.astype(int)
+    #     incorrect_predictions = predicted_int != true_values
+    #     misclassified_count = np.sum(incorrect_predictions)
+    #     misclassified_current.append(misclassified_count)
     #
-    for predicts in adjusted_y_pred_ind_current:
-        true_values = np.array(test_data_copy.entities[0].labels)  # 1 for anomaly, 0 for normal
+    # f1_models_curent = {}
+    # pr_models_curent = {}
+    # i = 0
+    # for model_name in model_names:
+    #     f1_models_curent[model_name] = F1_Score_list_ind_curent[i]
+    #     pr_models_curent[model_name] = PR_AUC_Score_list_ind_curent[i]
+    #     i += 1
 
-        predicted_values = np.array(predicts)  # True for predicted anomaly, False for no predicted anomaly
-
-        # Converting boolean predictions to integer for easy plotting (True to 1, False to 0)
-        predicted_int = predicted_values.astype(int)
-
-        # Identifying incorrect predictions
-        incorrect_predictions = predicted_int != true_values
-        misclassified_count = np.sum(incorrect_predictions)  # Number of misclassifications
-        misclassified_current.append(misclassified_count)
-
-    f1_models_curent = {}
-    pr_models_curent = {}
-
-    i = 0
-    for model_name in model_names:
-        f1_models_curent[model_name] = F1_Score_list_ind_curent[i]
-        pr_models_curent[model_name] = PR_AUC_Score_list_ind_curent[i]
-        # f1_models_new[model_name] = F1_Score_list_ind_new[i]
-        # pr_models_new[model_name] = PR_AUC_Score_list_ind_new[i]
-        i += 1
-        # Write summary and rankings to a file
+    # Write summary and rankings to a file (simplified)
     with open(output_file, 'w') as f:
         f.write("Summary of Linear Thompson Sampling:\n")
         for model_name, mean in means.items():
@@ -518,12 +512,13 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
         f.write("\nModels ranked by mean score:\n")
         for rank, (model_name, score) in enumerate(ranked_models, 1):
             f.write(f"{rank}. {model_name} with score {score}\n")
-        f.write("\n evaluation for models over the current test data:\n")
-        f.write(f"{misclassified_current}")
-        f.write("\n f1_score list for models over the current test data:\n")
-        f.write(f"{f1_models_curent}")
-        f.write("\n pr_score list for models over the current test data:\n")
-        f.write(f"{pr_models_curent}")
+        # Skip detailed evaluation metrics to save computation time
+        # f.write("\n evaluation for models over the current test data:\n")
+        # f.write(f"{misclassified_current}")
+        # f.write("\n f1_score list for models over the current test data:\n")
+        # f.write(f"{f1_models_curent}")
+        # f.write("\n pr_score list for models over the current test data:\n")
+        # f.write(f"{pr_models_curent}")
 
     print(f"Results saved to {output_file}")
     return model_names

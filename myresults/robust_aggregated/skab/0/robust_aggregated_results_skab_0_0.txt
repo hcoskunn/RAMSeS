@@ -1,17 +1,19 @@
-Summary of robust tests:
+Summary of robust tests (order: GAN → Borderline → Monte Carlo):
 
-1- Monte carlo
-['RNN_4', 'RNN_3', 'RNN_1', 'RNN_2', 'LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'NN_1', 'NN_2', 'NN_3'] 
- ['RNN_3', 'RNN_1', 'RNN_4', 'RNN_2', 'LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'NN_1', 'NN_2', 'NN_3'] 
+[GAN]
+['LOF_1', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1', 'NN_1', 'NN_2']
+['LSTMVAE_1', 'LOF_1', 'NN_1', 'NN_2', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1']
 
- Gan
-['LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'RNN_4', 'RNN_2', 'RNN_1', 'RNN_3', 'NN_1', 'NN_2', 'NN_3'] 
- ['LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'RNN_4', 'RNN_3', 'RNN_1', 'RNN_2', 'NN_2', 'NN_3', 'NN_1'] 
+[Borderline / Off-by-threshold]
+['LOF_1', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1', 'NN_1', 'NN_2']
+['LSTMVAE_1', 'LOF_1', 'NN_1', 'NN_2', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1']
 
- Off by threshold testing (sensitivity)
-['LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'RNN_3', 'RNN_1', 'RNN_4', 'RNN_2', 'NN_1', 'NN_2', 'NN_3'] 
- ['LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'RNN_3', 'RNN_1', 'RNN_4', 'RNN_2', 'NN_1', 'NN_2', 'NN_3'] 
-Robust rank aggregates
-(np.float64(1.9706308755595086), ['LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'RNN_3', 'RNN_4', 'RNN_1', 'RNN_2', 'NN_2', 'NN_1', 'NN_3'])
-All aggregated
-(np.float64(2.380194298742434), ['RNN_3', 'LOF_1', 'RNN_4', 'RNN_1', 'NN_2', 'LOF_4', 'RNN_2', 'NN_3', 'LOF_3', 'LOF_2', 'NN_1'])
+[Monte Carlo]
+['LOF_1', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1', 'NN_1', 'NN_2']
+['LSTMVAE_1', 'LOF_1', 'NN_1', 'NN_2', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1']
+
+[Robust rank aggregate]
+(np.float64(1.9574557019399184), ['LOF_1', 'RNN_1', 'CBLOF_1', 'LSTMVAE_1', 'MD_1', 'NN_1', 'DGHL_1', 'NN_2'])
+
+[Final aggregate vs Thompson]
+(np.float64(2.048966009898497), ['LSTMVAE_1', 'RNN_1', 'MD_1', 'LOF_1', 'NN_1', 'NN_2', 'CBLOF_1', 'DGHL_1'])

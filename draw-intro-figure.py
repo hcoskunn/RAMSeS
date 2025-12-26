@@ -52,13 +52,13 @@ F1S = np.array([
 # Thumbnail sources, one per category, in order.
 # If a TXT/CSV has no header, we’ll use the FIRST COLUMN as the value and x = 0..N-1.
 THUMBNAILS: List[Dict] = [
-    dict(kind="csv", path="/home/maxoud/projects/RAMS-TSAD/Mononito/datasets/TCPD/apple/apple.csv",
+    dict(kind="csv", path="/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets/TCPD/apple/apple.csv",
          time_col=None, value_col=None),
-    dict(kind="txt", path="Mononito/datasets/Anomaly_Archive/017_UCR_Anomaly_DISTORTEDECG4_5000_17000_17100.txt",
+    dict(kind="txt", path="/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets/Anomaly_Archive/017_UCR_Anomaly_DISTORTEDECG4_5000_17000_17100.txt",
          time_col=None, value_col=None),
-    dict(kind="csv", path="/home/maxoud/projects/RAMS-TSAD/Mononito/datasets/SKAB/10.csv",
+    dict(kind="csv", path="/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets/SKAB/10.csv",
          time_col="datetime", value_col="Accelerometer1RMS"),
-    dict(kind="csv", path="/home/maxoud/projects/RAMS-TSAD/Mononito/datasets/SKAB/0.csv",
+    dict(kind="csv", path="/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets/SKAB/0.csv",
          time_col="datetime", value_col="Temperature"),
 ]
 

@@ -34,6 +34,11 @@ def intersperse_borderline_normal_points(data, labels, factor, min_scale=0.95, m
     injected_anomaly_indices = []
     # Calculate how often to insert a new point
     num_new_points = int(factor * n_samples)
+    
+    # If no new points to add, return original data
+    if num_new_points == 0:
+        return data, labels, injected_normal_indices, injected_anomaly_indices
+    
     contextual_length = int(0.05 * factor * n_samples)
     insert_every = n_samples // num_new_points
 

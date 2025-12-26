@@ -20,6 +20,8 @@ from Algorithms.pyod_model import PyodModel
 from .hyperparameter_grids import *  # DGHL_TRAIN_PARAM_GRID, DGHL_PARAM_GRID, MD_TRAIN_PARAM_GRID, MD_PARAM_GRID, RM_PARAM_GRID, RM_TRAIN_PARAM_GRID, NN_PARAM_GRID, NN_TRAIN_PARAM_GRID, LSTMVAE_TRAIN_PARAM_GRID, LSTMVAE_PARAM_GRID, RNN_TRAIN_PARAM_GRID, RNN_PARAM_GRID
 from Model_Training.training_args import TrainingArguments
 from Model_Training.trainer import Trainer
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
 import matplotlib.pyplot as plt
 from Utils.logger import Logger
 from Datasets.load import load_data
@@ -639,7 +641,7 @@ class TrainModels(object):
                     Y, Y_hat, mask = Y.detach().cpu().numpy(), Y_hat.detach().cpu().numpy(), mask.detach().cpu().numpy()
                     break
 
-                batch_num = 2
+                batch_num = 0  # Use first batch (safe for any batch size)
                 feature_num = 0
                 fig, axes = plt.subplots(1, 1, sharey=True, figsize=(15, 4))
                 axes.plot(Y[batch_num, feature_num, :].flatten(), c='darkblue', label='Y')
@@ -713,7 +715,8 @@ class TrainModels(object):
                     Y, Y_hat, mask = Y.detach().cpu().numpy(), Y_hat.detach().cpu().numpy(), mask.detach().cpu().numpy()
 
 
-                batch_num = 2
+                # Use first batch for visualization (safe indexing - always use batch 0)
+                batch_num = 0
                 feature_num = 0
                 fig, axes = plt.subplots(1, 1, sharey=True, figsize=(15, 4))
                 axes.plot(Y[batch_num, feature_num, :].flatten(), c='darkblue', label='Y')
@@ -788,7 +791,7 @@ class TrainModels(object):
                     Y, Y_mu, mask, Y_sigma, Z_mu, Z_sigma, Z = Y.detach().cpu().numpy(), Y_mu.detach().cpu().numpy(), mask.detach().cpu().numpy(), Y_sigma.detach().cpu().numpy(), Z_mu.detach().cpu().numpy(), Z_sigma.detach().cpu().numpy(), Z.detach().cpu().numpy()
                     break
 
-                batch_num = 2
+                batch_num = 0  # Use first batch (safe for any batch size)
                 feature_num = 0
                 fig, axes = plt.subplots(1, 1, sharey=True, figsize=(15, 4))
                 axes.plot(Y[batch_num, feature_num, :].flatten(), c='darkblue', label='Y')
@@ -1011,7 +1014,7 @@ class TrainModels(object):
                     Y, Y_hat, mask = model.forward(batch)
                     break
 
-                batch_num = 2
+                batch_num = 0  # Use first batch (safe for any batch size)
                 feature_num = 0
                 fig, axes = plt.subplots(1, 1, sharey=True, figsize=(15, 4))
                 axes.plot(Y[batch_num, feature_num, :].flatten(), c='darkblue', label='Y')

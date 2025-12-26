@@ -1,12 +1,12 @@
 # General parameters
 random_seed: 13
 n_jobs: 5
-overwrite: True
+overwrite: False  # Set to False to skip already-trained models and only train missing ones
 
 # Model training parameters
 downsampling: 10
-trained_model_path: "/home/maxoud/projects/RAMS-TSAD/Mononito/trained_models"
-dataset_path: "/home/maxoud/projects/RAMS-TSAD/Mononito/datasets"
+trained_model_path: "/home/maxoud/local-storage/projects/RAMSeS/Mononito/trained_models"
+dataset_path: "/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets"
 
 #docker path
 #trained_model_path: '/trained_models/'
@@ -20,7 +20,7 @@ model_architectures: 'all'
 
 # Model evaluation parametersq
 normalize: True
-results_path: "/home/maxoud/projects/RAMS-TSAD/Mononito/results"
+results_path: "/home/maxoud/local-storage/projects/RAMSeS/Mononito/results"
 
 #docker path
 #results_path: '/results/'

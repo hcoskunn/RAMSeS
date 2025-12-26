@@ -192,6 +192,11 @@ def evaluate_model(data: Union[Dataset, Entity],
                                        padding_size=dataloader.padding_size,
                                        padding_type=padding_type)
 
+    # Clean entity_scores to handle inf/nan values that may come from models
+    entity_scores = np.nan_to_num(entity_scores, nan=0.0, posinf=1.0, neginf=0.0)
+    Y_hat = np.nan_to_num(Y_hat, nan=0.0, posinf=1e10, neginf=-1e10)
+    Y_sigma = np.nan_to_num(Y_sigma, nan=0.0, posinf=1e10, neginf=0.0)
+
     return {
         'entity_scores': entity_scores,
         'Y': Y,

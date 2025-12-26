@@ -49,6 +49,10 @@ def load_data(dataset: str, group: str, entities: Union[str, List[str]], downsam
         Controls verbosity
     """
     dataset = dataset.lower()
+    # Handle aliases
+    if dataset == 'servermachinedataset':
+        dataset = 'smd'
+    
     if dataset == 'smd':
         return load_smd(group=group, machines=entities, downsampling=downsampling, root_dir=root_dir,
                         normalize=normalize, verbose=verbose)
@@ -95,15 +99,19 @@ def load_csv_file(data_path: str, name_of_data: str, group: str, normalize: bool
     date_column_name = df.columns[0]
     df.set_index(date_column_name, inplace=True)
 
-    X = df
-    X_train, X_test, = train_test_split(X, test_size=0.2, random_state=42)
-    X_train = X_train.values.T
-    X_test = X_test.values.T
+    X = df.values.T  # Shape: (n_features, n_timestamps)
+    n_features, n_timestamps = X.shape
+    
+    # Sequential split: first 80% for training, last 20% for testing
+    train_end = int(n_timestamps * 0.8)
+    X_train = X[:, :train_end]
+    X_test = X[:, train_end:]
+    
     if group == 'train':
         name = f'{name_of_data}-train'
         if normalize:
-            scaler.fit(X_train)
-            Y = scaler.transform(X_train)
+            scaler.fit(X_train.T)  # Fit on training data
+            Y = scaler.transform(X_train.T).T
         else:
             Y = X_train
         entity = Entity(Y=Y, name=name_of_data, verbose=verbose)
@@ -112,8 +120,11 @@ def load_csv_file(data_path: str, name_of_data: str, group: str, normalize: bool
     elif group == 'test':
         name = f'{name_of_data}-test'
         if normalize:
-            scaler.fit(X_test)
-            Y = scaler.transform(X_test)
+            # IMPORTANT: Fit scaler on TRAINING data, then transform TEST data
+            scaler.fit(X_train.T)
+            Y = scaler.transform(X_test.T).T
+        else:
+            Y = X_test
 
         entity = Entity(Y=Y, name=name_of_data, verbose=verbose)
         entities.append(entity)
@@ -127,14 +138,26 @@ def load_any_dataset(group, root_dir, dataset, entity, normalize=True, verbose=T
         data_path = f'{root_dir}/{dataset}/{entity[0]}'
     else:
         data_path = f'{root_dir}/{dataset}/{entity}'
+    
+    # Check for .csv file first
     if os.path.isfile(f'{data_path}.csv'):
         dataset = load_csv_file(f'{data_path}.csv', entity, group, normalize, verbose)
+    # Check for .txt file (for SMD and similar datasets)
+    elif os.path.isfile(f'{data_path}.txt'):
+        dataset = load_csv_file(f'{data_path}.txt', entity, group, normalize, verbose)
+    # If neither exists, look for files in a directory
     else:
-        csv_files = [os.path.join(data_path, file) for file in os.listdir(data_path) if file.lower().endswith('.csv')]
-        if len(csv_files) > 1:
-            raise Exception("Exceeded the number of allowed .csv files. Only 1 csv file should be present")
+        # Try to find csv files in directory
+        if os.path.isdir(data_path):
+            csv_files = [os.path.join(data_path, file) for file in os.listdir(data_path) if file.lower().endswith('.csv')]
+            if len(csv_files) > 1:
+                raise Exception("Exceeded the number of allowed .csv files. Only 1 csv file should be present")
+            elif len(csv_files) == 1:
+                dataset = load_csv_file(csv_files[0], entity, group, normalize, verbose)
+            else:
+                raise FileNotFoundError(f"No .csv or .txt file found at {data_path}")
         else:
-            dataset = load_csv_file(csv_files[0], entity, group, normalize, verbose)
+            raise FileNotFoundError(f"Data path not found: {data_path}")
 
     return dataset
 

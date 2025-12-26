@@ -1,0 +1,1172 @@
+[
+  {
+    "dataset_file": "001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620.txt",
+    "domain": "anomaly_archive",
+    "entity": "001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620",
+    "total_runtime": 429.6915,
+    "avg_memory_mb": 0,
+    "peak_memory_mb": 0,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 66.4466,
+        "2_Thompson_Sampling": 257.572,
+        "3_GAN_Robustness": 40.3048,
+        "4_Borderline_Sensitivity": 22.4863,
+        "5_Monte_Carlo": 42.8779,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 429.6915
+      },
+      "ga": {
+        "f1": 0.649628,
+        "pr_auc": 0.773262
+      },
+      "thompson": {
+        "f1": 0.577177,
+        "pr_auc": 0.249483
+      },
+      "gan": {
+        "f1": 0.846149,
+        "pr_auc": 0.792156
+      },
+      "borderline": {
+        "f1": 0.839501,
+        "pr_auc": 0.767188
+      },
+      "monte_carlo": {
+        "f1": 0.839501,
+        "pr_auc": 0.767824
+      },
+      "final_decision": {
+        "single_f1": 0.779995,
+        "ensemble_f1": 0.649628,
+        "selected": "single",
+        "selected_f1": 0.779995
+      }
+    }
+  },
+  {
+    "dataset_file": "002_UCR_Anomaly_DISTORTED2sddb40_35000_56600_56900.txt",
+    "domain": "anomaly_archive",
+    "entity": "002_UCR_Anomaly_DISTORTED2sddb40_35000_56600_56900",
+    "total_runtime": 772.2311913967133,
+    "avg_memory_mb": 106.56881859725924,
+    "peak_memory_mb": 110.0859375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 56.2308,
+        "2_Thompson_Sampling": 281.1076,
+        "3_GAN_Robustness": 36.8666,
+        "4_Borderline_Sensitivity": 20.8213,
+        "5_Monte_Carlo": 43.9928,
+        "6_Rank_Aggregation": 0.0018,
+        "end_to_end": 439.0231
+      },
+      "ga": {
+        "f1": 0.664344,
+        "pr_auc": 0.730219
+      },
+      "thompson": {
+        "f1": 0.776465,
+        "pr_auc": 0.726347
+      },
+      "gan": {
+        "f1": 0.799995,
+        "pr_auc": 0.779408
+      },
+      "borderline": {
+        "f1": 0.853328,
+        "pr_auc": 0.789193
+      },
+      "monte_carlo": {
+        "f1": 0.763153,
+        "pr_auc": 0.706275
+      },
+      "final_decision": {
+        "single_f1": 0.776465,
+        "ensemble_f1": 0.664344,
+        "selected": "single",
+        "selected_f1": 0.776465
+      }
+    }
+  },
+  {
+    "dataset_file": "003_UCR_Anomaly_DISTORTED3sddb40_35000_46600_46900.txt",
+    "domain": "anomaly_archive",
+    "entity": "003_UCR_Anomaly_DISTORTED3sddb40_35000_46600_46900",
+    "total_runtime": 795.138748884201,
+    "avg_memory_mb": 107.97299921716316,
+    "peak_memory_mb": 110.140625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 59.6705,
+        "2_Thompson_Sampling": 290.7273,
+        "3_GAN_Robustness": 37.5015,
+        "4_Borderline_Sensitivity": 22.5201,
+        "5_Monte_Carlo": 43.1247,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 453.5476
+      },
+      "ga": {
+        "f1": 0.671446,
+        "pr_auc": 0.706724
+      },
+      "thompson": {
+        "f1": 0.705877,
+        "pr_auc": 0.568328
+      },
+      "gan": {
+        "f1": 0.794515,
+        "pr_auc": 0.721326
+      },
+      "borderline": {
+        "f1": 0.771079,
+        "pr_auc": 0.635755
+      },
+      "monte_carlo": {
+        "f1": 0.695647,
+        "pr_auc": 0.622887
+      },
+      "final_decision": {
+        "single_f1": 0.746983,
+        "ensemble_f1": 0.671446,
+        "selected": "single",
+        "selected_f1": 0.746983
+      }
+    }
+  },
+  {
+    "dataset_file": "004_UCR_Anomaly_DISTORTEDBIDMC1_2500_5400_5600.txt",
+    "domain": "anomaly_archive",
+    "entity": "004_UCR_Anomaly_DISTORTEDBIDMC1_2500_5400_5600",
+    "total_runtime": 3096.57506608963,
+    "avg_memory_mb": 110.89484189715868,
+    "peak_memory_mb": 115.42578125,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 61.3673,
+        "2_Thompson_Sampling": 1627.8053,
+        "3_GAN_Robustness": 193.1117,
+        "4_Borderline_Sensitivity": 117.7911,
+        "5_Monte_Carlo": 227.7731,
+        "6_Rank_Aggregation": 0.0025,
+        "end_to_end": 2227.8562
+      },
+      "ga": {
+        "f1": 0.747844,
+        "pr_auc": 0.397998
+      },
+      "thompson": {
+        "f1": 0.874246,
+        "pr_auc": 0.917696
+      },
+      "gan": {
+        "f1": 0.935892,
+        "pr_auc": 0.948103
+      },
+      "borderline": {
+        "f1": 0.880947,
+        "pr_auc": 0.915657
+      },
+      "monte_carlo": {
+        "f1": 0.872722,
+        "pr_auc": 0.918124
+      },
+      "final_decision": {
+        "single_f1": 0.761416,
+        "ensemble_f1": 0.747844,
+        "selected": "single",
+        "selected_f1": 0.761416
+      }
+    }
+  },
+  {
+    "dataset_file": "005_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature1_4000_5391_5392.txt",
+    "domain": "anomaly_archive",
+    "entity": "005_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature1_4000_5391_5392",
+    "total_runtime": 2631.7777161598206,
+    "avg_memory_mb": 113.12551344852669,
+    "peak_memory_mb": 113.19921875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 10.4177,
+        "2_Thompson_Sampling": 39.8318,
+        "3_GAN_Robustness": 71.4888,
+        "4_Borderline_Sensitivity": 2.9324,
+        "5_Monte_Carlo": 6.7821,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 131.4557
+      },
+      "ga": {
+        "f1": 0.627766,
+        "pr_auc": 0.207129
+      },
+      "thompson": {
+        "f1": 0.833327,
+        "pr_auc": 0.487855
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "borderline": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "monte_carlo": {
+        "f1": 0.999993,
+        "pr_auc": 0.316665
+      },
+      "final_decision": {
+        "single_f1": 0.909084,
+        "ensemble_f1": 0.627766,
+        "selected": "single",
+        "selected_f1": 0.909084
+      }
+    }
+  },
+  {
+    "dataset_file": "006_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature2_4000_5703_5727.txt",
+    "domain": "anomaly_archive",
+    "entity": "006_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature2_4000_5703_5727",
+    "total_runtime": 734.6671860218048,
+    "avg_memory_mb": 113.28948784200675,
+    "peak_memory_mb": 113.3515625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 35.0055,
+        "2_Thompson_Sampling": 42.1768,
+        "3_GAN_Robustness": 31.357,
+        "4_Borderline_Sensitivity": 10.0326,
+        "5_Monte_Carlo": 31.9528,
+        "6_Rank_Aggregation": 0.0021,
+        "end_to_end": 150.5307
+      },
+      "ga": {
+        "f1": 0.613023,
+        "pr_auc": 0.383234
+      },
+      "thompson": {
+        "f1": 0.833327,
+        "pr_auc": 0.262856
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "borderline": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "monte_carlo": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "final_decision": {
+        "single_f1": 0.999993,
+        "ensemble_f1": 0.613023,
+        "selected": "single",
+        "selected_f1": 0.999993
+      }
+    }
+  },
+  {
+    "dataset_file": "007_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature3_4000_6520_6544.txt",
+    "domain": "anomaly_archive",
+    "entity": "007_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature3_4000_6520_6544",
+    "total_runtime": 4291.960068225861,
+    "avg_memory_mb": 113.41874273255814,
+    "peak_memory_mb": 113.4296875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 14.1106,
+        "2_Thompson_Sampling": 6.5157,
+        "3_GAN_Robustness": 13.261,
+        "4_Borderline_Sensitivity": 2.9491,
+        "5_Monte_Carlo": 7.0183,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 43.8579
+      },
+      "ga": {
+        "f1": 0.595932,
+        "pr_auc": 0.338276
+      },
+      "thompson": {
+        "f1": 0.999993,
+        "pr_auc": 0.399998
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "borderline": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "monte_carlo": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "final_decision": {
+        "single_f1": 0.909084,
+        "ensemble_f1": 0.595932,
+        "selected": "single",
+        "selected_f1": 0.909084
+      }
+    }
+  },
+  {
+    "dataset_file": "008_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature4_4000_5549_5597.txt",
+    "domain": "anomaly_archive",
+    "entity": "008_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature4_4000_5549_5597",
+    "total_runtime": 6023.745931148529,
+    "avg_memory_mb": 113.4296875,
+    "peak_memory_mb": 113.4296875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 77.0142,
+        "2_Thompson_Sampling": 236.1429,
+        "3_GAN_Robustness": 16.6315,
+        "4_Borderline_Sensitivity": 31.2273,
+        "5_Monte_Carlo": 132.5525,
+        "6_Rank_Aggregation": 0.002,
+        "end_to_end": 493.5797
+      },
+      "ga": {
+        "f1": 0.619316,
+        "pr_auc": 0.265737
+      },
+      "thompson": {
+        "f1": 0.833327,
+        "pr_auc": 0.487855
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "borderline": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "monte_carlo": {
+        "f1": 0.909084,
+        "pr_auc": 0.541664
+      },
+      "final_decision": {
+        "single_f1": 0.909084,
+        "ensemble_f1": 0.619316,
+        "selected": "single",
+        "selected_f1": 0.909084
+      }
+    }
+  },
+  {
+    "dataset_file": "009_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature5_4000_4852_4900.txt",
+    "domain": "anomaly_archive",
+    "entity": "009_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature5_4000_4852_4900",
+    "total_runtime": 4481.938317298889,
+    "avg_memory_mb": 113.4296875,
+    "peak_memory_mb": 113.4296875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 12.3089,
+        "2_Thompson_Sampling": 7.2317,
+        "3_GAN_Robustness": 12.4113,
+        "4_Borderline_Sensitivity": 3.0251,
+        "5_Monte_Carlo": 6.7005,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 41.6822
+      },
+      "ga": {
+        "f1": 0.606637,
+        "pr_auc": 0.382073
+      },
+      "thompson": {
+        "f1": 0.909084,
+        "pr_auc": 0.541664
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.487855
+      },
+      "borderline": {
+        "f1": 0.999993,
+        "pr_auc": 0.541664
+      },
+      "monte_carlo": {
+        "f1": 0.909084,
+        "pr_auc": 0.316665
+      },
+      "final_decision": {
+        "single_f1": 0.999993,
+        "ensemble_f1": 0.606637,
+        "selected": "single",
+        "selected_f1": 0.999993
+      }
+    }
+  },
+  {
+    "dataset_file": "010_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature6_4000_6006_6054.txt",
+    "domain": "anomaly_archive",
+    "entity": "010_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature6_4000_6006_6054",
+    "total_runtime": 793.3219327926636,
+    "avg_memory_mb": 113.4296875,
+    "peak_memory_mb": 113.4296875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 24.0753,
+        "2_Thompson_Sampling": 197.7602,
+        "3_GAN_Robustness": 39.7441,
+        "4_Borderline_Sensitivity": 13.0335,
+        "5_Monte_Carlo": 37.5959,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 312.2137
+      },
+      "ga": {
+        "f1": 0.623913,
+        "pr_auc": 0.461547
+      },
+      "thompson": {
+        "f1": 0.833327,
+        "pr_auc": 0.497617
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.583331
+      },
+      "borderline": {
+        "f1": 0.999993,
+        "pr_auc": 0.583331
+      },
+      "monte_carlo": {
+        "f1": 0.999993,
+        "pr_auc": 0.547617
+      },
+      "final_decision": {
+        "single_f1": 0.999993,
+        "ensemble_f1": 0.623913,
+        "selected": "single",
+        "selected_f1": 0.999993
+      }
+    }
+  },
+  {
+    "dataset_file": "011_UCR_Anomaly_DISTORTEDECG1_10000_11800_12100.txt",
+    "domain": "anomaly_archive",
+    "entity": "011_UCR_Anomaly_DISTORTEDECG1_10000_11800_12100",
+    "total_runtime": 316.9333312511444,
+    "avg_memory_mb": 113.4296875,
+    "peak_memory_mb": 113.4296875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 27.0214,
+        "2_Thompson_Sampling": 5.7764,
+        "3_GAN_Robustness": 17.5331,
+        "4_Borderline_Sensitivity": 9.1288,
+        "5_Monte_Carlo": 19.5203,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 78.9834
+      },
+      "ga": {
+        "f1": 0.794509,
+        "pr_auc": 0.413855
+      },
+      "thompson": {
+        "f1": 0.779656,
+        "pr_auc": 0.7054
+      },
+      "gan": {
+        "f1": 0.851059,
+        "pr_auc": 0.7437
+      },
+      "borderline": {
+        "f1": 0.867919,
+        "pr_auc": 0.739344
+      },
+      "monte_carlo": {
+        "f1": 0.827581,
+        "pr_auc": 0.713848
+      },
+      "final_decision": {
+        "single_f1": 0.807012,
+        "ensemble_f1": 0.794509,
+        "selected": "single",
+        "selected_f1": 0.807012
+      }
+    }
+  },
+  {
+    "dataset_file": "012_UCR_Anomaly_DISTORTEDECG2_15000_16000_16100.txt",
+    "domain": "anomaly_archive",
+    "entity": "012_UCR_Anomaly_DISTORTEDECG2_15000_16000_16100",
+    "total_runtime": 491.4297709465027,
+    "avg_memory_mb": 128.05285098782906,
+    "peak_memory_mb": 147.3671875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 50.9913,
+        "2_Thompson_Sampling": 64.1599,
+        "3_GAN_Robustness": 26.9866,
+        "4_Borderline_Sensitivity": 17.5603,
+        "5_Monte_Carlo": 30.1651,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 189.867
+      },
+      "ga": {
+        "f1": 0.81529,
+        "pr_auc": 0.322882
+      },
+      "thompson": {
+        "f1": 0.878043,
+        "pr_auc": 0.875355
+      },
+      "gan": {
+        "f1": 0.944439,
+        "pr_auc": 0.908954
+      },
+      "borderline": {
+        "f1": 0.926824,
+        "pr_auc": 0.910981
+      },
+      "monte_carlo": {
+        "f1": 0.926824,
+        "pr_auc": 0.910981
+      },
+      "final_decision": {
+        "single_f1": 0.926824,
+        "ensemble_f1": 0.81529,
+        "selected": "single",
+        "selected_f1": 0.926824
+      }
+    }
+  },
+  {
+    "dataset_file": "013_UCR_Anomaly_DISTORTEDECG3_15000_16000_16100.txt",
+    "domain": "anomaly_archive",
+    "entity": "013_UCR_Anomaly_DISTORTEDECG3_15000_16000_16100",
+    "total_runtime": 534.1496572494507,
+    "avg_memory_mb": 129.63839889273208,
+    "peak_memory_mb": 150.90234375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 32.1787,
+        "2_Thompson_Sampling": 9.8802,
+        "3_GAN_Robustness": 16.2601,
+        "4_Borderline_Sensitivity": 7.2697,
+        "5_Monte_Carlo": 20.869,
+        "6_Rank_Aggregation": 0.002,
+        "end_to_end": 86.4622
+      },
+      "ga": {
+        "f1": 0.798517,
+        "pr_auc": 0.578054
+      },
+      "thompson": {
+        "f1": 0.888883,
+        "pr_auc": 0.905192
+      },
+      "gan": {
+        "f1": 0.941171,
+        "pr_auc": 0.877564
+      },
+      "borderline": {
+        "f1": 0.941171,
+        "pr_auc": 0.906217
+      },
+      "monte_carlo": {
+        "f1": 0.941171,
+        "pr_auc": 0.875984
+      },
+      "final_decision": {
+        "single_f1": 0.941171,
+        "ensemble_f1": 0.798517,
+        "selected": "single",
+        "selected_f1": 0.941171
+      }
+    }
+  },
+  {
+    "dataset_file": "014_UCR_Anomaly_DISTORTEDECG3_8000_17000_17100.txt",
+    "domain": "anomaly_archive",
+    "entity": "014_UCR_Anomaly_DISTORTEDECG3_8000_17000_17100",
+    "total_runtime": 660.1101977825165,
+    "avg_memory_mb": 117.2865011449741,
+    "peak_memory_mb": 117.59375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 24.4151,
+        "2_Thompson_Sampling": 10.1384,
+        "3_GAN_Robustness": 18.3347,
+        "4_Borderline_Sensitivity": 9.8843,
+        "5_Monte_Carlo": 23.4972,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 86.2727
+      },
+      "ga": {
+        "f1": 0.790737,
+        "pr_auc": 0.43785
+      },
+      "thompson": {
+        "f1": 0.86956,
+        "pr_auc": 0.624464
+      },
+      "gan": {
+        "f1": 0.86956,
+        "pr_auc": 0.734218
+      },
+      "borderline": {
+        "f1": 0.874995,
+        "pr_auc": 0.661774
+      },
+      "monte_carlo": {
+        "f1": 0.874995,
+        "pr_auc": 0.617104
+      },
+      "final_decision": {
+        "single_f1": 0.874995,
+        "ensemble_f1": 0.790737,
+        "selected": "single",
+        "selected_f1": 0.874995
+      }
+    }
+  },
+  {
+    "dataset_file": "015_UCR_Anomaly_DISTORTEDECG4_5000_16800_17100.txt",
+    "domain": "anomaly_archive",
+    "entity": "015_UCR_Anomaly_DISTORTEDECG4_5000_16800_17100",
+    "total_runtime": 6839.687541723251,
+    "avg_memory_mb": 120.14682022479775,
+    "peak_memory_mb": 126.12890625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 102.032,
+        "2_Thompson_Sampling": 6062.2173,
+        "3_GAN_Robustness": 204.2102,
+        "4_Borderline_Sensitivity": 87.3054,
+        "5_Monte_Carlo": 174.2668,
+        "6_Rank_Aggregation": 0.0024,
+        "end_to_end": 6630.0359
+      },
+      "ga": {
+        "f1": 0.712594,
+        "pr_auc": 0.384924
+      },
+      "thompson": {
+        "f1": 0.767891,
+        "pr_auc": 0.843469
+      },
+      "gan": {
+        "f1": 0.841832,
+        "pr_auc": 0.907147
+      },
+      "borderline": {
+        "f1": 0.845311,
+        "pr_auc": 0.874815
+      },
+      "monte_carlo": {
+        "f1": 0.841644,
+        "pr_auc": 0.874597
+      },
+      "final_decision": {
+        "single_f1": 0.771547,
+        "ensemble_f1": 0.712594,
+        "selected": "single",
+        "selected_f1": 0.771547
+      }
+    }
+  },
+  {
+    "dataset_file": "016_UCR_Anomaly_DISTORTEDECG4_5000_16900_17100.txt",
+    "domain": "anomaly_archive",
+    "entity": "016_UCR_Anomaly_DISTORTEDECG4_5000_16900_17100",
+    "total_runtime": 588.7108466625214,
+    "avg_memory_mb": 122.25752315335794,
+    "peak_memory_mb": 122.2734375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 25.8163,
+        "2_Thompson_Sampling": 134.4026,
+        "3_GAN_Robustness": 54.703,
+        "4_Borderline_Sensitivity": 22.3708,
+        "5_Monte_Carlo": 39.4228,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 276.7192
+      },
+      "ga": {
+        "f1": 0.7871,
+        "pr_auc": 0.392936
+      },
+      "thompson": {
+        "f1": 0.933328,
+        "pr_auc": 0.873486
+      },
+      "gan": {
+        "f1": 0.999995,
+        "pr_auc": 0.923075
+      },
+      "borderline": {
+        "f1": 0.965512,
+        "pr_auc": 0.923781
+      },
+      "monte_carlo": {
+        "f1": 0.947363,
+        "pr_auc": 0.875867
+      },
+      "final_decision": {
+        "single_f1": 0.947363,
+        "ensemble_f1": 0.7871,
+        "selected": "single",
+        "selected_f1": 0.947363
+      }
+    }
+  },
+  {
+    "dataset_file": "017_UCR_Anomaly_DISTORTEDECG4_5000_17000_17100.txt",
+    "domain": "anomaly_archive",
+    "entity": "017_UCR_Anomaly_DISTORTEDECG4_5000_17000_17100",
+    "total_runtime": 223.29237294197083,
+    "avg_memory_mb": 122.2734375,
+    "peak_memory_mb": 122.2734375,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 27.2744,
+        "2_Thompson_Sampling": 10.8307,
+        "3_GAN_Robustness": 19.3228,
+        "4_Borderline_Sensitivity": 11.029,
+        "5_Monte_Carlo": 32.7797,
+        "6_Rank_Aggregation": 0.0018,
+        "end_to_end": 101.2403
+      },
+      "ga": {
+        "f1": 0.790129,
+        "pr_auc": 0.47336
+      },
+      "thompson": {
+        "f1": 0.965512,
+        "pr_auc": 0.869835
+      },
+      "gan": {
+        "f1": 0.981127,
+        "pr_auc": 0.921624
+      },
+      "borderline": {
+        "f1": 0.982451,
+        "pr_auc": 0.926017
+      },
+      "monte_carlo": {
+        "f1": 0.96428,
+        "pr_auc": 0.916448
+      },
+      "final_decision": {
+        "single_f1": 0.949147,
+        "ensemble_f1": 0.790129,
+        "selected": "single",
+        "selected_f1": 0.949147
+      }
+    }
+  },
+  {
+    "dataset_file": "018_UCR_Anomaly_DISTORTEDECG4_8000_17000_17100.txt",
+    "domain": "anomaly_archive",
+    "entity": "018_UCR_Anomaly_DISTORTEDECG4_8000_17000_17100",
+    "total_runtime": 576.5843482017517,
+    "avg_memory_mb": 122.27763269801116,
+    "peak_memory_mb": 122.90625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 27.7724,
+        "2_Thompson_Sampling": 88.2054,
+        "3_GAN_Robustness": 35.9629,
+        "4_Borderline_Sensitivity": 25.666,
+        "5_Monte_Carlo": 41.1146,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 218.7253
+      },
+      "ga": {
+        "f1": 0.793875,
+        "pr_auc": 0.501486
+      },
+      "thompson": {
+        "f1": 0.857138,
+        "pr_auc": 0.633711
+      },
+      "gan": {
+        "f1": 0.863631,
+        "pr_auc": 0.741353
+      },
+      "borderline": {
+        "f1": 0.857138,
+        "pr_auc": 0.615698
+      },
+      "monte_carlo": {
+        "f1": 0.857138,
+        "pr_auc": 0.621276
+      },
+      "final_decision": {
+        "single_f1": 0.666661,
+        "ensemble_f1": 0.793875,
+        "selected": "ensemble",
+        "selected_f1": 0.793875
+      }
+    }
+  },
+  {
+    "dataset_file": "019_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z1_5000_6168_6212.txt",
+    "domain": "anomaly_archive",
+    "entity": "019_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z1_5000_6168_6212",
+    "total_runtime": 232.94730877876282,
+    "avg_memory_mb": 122.90625,
+    "peak_memory_mb": 122.90625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 17.5708,
+        "2_Thompson_Sampling": 5.1198,
+        "3_GAN_Robustness": 13.315,
+        "4_Borderline_Sensitivity": 4.3335,
+        "5_Monte_Carlo": 9.0645,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 49.4072
+      },
+      "ga": {
+        "f1": 0.764337,
+        "pr_auc": 0.4875
+      },
+      "thompson": {
+        "f1": 0.476186,
+        "pr_auc": 0.284756
+      },
+      "gan": {
+        "f1": 0.888882,
+        "pr_auc": 0.658328
+      },
+      "borderline": {
+        "f1": 0.833327,
+        "pr_auc": 0.664758
+      },
+      "monte_carlo": {
+        "f1": 0.66666,
+        "pr_auc": 0.470831
+      },
+      "final_decision": {
+        "single_f1": 0.666661,
+        "ensemble_f1": 0.764337,
+        "selected": "ensemble",
+        "selected_f1": 0.764337
+      }
+    }
+  },
+  {
+    "dataset_file": "020_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z2_5000_7175_7388.txt",
+    "domain": "anomaly_archive",
+    "entity": "020_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z2_5000_7175_7388",
+    "total_runtime": 660.6352853775024,
+    "avg_memory_mb": 122.90625,
+    "peak_memory_mb": 122.90625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 13.1467,
+        "2_Thompson_Sampling": 6.0818,
+        "3_GAN_Robustness": 13.105,
+        "4_Borderline_Sensitivity": 4.0156,
+        "5_Monte_Carlo": 10.6341,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 46.986
+      },
+      "ga": {
+        "f1": 0.772769,
+        "pr_auc": 0.341487
+      },
+      "thompson": {
+        "f1": 0.399996,
+        "pr_auc": 0.149057
+      },
+      "gan": {
+        "f1": 0.888882,
+        "pr_auc": 0.658328
+      },
+      "borderline": {
+        "f1": 0.888882,
+        "pr_auc": 0.658328
+      },
+      "monte_carlo": {
+        "f1": 0.857136,
+        "pr_auc": 0.658328
+      },
+      "final_decision": {
+        "single_f1": 0.749993,
+        "ensemble_f1": 0.772769,
+        "selected": "ensemble",
+        "selected_f1": 0.772769
+      }
+    }
+  },
+  {
+    "dataset_file": "021_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z3_5000_5948_5993.txt",
+    "domain": "anomaly_archive",
+    "entity": "021_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z3_5000_5948_5993",
+    "total_runtime": 473.4064049720764,
+    "avg_memory_mb": 122.90625,
+    "peak_memory_mb": 122.90625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 41.2346,
+        "2_Thompson_Sampling": 69.5623,
+        "3_GAN_Robustness": 27.1688,
+        "4_Borderline_Sensitivity": 19.826,
+        "5_Monte_Carlo": 23.1221,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 180.9168
+      },
+      "ga": {
+        "f1": 0.759253,
+        "pr_auc": 0.549279
+      },
+      "thompson": {
+        "f1": 0.571423,
+        "pr_auc": 0.401377
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.749994
+      },
+      "borderline": {
+        "f1": 0.888882,
+        "pr_auc": 0.731245
+      },
+      "monte_carlo": {
+        "f1": 0.888882,
+        "pr_auc": 0.639579
+      },
+      "final_decision": {
+        "single_f1": 0.749993,
+        "ensemble_f1": 0.759253,
+        "selected": "ensemble",
+        "selected_f1": 0.759253
+      }
+    }
+  },
+  {
+    "dataset_file": "022_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z4_4000_6527_6645.txt",
+    "domain": "anomaly_archive",
+    "entity": "022_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z4_4000_6527_6645",
+    "total_runtime": 461.4196660518646,
+    "avg_memory_mb": 122.96151591350358,
+    "peak_memory_mb": 123.22265625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 26.8548,
+        "2_Thompson_Sampling": 32.6215,
+        "3_GAN_Robustness": 13.4401,
+        "4_Borderline_Sensitivity": 4.3313,
+        "5_Monte_Carlo": 10.4177,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 87.6681
+      },
+      "ga": {
+        "f1": 0.74267,
+        "pr_auc": 0.382026
+      },
+      "thompson": {
+        "f1": 0.999994,
+        "pr_auc": 0.799997
+      },
+      "gan": {
+        "f1": 0.999994,
+        "pr_auc": 0.799997
+      },
+      "borderline": {
+        "f1": 0.999994,
+        "pr_auc": 0.799997
+      },
+      "monte_carlo": {
+        "f1": 0.999994,
+        "pr_auc": 0.799997
+      },
+      "final_decision": {
+        "single_f1": 0.952375,
+        "ensemble_f1": 0.74267,
+        "selected": "single",
+        "selected_f1": 0.952375
+      }
+    }
+  },
+  {
+    "dataset_file": "023_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z5_5000_8612_8716.txt",
+    "domain": "anomaly_archive",
+    "entity": "023_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z5_5000_8612_8716",
+    "total_runtime": 276.18676376342773,
+    "avg_memory_mb": 123.22265625,
+    "peak_memory_mb": 123.22265625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 18.9348,
+        "2_Thompson_Sampling": 4.9309,
+        "3_GAN_Robustness": 13.1756,
+        "4_Borderline_Sensitivity": 4.01,
+        "5_Monte_Carlo": 9.5025,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 50.5571
+      },
+      "ga": {
+        "f1": 0.781465,
+        "pr_auc": 0.411015
+      },
+      "thompson": {
+        "f1": 0.571423,
+        "pr_auc": 0.420944
+      },
+      "gan": {
+        "f1": 0.999993,
+        "pr_auc": 0.749994
+      },
+      "borderline": {
+        "f1": 0.888882,
+        "pr_auc": 0.705551
+      },
+      "monte_carlo": {
+        "f1": 0.888882,
+        "pr_auc": 0.681246
+      },
+      "final_decision": {
+        "single_f1": 0.571423,
+        "ensemble_f1": 0.781465,
+        "selected": "ensemble",
+        "selected_f1": 0.781465
+      }
+    }
+  },
+  {
+    "dataset_file": "025_UCR_Anomaly_DISTORTEDInternalBleeding14_2800_5607_5634.txt",
+    "domain": "anomaly_archive",
+    "entity": "025_UCR_Anomaly_DISTORTEDInternalBleeding14_2800_5607_5634",
+    "total_runtime": 425.592036485672,
+    "avg_memory_mb": 123.22265625,
+    "peak_memory_mb": 123.22265625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 17.3266,
+        "2_Thompson_Sampling": 51.455,
+        "3_GAN_Robustness": 18.2602,
+        "4_Borderline_Sensitivity": 30.7095,
+        "5_Monte_Carlo": 22.6207,
+        "6_Rank_Aggregation": 0.0019,
+        "end_to_end": 140.3754
+      },
+      "ga": {
+        "f1": 0.705856,
+        "pr_auc": 0.439772
+      },
+      "thompson": {
+        "f1": 0.799992,
+        "pr_auc": 0.097222
+      },
+      "gan": {
+        "f1": 0.999992,
+        "pr_auc": 0.66666
+      },
+      "borderline": {
+        "f1": 0.999992,
+        "pr_auc": 0.499996
+      },
+      "monte_carlo": {
+        "f1": 0.999992,
+        "pr_auc": 0.333331
+      },
+      "final_decision": {
+        "single_f1": 0.799992,
+        "ensemble_f1": 0.705856,
+        "selected": "single",
+        "selected_f1": 0.799992
+      }
+    }
+  },
+  {
+    "dataset_file": "026_UCR_Anomaly_DISTORTEDInternalBleeding15_1700_5684_5854.txt",
+    "domain": "anomaly_archive",
+    "entity": "026_UCR_Anomaly_DISTORTEDInternalBleeding15_1700_5684_5854",
+    "total_runtime": 2058.295026063919,
+    "avg_memory_mb": 123.22265625,
+    "peak_memory_mb": 123.22265625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 48.8676,
+        "2_Thompson_Sampling": 1276.8437,
+        "3_GAN_Robustness": 91.5975,
+        "4_Borderline_Sensitivity": 96.1209,
+        "5_Monte_Carlo": 228.7595,
+        "6_Rank_Aggregation": 0.002,
+        "end_to_end": 1742.1937
+      },
+      "ga": {
+        "f1": 0.728211,
+        "pr_auc": 0.343317
+      },
+      "thompson": {
+        "f1": 0.818893,
+        "pr_auc": 0.878478
+      },
+      "gan": {
+        "f1": 0.847995,
+        "pr_auc": 0.900257
+      },
+      "borderline": {
+        "f1": 0.830764,
+        "pr_auc": 0.885453
+      },
+      "monte_carlo": {
+        "f1": 0.830764,
+        "pr_auc": 0.856568
+      },
+      "final_decision": {
+        "single_f1": 0.830764,
+        "ensemble_f1": 0.728211,
+        "selected": "single",
+        "selected_f1": 0.830764
+      }
+    }
+  },
+  {
+    "dataset_file": "027_UCR_Anomaly_DISTORTEDInternalBleeding16_1200_4187_4199.txt",
+    "domain": "anomaly_archive",
+    "entity": "027_UCR_Anomaly_DISTORTEDInternalBleeding16_1200_4187_4199",
+    "total_runtime": 1914.6795217990875,
+    "avg_memory_mb": 123.22265625,
+    "peak_memory_mb": 123.22265625,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 45.0951,
+        "2_Thompson_Sampling": 1340.2514,
+        "3_GAN_Robustness": 152.9827,
+        "4_Borderline_Sensitivity": 28.6998,
+        "5_Monte_Carlo": 58.7026,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 1625.735
+      },
+      "ga": {
+        "f1": 0.722257,
+        "pr_auc": 0.457574
+      },
+      "thompson": {
+        "f1": 0.686042,
+        "pr_auc": 0.749831
+      },
+      "gan": {
+        "f1": 0.866662,
+        "pr_auc": 0.911016
+      },
+      "borderline": {
+        "f1": 0.82269,
+        "pr_auc": 0.862492
+      },
+      "monte_carlo": {
+        "f1": 0.803274,
+        "pr_auc": 0.863976
+      },
+      "final_decision": {
+        "single_f1": 0.690054,
+        "ensemble_f1": 0.722257,
+        "selected": "ensemble",
+        "selected_f1": 0.722257
+      }
+    }
+  }
+]

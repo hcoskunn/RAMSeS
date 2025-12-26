@@ -39,13 +39,23 @@ def train_gan(generator, discriminator, data, epochs=100, batch_size=32, noise_d
     generator_optimizer = tf.keras.optimizers.Adam(0.0001)
     discriminator_optimizer = tf.keras.optimizers.Adam(0.0001)
 
+    # Ensure batch_size doesn't exceed data size
+    batch_size = min(batch_size, data.shape[0])
+    if batch_size == 0:
+        logger.warning("Data size is 0, cannot train GAN")
+        return
+
     for epoch in range(epochs):
-        for _ in range(data.shape[0] // batch_size):
+        gen_loss = None
+        disc_loss = None
+        
+        num_batches = max(1, data.shape[0] // batch_size)
+        for _ in range(num_batches):
             idx = np.random.randint(0, data.shape[0], batch_size)
             real_data = data[idx]
 
             noise = np.random.normal(0, 1, (batch_size, noise_dim))
-            fake_data = generator.predict(noise)
+            fake_data = generator.predict(noise, verbose=0)
 
             # Add Gaussian noise to discriminator input
             real_data += 0.1 * np.random.normal(size=real_data.shape)
@@ -74,14 +84,14 @@ def train_gan(generator, discriminator, data, epochs=100, batch_size=32, noise_d
             gradients_of_generator = gen_tape.gradient(gen_loss, generator.trainable_variables)
             generator_optimizer.apply_gradients(zip(gradients_of_generator, generator.trainable_variables))
 
-        if epoch % 50 == 0:
+        if epoch % 50 == 0 and gen_loss is not None and disc_loss is not None:
             logger.info(f"Epoch {epoch}: Gen Loss: {gen_loss.numpy()}, Disc Loss: {disc_loss.numpy()}")
 
 
 # Function to generate new borderline points
 def generate_borderline_points(generator, num_samples=100, noise_dim=10):
     noise = np.random.normal(0, 1, (num_samples, noise_dim))
-    generated_data = generator.predict(noise)
+    generated_data = generator.predict(noise, verbose=0)
     return generated_data
 
 
@@ -108,10 +118,12 @@ def integrate_gan_with_dataset(data, labels):
 
     # Generate borderline points
     num_samples = int(0.1 * len(labels))  # % of the total number of data points
+    if num_samples == 0:
+        num_samples = 1  # Ensure at least one sample
     borderline_points = generate_borderline_points(generator, num_samples=num_samples, noise_dim=input_dim)
 
     # Use the discriminator to dynamically label the generated points
-    discriminator_outputs = discriminator.predict(borderline_points).flatten()
+    discriminator_outputs = discriminator.predict(borderline_points, verbose=0).flatten()
     print(f"Discriminator outputs: {discriminator_outputs}")  # Debug print
     new_labels = np.where(discriminator_outputs > np.mean(discriminator_outputs), 1, 0)
     print(f"Generated labels: {new_labels}")  # Debug print
@@ -123,7 +135,7 @@ def integrate_gan_with_dataset(data, labels):
     print(f"Adjusted labels after anomaly threshold: {new_labels}")  # Debug print
 
     # Integrate the generated points into the original dataset using windows
-    num_windows = len(data[0]) // 10  # Divide the data into windows
+    num_windows = max(1, len(data[0]) // 10)  # Divide the data into windows, ensure at least 1
     indices_to_insert = np.array_split(np.arange(len(data[0])), num_windows)
 
     integrated_data = []
@@ -199,9 +211,16 @@ def run_Gan(test_data, trained_models, model_names, dataset, entity):
             results[model_name].append({'f1': best_f1, 'pr_auc': pr_auc})
             logger.info(f"Evaluated {model_name}: F1={best_f1}, PR_AUC={pr_auc}")
 
-    ranked_by_f1 = sorted(results.items(), key=lambda x: x[1][0]['f1'], reverse=True)
+    # Filter out models with no results before sorting
+    valid_results = {k: v for k, v in results.items() if len(v) > 0}
+    
+    if not valid_results:
+        logger.warning("No valid GAN test results found, skipping ranking")
+        return [], [], [], []
+    
+    ranked_by_f1 = sorted(valid_results.items(), key=lambda x: x[1][0]['f1'], reverse=True)
     ranked_by_f1_names = [item[0] for item in ranked_by_f1]
-    ranked_by_pr_auc = sorted(results.items(), key=lambda x: x[1][0]['pr_auc'], reverse=True)
+    ranked_by_pr_auc = sorted(valid_results.items(), key=lambda x: x[1][0]['pr_auc'], reverse=True)
     ranked_by_pr_auc_names = [item[0] for item in ranked_by_pr_auc]
 
     true_values = np.array(test_data.entities[0].labels)  # 1 for anomaly, 0 for normal
