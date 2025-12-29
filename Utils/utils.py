@@ -41,6 +41,10 @@ def get_args_from_cmdline():
                         type=str,
                         default=None,
                         help='Entity ID (e.g., 3, 5)')
+    parser.add_argument('--parallel',
+                        type=str,
+                        default='false',
+                        help='Run model selection in parallel (true/false, t/f, T/F, True/False)')
     
     cmd_args = parser.parse_args()
     
@@ -57,6 +61,10 @@ def get_args_from_cmdline():
         args['dataset'] = cmd_args.dataset
     if cmd_args.entity is not None:
         args['entity'] = cmd_args.entity
+    
+    # Parse parallel flag (accepts: true, t, T, True, TRUE, 1, yes, y, Y, Yes, YES)
+    parallel_str = cmd_args.parallel.lower()
+    args['parallel'] = parallel_str in ['true', 't', '1', 'yes', 'y']
     
     return args
 

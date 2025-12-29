@@ -67,7 +67,8 @@ class MemoryMonitor:
 class TestbedRunner:
     """Run RAMSeS testbed across multiple datasets"""
     
-    def __init__(self, dataset_list_file: str, output_base_dir: str = "testbed_results", timeout: int = 3600):
+    def __init__(self, dataset_list_file: str, output_base_dir: str = "testbed_results", 
+                 timeout: int = 3600, parallel: str = 'false'):
         """
         Initialize testbed runner
         
@@ -79,10 +80,13 @@ class TestbedRunner:
             Base directory for storing results
         timeout : int
             Timeout in seconds for each dataset execution (default: 3600 = 1 hour)
+        parallel : str
+            Whether to use parallel model selection (default: 'false')
         """
         self.dataset_list_file = dataset_list_file
         self.output_base_dir = output_base_dir
         self.timeout = timeout
+        self.parallel = parallel
         self.results_by_domain = defaultdict(list)
         self.memory_monitor = MemoryMonitor()
         
@@ -271,7 +275,8 @@ class TestbedRunner:
         cmd = [
             'python', 'app.py',
             '--dataset', domain.lower(),
-            '--entity', entity
+            '--entity', entity,
+            '--parallel', self.parallel
         ]
         
         logger.info(f"  Command: {' '.join(cmd)}")
@@ -816,11 +821,17 @@ def main():
         default=None,
         help='Run only specific domain (optional)'
     )
+    parser.add_argument(
+        '--parallel',
+        type=str,
+        default='false',
+        help='Run model selection in parallel mode (true/false, t/f, T/F)'
+    )
     
     args = parser.parse_args()
     
     # Create testbed runner
-    runner = TestbedRunner(args.dataset_list, args.output_dir, args.timeout)
+    runner = TestbedRunner(args.dataset_list, args.output_dir, args.timeout, args.parallel)
     
     if args.domain:
         # Run single domain

@@ -509,91 +509,188 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     )
 
 
-def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration):
+def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration, trained_models, model_list=None):
     """
-    Parallel variant: executes GAN, Borderline, Monte Carlo, GA, and Thompson in parallel
-    (not used by default in run_app).
+    PARALLEL VERSION: Runs model selection algorithms concurrently using ThreadPoolExecutor.
+    
+    Executes 5 algorithms in parallel:
+      1) GA (genetic algorithm for stacking ensemble)
+      2) Thompson Sampling (online LinTS)
+      3) GAN robustness test
+      4) Off-by-threshold (borderline sensitivity)
+      5) Monte Carlo (noise stress test)
+    
+    Parameters
+    ----------
+    trained_models : dict
+        Dictionary of trained model instances
+    model_list : list[str], optional
+        List of model names to use. If None, uses global algorithm_list_instances.
+        
+    Returns
+    -------
+    Same 11-item tuple as run_model_selection_algorithms_1
     """
-    with concurrent.futures.ProcessPoolExecutor() as executor:
-        monte_carlo_future = executor.submit(
-            run_monte_carlo_simulation,
-            test_data, trained_models, algorithm_list_instances,
-            dataset, entity, 2, 0.1
-        )
-        off_by_threshold_future = executor.submit(
-            run_off_by_threshold,
-            test_data, trained_models, algorithm_list_instances,
-            dataset, entity
-        )
-        gan_future = executor.submit(
-            run_Gan,
-            test_data, trained_models, algorithm_list_instances,
-            dataset, entity
-        )
-        genetic_future = executor.submit(
+    # Use provided model list or fall back to global
+    models_to_use = model_list if model_list is not None else algorithm_list_instances
+    
+    logger.info("  🚀 Starting PARALLEL model selection (5 algorithms concurrently)...")
+    logger.info("  ✨ VERSION CHECK: Using run_model_selection_algorithms_2 with deepcopy fix")
+    timing_dict = {}
+    overall_start = time.time()
+    
+    # CRITICAL: Create independent copies of test_data for each algorithm
+    # This prevents race conditions when algorithms modify data during processing
+    logger.info("     📋 Creating independent data copies...")
+    test_data_ga = copy.deepcopy(test_data)
+    test_data_thompson = copy.deepcopy(test_data)
+    test_data_gan = copy.deepcopy(test_data)
+    test_data_borderline = copy.deepcopy(test_data)
+    test_data_montecarlo = copy.deepcopy(test_data)
+    logger.info("     ✓ Created 5 independent data copies for thread safety")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        logger.info("     Launching: GA | Thompson | GAN | Borderline | Monte Carlo")
+        
+        # Submit all 5 algorithms with their own data copies
+        ga_future = executor.submit(
             genetic_algorithm,
-            dataset, entity, train_data, test_data,
-            algorithm_list_instances, trained_models,
-            5, 10, 'lr', 0.1
+            dataset, entity, train_data, test_data_ga,
+            models_to_use, trained_models,
+            20, 20, 'rf', 0.1
         )
         thompson_future = executor.submit(
             run_linear_thompson_sampling,
-            test_data=test_data,
+            test_data=test_data_thompson,
             trained_models=trained_models,
-            model_names=algorithm_list_instances,
+            model_names=models_to_use,
             dataset=dataset,
             entity=entity,
             iterations=50,
             iteration=iteration,
         )
+        gan_future = executor.submit(
+            run_Gan,
+            test_data_gan, trained_models, models_to_use,
+            dataset, entity
+        )
+        borderline_future = executor.submit(
+            run_off_by_threshold,
+            test_data_borderline, trained_models, models_to_use,
+            dataset, entity
+        )
+        monte_carlo_future = executor.submit(
+            run_monte_carlo_simulation,
+            test_data_montecarlo, trained_models, models_to_use,
+            dataset, entity, 2, 0.1
+        )
 
-        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = monte_carlo_future.result()
-        ranked_by_f1, ranked_by_pr_auc, ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = \
-            off_by_threshold_future.result()
-
+        # Collect results
+        logger.info("     ⏳ Waiting for parallel tasks...")
+        
+        best_ensemble, best_f1, best_pr_auc, best_fitness, \
+        individual_predictions, base_model_predictions_train, base_model_predictions_test, \
+        y_true_train, y_true_test, meta_model_type = ga_future.result()
+        timing_dict['1_GA'] = time.time() - overall_start
+        logger.info("     ✓ GA: ensemble=%s | F1=%.4f | PR-AUC=%.4f", best_ensemble, best_f1, best_pr_auc)
+        
+        thompson_model_names = thompson_future.result()
+        timing_dict['2_Thompson'] = time.time() - overall_start
+        logger.info("     ✓ Thompson: top-5=%s", thompson_model_names[:5])
+        
         Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
         Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = gan_future.result()
+        timing_dict['3_GAN'] = time.time() - overall_start
+        logger.info("     ✓ GAN: F1 top-5=%s", Gan_ranked_by_f1_names[:5])
+        
+        ranked_by_f1, ranked_by_pr_auc, \
+        ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = borderline_future.result()
+        timing_dict['4_Borderline'] = time.time() - overall_start
+        logger.info("     ✓ Borderline: F1 top-5=%s", ranked_by_f1_names_sensitivity[:5])
+        
+        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = monte_carlo_future.result()
+        timing_dict['5_MonteCarlo'] = time.time() - overall_start
+        logger.info("     ✓ MonteCarlo: F1 top-5=%s", monte_carlo_ranked_models_F1[:5])
 
-        (best_ensemble, best_f1, best_pr_auc, best_fitness,
-         individual_predictions, base_model_predictions_train, base_model_predictions_test,
-         y_true_train, y_true_test, meta_model_type) = genetic_future.result()
+    timing_dict['0_Parallel_Total'] = time.time() - overall_start
+    logger.info("  ✅ All 5 algorithms completed in %.2fs (parallel)", timing_dict['0_Parallel_Total'])
 
-        thompson_model_names = thompson_future.result()
-
-    logger.info("[GA] Best ensemble=%s | F1=%.4f | PR-AUC=%.4f | fitness=%.4f",
-                best_ensemble, best_f1, best_pr_auc, best_fitness)
-
+    # Rank Aggregation
+    logger.info("  📊 Sub-stage 6.6: Rank Aggregation...")
+    agg_start = time.time()
     test_for_rank = [
-        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR,
         Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names,
         ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity,
+        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR,
     ]
     robust_agg = enhanced_markov_chain_rank_aggregator_text(test_for_rank)
     full_ = [robust_agg[1], thompson_model_names]
     full_aggregated = enhanced_markov_chain_rank_aggregator_text(full_)
+    timing_dict['6_Aggregation'] = time.time() - agg_start
+    logger.info("  ✓ Aggregation: %.2fs", timing_dict['6_Aggregation'])
 
+    # Persist results
     directory = f"myresults/robust_aggregated/{dataset}/{entity}/"
     os.makedirs(directory, exist_ok=True)
     output_file = os.path.join(
         directory, f"robust_aggregated_results_{dataset}_{entity}_{iteration}.txt"
     )
     with open(output_file, 'w') as f:
-        f.write("Summary of robust tests:\n")
-        f.write("\n[Monte Carlo]\n")
-        f.write(f"{monte_carlo_ranked_models_F1}\n{monte_carlo_ranked_models_PR}\n")
+        f.write("Summary of robust tests (PARALLEL execution):\n")
         f.write("\n[GAN]\n")
         f.write(f"{Gan_ranked_by_f1_names}\n{Gan_ranked_by_pr_auc_names}\n")
         f.write("\n[Borderline]\n")
         f.write(f"{ranked_by_f1_names_sensitivity}\n{ranked_by_pr_auc_names_sensitivity}\n")
+        f.write("\n[Monte Carlo]\n")
+        f.write(f"{monte_carlo_ranked_models_F1}\n{monte_carlo_ranked_models_PR}\n")
         f.write("\n[Robust rank aggregate]\n")
         f.write(f"{robust_agg}\n")
         f.write("\n[Final aggregate vs Thompson]\n")
         f.write(f"{full_aggregated}\n")
 
+    # Return 11-item tuple matching sequential version
     return (
-        thompson_model_names[0], robust_agg[1], full_aggregated[1],
-        best_ensemble, individual_predictions, base_model_predictions_train,
-        base_model_predictions_test, y_true_train, y_true_test, meta_model_type
+        thompson_model_names[0],
+        robust_agg[1],
+        full_aggregated[1],
+        best_ensemble,
+        individual_predictions,
+        base_model_predictions_train,
+        base_model_predictions_test,
+        y_true_train,
+        y_true_test,
+        meta_model_type,
+        {
+            'ga': {'f1': best_f1, 'pr_auc': best_pr_auc, 'fitness': best_fitness},
+            'thompson': thompson_model_names,
+            'gan': {
+                'f1_names': Gan_ranked_by_f1_names, 
+                'pr_auc_names': Gan_ranked_by_pr_auc_names,
+                'f1_scores': Gan_ranked_by_f1,
+                'pr_auc_scores': Gan_ranked_by_pr_auc,
+                'best_model': Gan_ranked_by_f1_names[0],
+                'best_f1': Gan_ranked_by_f1[0][1][0]['f1'] if len(Gan_ranked_by_f1) > 0 else 0.0,
+                'best_pr_auc': Gan_ranked_by_pr_auc[0][1][0]['pr_auc'] if len(Gan_ranked_by_pr_auc) > 0 else 0.0
+            },
+            'borderline': {
+                'f1_names': ranked_by_f1_names_sensitivity, 
+                'pr_auc_names': ranked_by_pr_auc_names_sensitivity,
+                'f1_scores': ranked_by_f1,
+                'pr_auc_scores': ranked_by_pr_auc,
+                'best_model': ranked_by_f1_names_sensitivity[0],
+                'best_f1': ranked_by_f1[0][1][0]['f1'] if len(ranked_by_f1) > 0 else 0.0,
+                'best_pr_auc': ranked_by_pr_auc[0][1][0]['pr_auc'] if len(ranked_by_pr_auc) > 0 else 0.0
+            },
+            'monte_carlo': {
+                'f1_names': monte_carlo_ranked_models_F1, 
+                'pr_auc_names': monte_carlo_ranked_models_PR,
+                'best_model_f1': monte_carlo_ranked_models_F1[0],
+                'best_model_pr_auc': monte_carlo_ranked_models_PR[0]
+            },
+            'robust_agg': robust_agg,
+            'full_aggregated': full_aggregated,
+            'timing': timing_dict
+        }
     )
 
 # ------------------------------------------------------------------------------
@@ -642,11 +739,12 @@ def run_app(algorithm_list, algorithm_list_instances):
     # Get dataset and entity from args (command line overrides, or use defaults)
     dataset = args.get('dataset', 'skab')
     entity = str(args.get('entity', '3'))
+    use_parallel = args.get('parallel', False)
     
     data_dir = args['dataset_path']
     
     logger.info("="*80)
-    logger.info(f"🚀 STARTING RAMSeS EXECUTION: dataset={dataset}, entity={entity}")
+    logger.info(f"🚀 STARTING RAMSeS EXECUTION: dataset={dataset}, entity={entity}, parallel={use_parallel}")
     logger.info("="*80)
     
     logger.info("📂 STAGE 1/7: Loading Training Data...")
@@ -763,13 +861,21 @@ def run_app(algorithm_list, algorithm_list_instances):
 
         # Start end-to-end timing
         e2e_start_time = time.time()
-        logger.info("  ⏱ Starting model selection pipeline...")
-        
-        (best_thompson, robust_agg, full_aggregated, best_ensemble,
-         individual_predictions, base_model_predictions_train, base_model_predictions_test,
-         y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
-            train_data, test_data_new, dataset, entity, iteration=0, model_list=loaded_model_names
-        )
+        if use_parallel:
+            logger.info("  ⏱ Starting model selection pipeline (PARALLEL mode)...")
+            (best_thompson, robust_agg, full_aggregated, best_ensemble,
+             individual_predictions, base_model_predictions_train, base_model_predictions_test,
+             y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_2(
+                train_data, test_data_new, dataset, entity, iteration=0, 
+                trained_models=trained_models, model_list=loaded_model_names
+            )
+        else:
+            logger.info("  ⏱ Starting model selection pipeline (SEQUENTIAL mode)...")
+            (best_thompson, robust_agg, full_aggregated, best_ensemble,
+             individual_predictions, base_model_predictions_train, base_model_predictions_test,
+             y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
+                train_data, test_data_new, dataset, entity, iteration=0, model_list=loaded_model_names
+            )
         
         # Calculate end-to-end time
         e2e_time = time.time() - e2e_start_time
@@ -951,11 +1057,19 @@ def run_app(algorithm_list, algorithm_list_instances):
 
             # Update selection for next iteration
             test_data_new_copy = copy.deepcopy(test_data_new)
-            (best_thompson, robust_agg, full_aggregated, best_ensemble,
-             individual_predictions, base_model_predictions_train, base_model_predictions_test,
-             y_true_train, y_true_test, meta_model_type) = run_model_selection_algorithms_1(
-                train_data, test_data_new_copy, dataset, entity, iteration=i, model_list=loaded_model_names
-            )
+            if use_parallel:
+                (best_thompson, robust_agg, full_aggregated, best_ensemble,
+                 individual_predictions, base_model_predictions_train, base_model_predictions_test,
+                 y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_2(
+                    train_data, test_data_new_copy, dataset, entity, iteration=i, 
+                    trained_models=trained_models, model_list=loaded_model_names
+                )
+            else:
+                (best_thompson, robust_agg, full_aggregated, best_ensemble,
+                 individual_predictions, base_model_predictions_train, base_model_predictions_test,
+                 y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_1(
+                    train_data, test_data_new_copy, dataset, entity, iteration=i, model_list=loaded_model_names
+                )
             i += 1
 
     except Exception:
