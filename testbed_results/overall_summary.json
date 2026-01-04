@@ -1,0 +1,40 @@
+{
+  "total_domains": 1,
+  "total_datasets": 244,
+  "total_time": 660805.8839688934,
+  "domains": {
+    "anomaly_archive": {
+      "total_datasets": 244,
+      "total_runtime": 660805.8839688934,
+      "avg_runtime": 2708.220835938088,
+      "avg_memory_mb": 87.89746427785585,
+      "peak_memory_mb": 88.42150678790983,
+      "max_peak_memory_mb": 154.14453125,
+      "avg_module_times": {
+        "1_Genetic_Algorithm": 74.8362893442623,
+        "2_Thompson_Sampling": 1445.527752868852,
+        "3_GAN_Robustness": 70.63565614754098,
+        "4_Borderline_Sensitivity": 38.70020409836066,
+        "5_Monte_Carlo": 74.30893483606559,
+        "6_Rank_Aggregation": 0.001657786885245902,
+        "end_to_end": 1704.0127823770492
+      },
+      "avg_f1_scores": {
+        "ga": 0.7365214303278689,
+        "thompson": 0.7979361803278688,
+        "gan": 0.8766775409836066,
+        "borderline": 0.859724393442623,
+        "monte_carlo": 0.834766512295082,
+        "final_selected": 0.8236145614754098
+      },
+      "std_f1_scores": {
+        "ga": 0.07261988682036431,
+        "thompson": 0.08982024857568024,
+        "gan": 0.0716839380115705,
+        "borderline": 0.0756780120982329,
+        "monte_carlo": 0.08875939862460012,
+        "final_selected": 0.07977020576539073
+      }
+    }
+  }
+}

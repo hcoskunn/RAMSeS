@@ -1015,8 +1015,13 @@ def run_app(algorithm_list, algorithm_list_instances):
         logger.info("="*80)
 
         # Real-time evaluation loop (iterations=1 means it won't run)
+        # update_interval controls how often we re-run the expensive model selection pipeline
+        update_interval = args.get('update_interval', 5)  # Re-optimize every N windows (default: 5)
+        logger.info(f"📊 Online mode: iterations={iterations}, update_interval={update_interval}")
+        
         i = 1
         while i < iterations:
+            logger.info(f"🔄 Processing window {i}/{iterations-1}")
             test_data.entities[0].Y = data_windows[i]
             test_data.entities[0].labels = targets_windows[i]
             test_data.entities[0].mask = new_mask[i]
@@ -1033,13 +1038,13 @@ def run_app(algorithm_list, algorithm_list_instances):
             test_data_new = copy.deepcopy(test_data)
             test_data_new, _ = Inject(test_data_new, anomaly_list)
 
-            # Evaluate current best single model
+            # LIGHTWEIGHT: Evaluate current best single model on this window
             test_data_new_copy = copy.deepcopy(test_data_new)
             _, adjusted_y_pred_ind_current, _, _ = evaluate_individual_models(
                 [full_aggregated[0]], test_data_new_copy, trained_models
             )
 
-            # Evaluate ensemble fitness on current window
+            # LIGHTWEIGHT: Evaluate ensemble fitness on current window
             test_data_new_copy = copy.deepcopy(test_data_new)
             values = fitness_function(
                 best_ensemble, train_data, test_data_new_copy, trained_models_new,
@@ -1048,28 +1053,37 @@ def run_app(algorithm_list, algorithm_list_instances):
                 meta_model_type=meta_model_type
             )
 
-            # Persist falses
+            # Persist falses (TP/FP/FN tracking)
             test_data_new_copy = copy.deepcopy(test_data_new)
             find_num_falses(
                 adjusted_y_pred_ind_current, test_data_new_copy, dataset, entity, values,
                 full_aggregated[0], best_ensemble, iteration=i
             )
 
-            # Update selection for next iteration
-            test_data_new_copy = copy.deepcopy(test_data_new)
-            if use_parallel:
-                (best_thompson, robust_agg, full_aggregated, best_ensemble,
-                 individual_predictions, base_model_predictions_train, base_model_predictions_test,
-                 y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_2(
-                    train_data, test_data_new_copy, dataset, entity, iteration=i, 
-                    trained_models=trained_models, model_list=loaded_model_names
-                )
+            # EXPENSIVE: Re-run full model selection pipeline only every N windows
+            if i % update_interval == 0:
+                logger.info(f"  🔄 Triggering background re-optimization at window {i} (every {update_interval} windows)...")
+                reopt_start = time.time()
+                test_data_new_copy = copy.deepcopy(test_data_new)
+                if use_parallel:
+                    (best_thompson, robust_agg, full_aggregated, best_ensemble,
+                     individual_predictions, base_model_predictions_train, base_model_predictions_test,
+                     y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_2(
+                        train_data, test_data_new_copy, dataset, entity, iteration=i, 
+                        trained_models=trained_models, model_list=loaded_model_names
+                    )
+                else:
+                    (best_thompson, robust_agg, full_aggregated, best_ensemble,
+                     individual_predictions, base_model_predictions_train, base_model_predictions_test,
+                     y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_1(
+                        train_data, test_data_new_copy, dataset, entity, iteration=i, model_list=loaded_model_names
+                    )
+                logger.info(f"  ✓ Re-optimization completed in {time.time() - reopt_start:.2f}s")
+                logger.info(f"  → Updated best_ensemble: {best_ensemble}")
+                logger.info(f"  → Updated best_single_model: {full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated}")
             else:
-                (best_thompson, robust_agg, full_aggregated, best_ensemble,
-                 individual_predictions, base_model_predictions_train, base_model_predictions_test,
-                 y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_1(
-                    train_data, test_data_new_copy, dataset, entity, iteration=i, model_list=loaded_model_names
-                )
+                logger.info(f"  ⏩ Skipping re-optimization (next at window {((i // update_interval) + 1) * update_interval})")
+            
             i += 1
 
     except Exception:

@@ -45,6 +45,10 @@ def get_args_from_cmdline():
                         type=str,
                         default='false',
                         help='Run model selection in parallel (true/false, t/f, T/F, True/False)')
+    parser.add_argument('--update_interval',
+                        type=int,
+                        default=5,
+                        help='Number of windows between model selection re-optimization (default: 5)')
     
     cmd_args = parser.parse_args()
     

@@ -1,0 +1,2243 @@
+================================================================================
+RAMSeS Testbed Report - Domain: anomaly_archive
+Generated: 2026-01-03 06:05:05
+================================================================================
+
+================================================================================
+OVERALL STATISTICS
+================================================================================
+
+Total Datasets Processed: 244
+Total Computational Time: 660805.88s (11013.43 min)
+Average Runtime per Dataset: 2708.22s
+Average Memory Usage: 87.90 MB
+Average Peak Memory: 88.42 MB
+Maximum Peak Memory: 154.14 MB
+
+================================================================================
+AVERAGE MODULE COMPUTATIONAL OVERHEAD
+================================================================================
+
+  1_Genetic_Algorithm            :    74.8363s
+  2_Thompson_Sampling            :  1445.5278s
+  3_GAN_Robustness               :    70.6357s
+  4_Borderline_Sensitivity       :    38.7002s
+  5_Monte_Carlo                  :    74.3089s
+  6_Rank_Aggregation             :     0.0017s
+--------------------------------------------------
+  End-to-End (Average)           :  1704.0128s
+
+================================================================================
+AVERAGE F1 SCORES BY MODULE
+================================================================================
+
+  ga                   : 0.736521 ± 0.072620
+  thompson             : 0.797936 ± 0.089820
+  gan                  : 0.876678 ± 0.071684
+  borderline           : 0.859724 ± 0.075678
+  monte_carlo          : 0.834767 ± 0.088759
+  final_selected       : 0.823615 ± 0.079770
+
+================================================================================
+PER-DATASET RESULTS
+================================================================================
+
+Dataset: 001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620.txt
+  Entity: 001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620
+  Runtime: 429.69s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.649628
+    Final (single): 0.779995
+
+Dataset: 002_UCR_Anomaly_DISTORTED2sddb40_35000_56600_56900.txt
+  Entity: 002_UCR_Anomaly_DISTORTED2sddb40_35000_56600_56900
+  Runtime: 439.02s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.664344
+    Final (single): 0.776465
+
+Dataset: 003_UCR_Anomaly_DISTORTED3sddb40_35000_46600_46900.txt
+  Entity: 003_UCR_Anomaly_DISTORTED3sddb40_35000_46600_46900
+  Runtime: 453.55s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.671446
+    Final (single): 0.746983
+
+Dataset: 004_UCR_Anomaly_DISTORTEDBIDMC1_2500_5400_5600.txt
+  Entity: 004_UCR_Anomaly_DISTORTEDBIDMC1_2500_5400_5600
+  Runtime: 2227.86s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.747844
+    Final (single): 0.761416
+
+Dataset: 005_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature1_4000_5391_5392.txt
+  Entity: 005_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature1_4000_5391_5392
+  Runtime: 131.46s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.627766
+    Final (single): 0.909084
+
+Dataset: 006_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature2_4000_5703_5727.txt
+  Entity: 006_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature2_4000_5703_5727
+  Runtime: 150.53s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.613023
+    Final (single): 0.999993
+
+Dataset: 007_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature3_4000_6520_6544.txt
+  Entity: 007_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature3_4000_6520_6544
+  Runtime: 43.86s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.595932
+    Final (single): 0.909084
+
+Dataset: 008_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature4_4000_5549_5597.txt
+  Entity: 008_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature4_4000_5549_5597
+  Runtime: 493.58s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.619316
+    Final (single): 0.909084
+
+Dataset: 009_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature5_4000_4852_4900.txt
+  Entity: 009_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature5_4000_4852_4900
+  Runtime: 41.68s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.606637
+    Final (single): 0.999993
+
+Dataset: 010_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature6_4000_6006_6054.txt
+  Entity: 010_UCR_Anomaly_DISTORTEDCIMIS44AirTemperature6_4000_6006_6054
+  Runtime: 312.21s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.623913
+    Final (single): 0.999993
+
+Dataset: 011_UCR_Anomaly_DISTORTEDECG1_10000_11800_12100.txt
+  Entity: 011_UCR_Anomaly_DISTORTEDECG1_10000_11800_12100
+  Runtime: 78.98s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.794509
+    Final (single): 0.807012
+
+Dataset: 012_UCR_Anomaly_DISTORTEDECG2_15000_16000_16100.txt
+  Entity: 012_UCR_Anomaly_DISTORTEDECG2_15000_16000_16100
+  Runtime: 189.87s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.815290
+    Final (single): 0.926824
+
+Dataset: 013_UCR_Anomaly_DISTORTEDECG3_15000_16000_16100.txt
+  Entity: 013_UCR_Anomaly_DISTORTEDECG3_15000_16000_16100
+  Runtime: 86.46s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.798517
+    Final (single): 0.941171
+
+Dataset: 014_UCR_Anomaly_DISTORTEDECG3_8000_17000_17100.txt
+  Entity: 014_UCR_Anomaly_DISTORTEDECG3_8000_17000_17100
+  Runtime: 86.27s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.790737
+    Final (single): 0.874995
+
+Dataset: 015_UCR_Anomaly_DISTORTEDECG4_5000_16800_17100.txt
+  Entity: 015_UCR_Anomaly_DISTORTEDECG4_5000_16800_17100
+  Runtime: 6630.04s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.712594
+    Final (single): 0.771547
+
+Dataset: 016_UCR_Anomaly_DISTORTEDECG4_5000_16900_17100.txt
+  Entity: 016_UCR_Anomaly_DISTORTEDECG4_5000_16900_17100
+  Runtime: 276.72s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.787100
+    Final (single): 0.947363
+
+Dataset: 017_UCR_Anomaly_DISTORTEDECG4_5000_17000_17100.txt
+  Entity: 017_UCR_Anomaly_DISTORTEDECG4_5000_17000_17100
+  Runtime: 101.24s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.790129
+    Final (single): 0.949147
+
+Dataset: 018_UCR_Anomaly_DISTORTEDECG4_8000_17000_17100.txt
+  Entity: 018_UCR_Anomaly_DISTORTEDECG4_8000_17000_17100
+  Runtime: 218.73s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.793875
+    Final (ensemble): 0.793875
+
+Dataset: 019_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z1_5000_6168_6212.txt
+  Entity: 019_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z1_5000_6168_6212
+  Runtime: 49.41s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.764337
+    Final (ensemble): 0.764337
+
+Dataset: 020_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z2_5000_7175_7388.txt
+  Entity: 020_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z2_5000_7175_7388
+  Runtime: 46.99s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.772769
+    Final (ensemble): 0.772769
+
+Dataset: 021_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z3_5000_5948_5993.txt
+  Entity: 021_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z3_5000_5948_5993
+  Runtime: 180.92s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.759253
+    Final (ensemble): 0.759253
+
+Dataset: 022_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z4_4000_6527_6645.txt
+  Entity: 022_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z4_4000_6527_6645
+  Runtime: 87.67s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.742670
+    Final (single): 0.952375
+
+Dataset: 023_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z5_5000_8612_8716.txt
+  Entity: 023_UCR_Anomaly_DISTORTEDGP711MarkerLFM5z5_5000_8612_8716
+  Runtime: 50.56s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.781465
+    Final (ensemble): 0.781465
+
+Dataset: 025_UCR_Anomaly_DISTORTEDInternalBleeding14_2800_5607_5634.txt
+  Entity: 025_UCR_Anomaly_DISTORTEDInternalBleeding14_2800_5607_5634
+  Runtime: 140.38s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.705856
+    Final (single): 0.799992
+
+Dataset: 026_UCR_Anomaly_DISTORTEDInternalBleeding15_1700_5684_5854.txt
+  Entity: 026_UCR_Anomaly_DISTORTEDInternalBleeding15_1700_5684_5854
+  Runtime: 1742.19s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.728211
+    Final (single): 0.830764
+
+Dataset: 027_UCR_Anomaly_DISTORTEDInternalBleeding16_1200_4187_4199.txt
+  Entity: 027_UCR_Anomaly_DISTORTEDInternalBleeding16_1200_4187_4199
+  Runtime: 1625.73s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.722257
+    Final (ensemble): 0.722257
+
+Dataset: 028_UCR_Anomaly_DISTORTEDInternalBleeding17_1600_3198_3309.txt
+  Entity: 028_UCR_Anomaly_DISTORTEDInternalBleeding17_1600_3198_3309
+  Runtime: 1248.56s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.723131
+    Final (single): 0.878044
+
+Dataset: 029_UCR_Anomaly_DISTORTEDInternalBleeding18_2300_4485_4587.txt
+  Entity: 029_UCR_Anomaly_DISTORTEDInternalBleeding18_2300_4485_4587
+  Runtime: 1515.54s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.743641
+    Final (ensemble): 0.743641
+
+Dataset: 030_UCR_Anomaly_DISTORTEDInternalBleeding19_3000_4187_4197.txt
+  Entity: 030_UCR_Anomaly_DISTORTEDInternalBleeding19_3000_4187_4197
+  Runtime: 46.95s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.708430
+    Final (single): 0.999992
+
+Dataset: 031_UCR_Anomaly_DISTORTEDInternalBleeding20_2700_5759_5919.txt
+  Entity: 031_UCR_Anomaly_DISTORTEDInternalBleeding20_2700_5759_5919
+  Runtime: 44.00s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.763643
+    Final (ensemble): 0.763643
+
+Dataset: 032_UCR_Anomaly_DISTORTEDInternalBleeding4_1000_4675_5033.txt
+  Entity: 032_UCR_Anomaly_DISTORTEDInternalBleeding4_1000_4675_5033
+  Runtime: 703.90s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.759942
+    Final (single): 0.843745
+
+Dataset: 033_UCR_Anomaly_DISTORTEDInternalBleeding5_4000_6200_6370.txt
+  Entity: 033_UCR_Anomaly_DISTORTEDInternalBleeding5_4000_6200_6370
+  Runtime: 38.89s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.729352
+    Final (single): 0.888882
+
+Dataset: 034_UCR_Anomaly_DISTORTEDInternalBleeding6_1500_3474_3629.txt
+  Entity: 034_UCR_Anomaly_DISTORTEDInternalBleeding6_1500_3474_3629
+  Runtime: 724.66s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.705783
+    Final (single): 0.859150
+
+Dataset: 035_UCR_Anomaly_DISTORTEDInternalBleeding8_2500_5865_5974.txt
+  Entity: 035_UCR_Anomaly_DISTORTEDInternalBleeding8_2500_5865_5974
+  Runtime: 549.20s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.730798
+    Final (single): 0.895100
+
+Dataset: 036_UCR_Anomaly_DISTORTEDInternalBleeding9_4200_6599_6681.txt
+  Entity: 036_UCR_Anomaly_DISTORTEDInternalBleeding9_4200_6599_6681
+  Runtime: 42.16s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.693666
+    Final (single): 0.799994
+
+Dataset: 037_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG1_5000_17210_17260.txt
+  Entity: 037_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG1_5000_17210_17260
+  Runtime: 88.66s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.630946
+    Final (single): 0.813554
+
+Dataset: 038_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG2_5000_27862_27932.txt
+  Entity: 038_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG2_5000_27862_27932
+  Runtime: 82.01s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.618482
+    Final (single): 0.687495
+
+Dataset: 039_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG3_5000_16390_16420.txt
+  Entity: 039_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG3_5000_16390_16420
+  Runtime: 86.47s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.615171
+    Final (single): 0.666661
+
+Dataset: 040_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG4_6000_17390_17520.txt
+  Entity: 040_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG4_6000_17390_17520
+  Runtime: 79.36s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.598910
+    Final (single): 0.785709
+
+Dataset: 041_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG5_7000_17390_17520.txt
+  Entity: 041_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG5_7000_17390_17520
+  Runtime: 78.33s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.583982
+    Final (single): 0.702697
+
+Dataset: 042_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG6_7000_12190_12420.txt
+  Entity: 042_UCR_Anomaly_DISTORTEDLab2Cmac011215EPG6_7000_12190_12420
+  Runtime: 83.09s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.579499
+    Final (single): 0.792448
+
+Dataset: 043_UCR_Anomaly_DISTORTEDMesoplodonDensirostris_10000_19280_19440.txt
+  Entity: 043_UCR_Anomaly_DISTORTEDMesoplodonDensirostris_10000_19280_19440
+  Runtime: 66.57s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.633426
+    Final (ensemble): 0.633426
+
+Dataset: 044_UCR_Anomaly_DISTORTEDPowerDemand1_9000_18485_18821.txt
+  Entity: 044_UCR_Anomaly_DISTORTEDPowerDemand1_9000_18485_18821
+  Runtime: 77.24s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.644409
+    Final (single): 0.774188
+
+Dataset: 045_UCR_Anomaly_DISTORTEDPowerDemand2_14000_23357_23717.txt
+  Entity: 045_UCR_Anomaly_DISTORTEDPowerDemand2_14000_23357_23717
+  Runtime: 83.12s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.668946
+    Final (single): 0.857137
+
+Dataset: 046_UCR_Anomaly_DISTORTEDPowerDemand3_16000_23405_23477.txt
+  Entity: 046_UCR_Anomaly_DISTORTEDPowerDemand3_16000_23405_23477
+  Runtime: 73.60s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.659173
+    Final (single): 0.827581
+
+Dataset: 047_UCR_Anomaly_DISTORTEDPowerDemand4_18000_24005_24077.txt
+  Entity: 047_UCR_Anomaly_DISTORTEDPowerDemand4_18000_24005_24077
+  Runtime: 75.41s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.648501
+    Final (single): 0.785709
+
+Dataset: 048_UCR_Anomaly_DISTORTEDTkeepFifthMARS_3500_5988_6085.txt
+  Entity: 048_UCR_Anomaly_DISTORTEDTkeepFifthMARS_3500_5988_6085
+  Runtime: 43.11s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.711539
+    Final (single): 0.909085
+
+Dataset: 049_UCR_Anomaly_DISTORTEDTkeepFirstMARS_3500_5365_5380.txt
+  Entity: 049_UCR_Anomaly_DISTORTEDTkeepFirstMARS_3500_5365_5380
+  Runtime: 43.24s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.734584
+    Final (single): 0.769225
+
+Dataset: 050_UCR_Anomaly_DISTORTEDTkeepForthMARS_3500_5988_6085.txt
+  Entity: 050_UCR_Anomaly_DISTORTEDTkeepForthMARS_3500_5988_6085
+  Runtime: 48.14s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.725809
+    Final (single): 0.782603
+
+Dataset: 051_UCR_Anomaly_DISTORTEDTkeepSecondMARS_3500_9330_9340.txt
+  Entity: 051_UCR_Anomaly_DISTORTEDTkeepSecondMARS_3500_9330_9340
+  Runtime: 51.83s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.709005
+    Final (single): 0.941170
+
+Dataset: 052_UCR_Anomaly_DISTORTEDTkeepThirdMARS_3500_4711_4809.txt
+  Entity: 052_UCR_Anomaly_DISTORTEDTkeepThirdMARS_3500_4711_4809
+  Runtime: 46.57s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.734943
+    Final (single): 0.799994
+
+Dataset: 053_UCR_Anomaly_DISTORTEDWalkingAceleration1_1500_2764_2995.txt
+  Entity: 053_UCR_Anomaly_DISTORTEDWalkingAceleration1_1500_2764_2995
+  Runtime: 596.78s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.633539
+    Final (single): 0.874995
+
+Dataset: 054_UCR_Anomaly_DISTORTEDWalkingAceleration5_2700_5920_5979.txt
+  Entity: 054_UCR_Anomaly_DISTORTEDWalkingAceleration5_2700_5920_5979
+  Runtime: 41.87s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.637692
+    Final (single): 0.727267
+
+Dataset: 055_UCR_Anomaly_DISTORTEDapneaecg2_10000_20950_21100.txt
+  Entity: 055_UCR_Anomaly_DISTORTEDapneaecg2_10000_20950_21100
+  Runtime: 97.74s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.719724
+    Final (single): 0.857138
+
+Dataset: 056_UCR_Anomaly_DISTORTEDapneaecg3_5000_11111_11211.txt
+  Entity: 056_UCR_Anomaly_DISTORTEDapneaecg3_5000_11111_11211
+  Runtime: 287.65s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.712193
+    Final (single): 0.727267
+
+Dataset: 057_UCR_Anomaly_DISTORTEDapneaecg4_6000_16000_16100.txt
+  Entity: 057_UCR_Anomaly_DISTORTEDapneaecg4_6000_16000_16100
+  Runtime: 304.56s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.723298
+    Final (ensemble): 0.723298
+
+Dataset: 058_UCR_Anomaly_DISTORTEDapneaecg_10000_12240_12308.txt
+  Entity: 058_UCR_Anomaly_DISTORTEDapneaecg_10000_12240_12308
+  Runtime: 103.87s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.730622
+    Final (single): 0.741930
+
+Dataset: 059_UCR_Anomaly_DISTORTEDgait1_20000_38500_38800.txt
+  Entity: 059_UCR_Anomaly_DISTORTEDgait1_20000_38500_38800
+  Runtime: 380.93s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.807036
+    Final (single): 0.842100
+
+Dataset: 060_UCR_Anomaly_DISTORTEDgait2_22000_46500_46800.txt
+  Entity: 060_UCR_Anomaly_DISTORTEDgait2_22000_46500_46800
+  Runtime: 464.60s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.811189
+    Final (single): 0.840904
+
+Dataset: 061_UCR_Anomaly_DISTORTEDgait3_24500_59900_60500.txt
+  Entity: 061_UCR_Anomaly_DISTORTEDgait3_24500_59900_60500
+  Runtime: 383.36s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.801505
+    Final (ensemble): 0.801505
+
+Dataset: 062_UCR_Anomaly_DISTORTEDgaitHunt1_18500_33070_33180.txt
+  Entity: 062_UCR_Anomaly_DISTORTEDgaitHunt1_18500_33070_33180
+  Runtime: 401.17s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.774004
+    Final (ensemble): 0.774004
+
+Dataset: 063_UCR_Anomaly_DISTORTEDgaitHunt2_18500_31200_31850.txt
+  Entity: 063_UCR_Anomaly_DISTORTEDgaitHunt2_18500_31200_31850
+  Runtime: 403.59s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.780864
+    Final (single): 0.826918
+
+Dataset: 064_UCR_Anomaly_DISTORTEDgaitHunt3_23400_38400_39200.txt
+  Entity: 064_UCR_Anomaly_DISTORTEDgaitHunt3_23400_38400_39200
+  Runtime: 434.09s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.813115
+    Final (single): 0.942303
+
+Dataset: 065_UCR_Anomaly_DISTORTEDinsectEPG1_3000_7000_7030.txt
+  Entity: 065_UCR_Anomaly_DISTORTEDinsectEPG1_3000_7000_7030
+  Runtime: 49.44s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.701175
+    Final (single): 0.799994
+
+Dataset: 066_UCR_Anomaly_DISTORTEDinsectEPG2_3700_8000_8025.txt
+  Entity: 066_UCR_Anomaly_DISTORTEDinsectEPG2_3700_8000_8025
+  Runtime: 47.16s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.719693
+    Final (single): 0.909084
+
+Dataset: 067_UCR_Anomaly_DISTORTEDinsectEPG3_5200_7000_7050.txt
+  Entity: 067_UCR_Anomaly_DISTORTEDinsectEPG3_5200_7000_7050
+  Runtime: 47.11s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.676005
+    Final (single): 0.714280
+
+Dataset: 068_UCR_Anomaly_DISTORTEDinsectEPG4_1300_6508_6558.txt
+  Entity: 068_UCR_Anomaly_DISTORTEDinsectEPG4_1300_6508_6558
+  Runtime: 2020.96s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.798657
+    Final (ensemble): 0.798657
+
+Dataset: 069_UCR_Anomaly_DISTORTEDinsectEPG5_3200_8500_8501.txt
+  Entity: 069_UCR_Anomaly_DISTORTEDinsectEPG5_3200_8500_8501
+  Runtime: 42.65s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.704100
+    Final (single): 0.769225
+
+Dataset: 070_UCR_Anomaly_DISTORTEDltstdbs30791AI_17555_52600_52800.txt
+  Entity: 070_UCR_Anomaly_DISTORTEDltstdbs30791AI_17555_52600_52800
+  Runtime: 340.93s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.832394
+    Final (ensemble): 0.832394
+
+Dataset: 071_UCR_Anomaly_DISTORTEDltstdbs30791AS_23000_52600_52800.txt
+  Entity: 071_UCR_Anomaly_DISTORTEDltstdbs30791AS_23000_52600_52800
+  Runtime: 323.44s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.776107
+    Final (single): 0.897431
+
+Dataset: 072_UCR_Anomaly_DISTORTEDltstdbs30791ES_20000_52600_52800.txt
+  Entity: 072_UCR_Anomaly_DISTORTEDltstdbs30791ES_20000_52600_52800
+  Runtime: 307.34s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.616003
+    Final (ensemble): 0.616003
+
+Dataset: 073_UCR_Anomaly_DISTORTEDpark3m_60000_72150_72495.txt
+  Entity: 073_UCR_Anomaly_DISTORTEDpark3m_60000_72150_72495
+  Runtime: 190.69s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.769770
+    Final (single): 0.843745
+
+Dataset: 074_UCR_Anomaly_DISTORTEDqtdbSel1005V_4000_12400_12800.txt
+  Entity: 074_UCR_Anomaly_DISTORTEDqtdbSel1005V_4000_12400_12800
+  Runtime: 321.33s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.727808
+    Final (single): 0.873234
+
+Dataset: 075_UCR_Anomaly_DISTORTEDqtdbSel100MLII_4000_13400_13800.txt
+  Entity: 075_UCR_Anomaly_DISTORTEDqtdbSel100MLII_4000_13400_13800
+  Runtime: 86.47s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.778084
+    Final (single): 0.888884
+
+Dataset: 076_UCR_Anomaly_DISTORTEDresperation10_48000_130700_131880.txt
+  Entity: 076_UCR_Anomaly_DISTORTEDresperation10_48000_130700_131880
+  Runtime: 2492.62s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.763273
+    Final (single): 0.812303
+
+Dataset: 077_UCR_Anomaly_DISTORTEDresperation11_58000_110800_110801.txt
+  Entity: 077_UCR_Anomaly_DISTORTEDresperation11_58000_110800_110801
+  Runtime: 3116.91s
+  Avg Memory: 107.05 MB
+  Peak Memory: 112.08 MB
+  F1 Scores:
+    GA Ensemble: 0.774330
+    Final (single): 0.831610
+
+Dataset: 078_UCR_Anomaly_DISTORTEDresperation1_100000_110260_110412.txt
+  Entity: 078_UCR_Anomaly_DISTORTEDresperation1_100000_110260_110412
+  Runtime: 4949.85s
+  Avg Memory: 0.00 MB
+  Peak Memory: 0.00 MB
+  F1 Scores:
+    GA Ensemble: 0.726064
+    Final (single): 0.904972
+
+Dataset: 080_UCR_Anomaly_DISTORTEDresperation2_30000_168250_168251.txt
+  Entity: 080_UCR_Anomaly_DISTORTEDresperation2_30000_168250_168251
+  Runtime: 1754.88s
+  Avg Memory: 111.12 MB
+  Peak Memory: 112.58 MB
+  F1 Scores:
+    GA Ensemble: 0.765827
+    Final (single): 0.819583
+
+Dataset: 081_UCR_Anomaly_DISTORTEDresperation3_45000_158250_158251.txt
+  Entity: 081_UCR_Anomaly_DISTORTEDresperation3_45000_158250_158251
+  Runtime: 2227.84s
+  Avg Memory: 113.30 MB
+  Peak Memory: 115.85 MB
+  F1 Scores:
+    GA Ensemble: 0.761036
+    Final (single): 0.853498
+
+Dataset: 082_UCR_Anomaly_DISTORTEDresperation4_70000_128430_128431.txt
+  Entity: 082_UCR_Anomaly_DISTORTEDresperation4_70000_128430_128431
+  Runtime: 2540.97s
+  Avg Memory: 113.49 MB
+  Peak Memory: 116.93 MB
+  F1 Scores:
+    GA Ensemble: 0.725881
+    Final (single): 0.731539
+
+Dataset: 083_UCR_Anomaly_DISTORTEDresperation9_38000_143411_143511.txt
+  Entity: 083_UCR_Anomaly_DISTORTEDresperation9_38000_143411_143511
+  Runtime: 2760.68s
+  Avg Memory: 115.05 MB
+  Peak Memory: 119.75 MB
+  F1 Scores:
+    GA Ensemble: 0.756622
+    Final (single): 0.830298
+
+Dataset: 084_UCR_Anomaly_DISTORTEDs20101mML2_12000_35774_35874.txt
+  Entity: 084_UCR_Anomaly_DISTORTEDs20101mML2_12000_35774_35874
+  Runtime: 308.38s
+  Avg Memory: 116.17 MB
+  Peak Memory: 116.48 MB
+  F1 Scores:
+    GA Ensemble: 0.786439
+    Final (single): 0.792448
+
+Dataset: 085_UCR_Anomaly_DISTORTEDs20101m_10000_35774_35874.txt
+  Entity: 085_UCR_Anomaly_DISTORTEDs20101m_10000_35774_35874
+  Runtime: 318.11s
+  Avg Memory: 116.59 MB
+  Peak Memory: 116.60 MB
+  F1 Scores:
+    GA Ensemble: 0.682589
+    Final (single): 0.688520
+
+Dataset: 086_UCR_Anomaly_DISTORTEDsddb49_20000_67950_68200.txt
+  Entity: 086_UCR_Anomaly_DISTORTEDsddb49_20000_67950_68200
+  Runtime: 961.38s
+  Avg Memory: 116.63 MB
+  Peak Memory: 116.63 MB
+  F1 Scores:
+    GA Ensemble: 0.679622
+    Final (single): 0.840575
+
+Dataset: 087_UCR_Anomaly_DISTORTEDsel840mECG1_17000_51370_51740.txt
+  Entity: 087_UCR_Anomaly_DISTORTEDsel840mECG1_17000_51370_51740
+  Runtime: 649.43s
+  Avg Memory: 116.80 MB
+  Peak Memory: 116.80 MB
+  F1 Scores:
+    GA Ensemble: 0.774213
+    Final (single): 0.851059
+
+Dataset: 088_UCR_Anomaly_DISTORTEDsel840mECG2_20000_49370_49740.txt
+  Entity: 088_UCR_Anomaly_DISTORTEDsel840mECG2_20000_49370_49740
+  Runtime: 553.54s
+  Avg Memory: 116.80 MB
+  Peak Memory: 116.80 MB
+  F1 Scores:
+    GA Ensemble: 0.607031
+    Final (single): 0.756092
+
+Dataset: 089_UCR_Anomaly_DISTORTEDtiltAPB1_100000_114283_114350.txt
+  Entity: 089_UCR_Anomaly_DISTORTEDtiltAPB1_100000_114283_114350
+  Runtime: 769.15s
+  Avg Memory: 116.80 MB
+  Peak Memory: 116.80 MB
+  F1 Scores:
+    GA Ensemble: 0.638597
+    Final (ensemble): 0.638597
+
+Dataset: 090_UCR_Anomaly_DISTORTEDtiltAPB2_50000_124159_124985.txt
+  Entity: 090_UCR_Anomaly_DISTORTEDtiltAPB2_50000_124159_124985
+  Runtime: 1217.99s
+  Avg Memory: 116.80 MB
+  Peak Memory: 116.87 MB
+  F1 Scores:
+    GA Ensemble: 0.666164
+    Final (single): 0.831456
+
+Dataset: 091_UCR_Anomaly_DISTORTEDtiltAPB3_40000_114000_114370.txt
+  Entity: 091_UCR_Anomaly_DISTORTEDtiltAPB3_40000_114000_114370
+  Runtime: 2420.00s
+  Avg Memory: 117.07 MB
+  Peak Memory: 117.07 MB
+  F1 Scores:
+    GA Ensemble: 0.666755
+    Final (single): 0.844439
+
+Dataset: 092_UCR_Anomaly_DISTORTEDtiltAPB4_20000_67995_67996.txt
+  Entity: 092_UCR_Anomaly_DISTORTEDtiltAPB4_20000_67995_67996
+  Runtime: 2067.46s
+  Avg Memory: 117.38 MB
+  Peak Memory: 117.38 MB
+  F1 Scores:
+    GA Ensemble: 0.673758
+    Final (single): 0.763631
+
+Dataset: 093_UCR_Anomaly_NOISE1sddb40_35000_52000_52620.txt
+  Entity: 093_UCR_Anomaly_NOISE1sddb40_35000_52000_52620
+  Runtime: 750.62s
+  Avg Memory: 116.07 MB
+  Peak Memory: 116.63 MB
+  F1 Scores:
+    GA Ensemble: 0.656962
+    Final (single): 0.860460
+
+Dataset: 094_UCR_Anomaly_NOISEBIDMC1_2500_5400_5600.txt
+  Entity: 094_UCR_Anomaly_NOISEBIDMC1_2500_5400_5600
+  Runtime: 1172.80s
+  Avg Memory: 116.80 MB
+  Peak Memory: 117.00 MB
+  F1 Scores:
+    GA Ensemble: 0.756557
+    Final (ensemble): 0.756557
+
+Dataset: 095_UCR_Anomaly_NOISECIMIS44AirTemperature4_4000_5549_5597.txt
+  Entity: 095_UCR_Anomaly_NOISECIMIS44AirTemperature4_4000_5549_5597
+  Runtime: 203.70s
+  Avg Memory: 117.09 MB
+  Peak Memory: 117.09 MB
+  F1 Scores:
+    GA Ensemble: 0.607220
+    Final (single): 0.909084
+
+Dataset: 096_UCR_Anomaly_NOISEECG4_5000_16900_17100.txt
+  Entity: 096_UCR_Anomaly_NOISEECG4_5000_16900_17100
+  Runtime: 240.03s
+  Avg Memory: 117.09 MB
+  Peak Memory: 117.09 MB
+  F1 Scores:
+    GA Ensemble: 0.798277
+    Final (single): 0.966661
+
+Dataset: 097_UCR_Anomaly_NOISEGP711MarkerLFM5z3_5000_5948_5993.txt
+  Entity: 097_UCR_Anomaly_NOISEGP711MarkerLFM5z3_5000_5948_5993
+  Runtime: 201.25s
+  Avg Memory: 117.09 MB
+  Peak Memory: 117.09 MB
+  F1 Scores:
+    GA Ensemble: 0.782571
+    Final (single): 0.857136
+
+Dataset: 098_UCR_Anomaly_NOISEInternalBleeding16_1200_4187_4199.txt
+  Entity: 098_UCR_Anomaly_NOISEInternalBleeding16_1200_4187_4199
+  Runtime: 876.14s
+  Avg Memory: 117.20 MB
+  Peak Memory: 117.20 MB
+  F1 Scores:
+    GA Ensemble: 0.755428
+    Final (single): 0.797292
+
+Dataset: 099_UCR_Anomaly_NOISEInternalBleeding6_1500_3474_3629.txt
+  Entity: 099_UCR_Anomaly_NOISEInternalBleeding6_1500_3474_3629
+  Runtime: 926.29s
+  Avg Memory: 117.20 MB
+  Peak Memory: 117.20 MB
+  F1 Scores:
+    GA Ensemble: 0.733233
+    Final (single): 0.839281
+
+Dataset: 100_UCR_Anomaly_NOISELab2Cmac011215EPG1_5000_17210_17260.txt
+  Entity: 100_UCR_Anomaly_NOISELab2Cmac011215EPG1_5000_17210_17260
+  Runtime: 245.92s
+  Avg Memory: 117.33 MB
+  Peak Memory: 117.33 MB
+  F1 Scores:
+    GA Ensemble: 0.633123
+    Final (single): 0.785709
+
+Dataset: 101_UCR_Anomaly_NOISELab2Cmac011215EPG4_6000_17390_17520.txt
+  Entity: 101_UCR_Anomaly_NOISELab2Cmac011215EPG4_6000_17390_17520
+  Runtime: 249.13s
+  Avg Memory: 117.33 MB
+  Peak Memory: 117.33 MB
+  F1 Scores:
+    GA Ensemble: 0.597206
+    Final (single): 0.799995
+
+Dataset: 102_UCR_Anomaly_NOISEMesoplodonDensirostris_10000_19280_19440.txt
+  Entity: 102_UCR_Anomaly_NOISEMesoplodonDensirostris_10000_19280_19440
+  Runtime: 259.54s
+  Avg Memory: 126.94 MB
+  Peak Memory: 144.06 MB
+  F1 Scores:
+    GA Ensemble: 0.625862
+    Final (single): 0.719995
+
+Dataset: 103_UCR_Anomaly_NOISETkeepThirdMARS_3500_4711_4809.txt
+  Entity: 103_UCR_Anomaly_NOISETkeepThirdMARS_3500_4711_4809
+  Runtime: 190.46s
+  Avg Memory: 121.69 MB
+  Peak Memory: 121.70 MB
+  F1 Scores:
+    GA Ensemble: 0.754422
+    Final (single): 0.941170
+
+Dataset: 104_UCR_Anomaly_NOISEapneaecg4_6000_16000_16100.txt
+  Entity: 104_UCR_Anomaly_NOISEapneaecg4_6000_16000_16100
+  Runtime: 444.34s
+  Avg Memory: 121.70 MB
+  Peak Memory: 121.71 MB
+  F1 Scores:
+    GA Ensemble: 0.725301
+    Final (ensemble): 0.725301
+
+Dataset: 105_UCR_Anomaly_NOISEgait3_24500_59900_60500.txt
+  Entity: 105_UCR_Anomaly_NOISEgait3_24500_59900_60500
+  Runtime: 671.89s
+  Avg Memory: 121.71 MB
+  Peak Memory: 121.71 MB
+  F1 Scores:
+    GA Ensemble: 0.830256
+    Final (ensemble): 0.830256
+
+Dataset: 106_UCR_Anomaly_NOISEgaitHunt2_18500_31200_31850.txt
+  Entity: 106_UCR_Anomaly_NOISEgaitHunt2_18500_31200_31850
+  Runtime: 637.57s
+  Avg Memory: 121.71 MB
+  Peak Memory: 121.71 MB
+  F1 Scores:
+    GA Ensemble: 0.812438
+    Final (ensemble): 0.812438
+
+Dataset: 107_UCR_Anomaly_NOISEinsectEPG3_5200_7000_7050.txt
+  Entity: 107_UCR_Anomaly_NOISEinsectEPG3_5200_7000_7050
+  Runtime: 201.18s
+  Avg Memory: 121.71 MB
+  Peak Memory: 121.71 MB
+  F1 Scores:
+    GA Ensemble: 0.708603
+    Final (single): 0.909084
+
+Dataset: 108_UCR_Anomaly_NOISEresperation2_30000_168250_168250.txt
+  Entity: 108_UCR_Anomaly_NOISEresperation2_30000_168250_168250
+  Runtime: 2270.47s
+  Avg Memory: 121.74 MB
+  Peak Memory: 122.20 MB
+  F1 Scores:
+    GA Ensemble: 0.773702
+    Final (single): 0.830941
+
+Dataset: 109_UCR_Anomaly_1sddb40_35000_52000_52620.txt
+  Entity: 109_UCR_Anomaly_1sddb40_35000_52000_52620
+  Runtime: 744.45s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.702025
+    Final (single): 0.746264
+
+Dataset: 110_UCR_Anomaly_2sddb40_35000_56600_56900.txt
+  Entity: 110_UCR_Anomaly_2sddb40_35000_56600_56900
+  Runtime: 693.04s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.697139
+    Final (single): 0.735627
+
+Dataset: 111_UCR_Anomaly_3sddb40_35000_46600_46900.txt
+  Entity: 111_UCR_Anomaly_3sddb40_35000_46600_46900
+  Runtime: 755.83s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.704251
+    Final (ensemble): 0.704251
+
+Dataset: 112_UCR_Anomaly_BIDMC1_2500_5400_5600.txt
+  Entity: 112_UCR_Anomaly_BIDMC1_2500_5400_5600
+  Runtime: 1079.06s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.843937
+    Final (ensemble): 0.843937
+
+Dataset: 113_UCR_Anomaly_CIMIS44AirTemperature1_4000_5391_5392.txt
+  Entity: 113_UCR_Anomaly_CIMIS44AirTemperature1_4000_5391_5392
+  Runtime: 188.65s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.628509
+    Final (single): 0.999993
+
+Dataset: 114_UCR_Anomaly_CIMIS44AirTemperature2_4000_5703_5727.txt
+  Entity: 114_UCR_Anomaly_CIMIS44AirTemperature2_4000_5703_5727
+  Runtime: 186.90s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.628340
+    Final (single): 0.999993
+
+Dataset: 115_UCR_Anomaly_CIMIS44AirTemperature3_4000_6520_6544.txt
+  Entity: 115_UCR_Anomaly_CIMIS44AirTemperature3_4000_6520_6544
+  Runtime: 185.32s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.623579
+    Final (single): 0.999993
+
+Dataset: 116_UCR_Anomaly_CIMIS44AirTemperature4_4000_5549_5597.txt
+  Entity: 116_UCR_Anomaly_CIMIS44AirTemperature4_4000_5549_5597
+  Runtime: 184.66s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.617959
+    Final (single): 0.999993
+
+Dataset: 117_UCR_Anomaly_CIMIS44AirTemperature5_4000_4852_4900.txt
+  Entity: 117_UCR_Anomaly_CIMIS44AirTemperature5_4000_4852_4900
+  Runtime: 195.20s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.623136
+    Final (single): 0.999993
+
+Dataset: 118_UCR_Anomaly_CIMIS44AirTemperature6_4000_6006_6054.txt
+  Entity: 118_UCR_Anomaly_CIMIS44AirTemperature6_4000_6006_6054
+  Runtime: 188.12s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.626960
+    Final (single): 0.999993
+
+Dataset: 119_UCR_Anomaly_ECG1_10000_11800_12100.txt
+  Entity: 119_UCR_Anomaly_ECG1_10000_11800_12100
+  Runtime: 257.54s
+  Avg Memory: 122.23 MB
+  Peak Memory: 122.23 MB
+  F1 Scores:
+    GA Ensemble: 0.852605
+    Final (ensemble): 0.852605
+
+Dataset: 120_UCR_Anomaly_ECG2_15000_16000_16100.txt
+  Entity: 120_UCR_Anomaly_ECG2_15000_16000_16100
+  Runtime: 288.11s
+  Avg Memory: 129.85 MB
+  Peak Memory: 147.73 MB
+  F1 Scores:
+    GA Ensemble: 0.883116
+    Final (ensemble): 0.883116
+
+Dataset: 121_UCR_Anomaly_ECG3_15000_16000_16100.txt
+  Entity: 121_UCR_Anomaly_ECG3_15000_16000_16100
+  Runtime: 312.89s
+  Avg Memory: 129.33 MB
+  Peak Memory: 149.09 MB
+  F1 Scores:
+    GA Ensemble: 0.840599
+    Final (single): 0.857137
+
+Dataset: 122_UCR_Anomaly_ECG3_8000_17000_17100.txt
+  Entity: 122_UCR_Anomaly_ECG3_8000_17000_17100
+  Runtime: 256.67s
+  Avg Memory: 122.16 MB
+  Peak Memory: 122.41 MB
+  F1 Scores:
+    GA Ensemble: 0.816941
+    Final (single): 0.833328
+
+Dataset: 123_UCR_Anomaly_ECG4_5000_16800_17100.txt
+  Entity: 123_UCR_Anomaly_ECG4_5000_16800_17100
+  Runtime: 3214.22s
+  Avg Memory: 123.61 MB
+  Peak Memory: 126.17 MB
+  F1 Scores:
+    GA Ensemble: 0.736124
+    Final (single): 0.774843
+
+Dataset: 124_UCR_Anomaly_ECG4_5000_16900_17100.txt
+  Entity: 124_UCR_Anomaly_ECG4_5000_16900_17100
+  Runtime: 257.89s
+  Avg Memory: 126.18 MB
+  Peak Memory: 126.18 MB
+  F1 Scores:
+    GA Ensemble: 0.815286
+    Final (single): 0.949147
+
+Dataset: 125_UCR_Anomaly_ECG4_5000_17000_17100.txt
+  Entity: 125_UCR_Anomaly_ECG4_5000_17000_17100
+  Runtime: 259.39s
+  Avg Memory: 126.18 MB
+  Peak Memory: 126.18 MB
+  F1 Scores:
+    GA Ensemble: 0.815439
+    Final (single): 0.949147
+
+Dataset: 126_UCR_Anomaly_ECG4_8000_17000_17100.txt
+  Entity: 126_UCR_Anomaly_ECG4_8000_17000_17100
+  Runtime: 272.67s
+  Avg Memory: 126.18 MB
+  Peak Memory: 126.18 MB
+  F1 Scores:
+    GA Ensemble: 0.816856
+    Final (single): 0.833328
+
+Dataset: 127_UCR_Anomaly_GP711MarkerLFM5z1_5000_6168_6212.txt
+  Entity: 127_UCR_Anomaly_GP711MarkerLFM5z1_5000_6168_6212
+  Runtime: 219.41s
+  Avg Memory: 126.28 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.810748
+    Final (ensemble): 0.810748
+
+Dataset: 128_UCR_Anomaly_GP711MarkerLFM5z2_5000_7175_7388.txt
+  Entity: 128_UCR_Anomaly_GP711MarkerLFM5z2_5000_7175_7388
+  Runtime: 196.44s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.798383
+    Final (ensemble): 0.798383
+
+Dataset: 129_UCR_Anomaly_GP711MarkerLFM5z3_5000_5948_5993.txt
+  Entity: 129_UCR_Anomaly_GP711MarkerLFM5z3_5000_5948_5993
+  Runtime: 206.67s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.807670
+    Final (ensemble): 0.807670
+
+Dataset: 130_UCR_Anomaly_GP711MarkerLFM5z4_4000_6527_6645.txt
+  Entity: 130_UCR_Anomaly_GP711MarkerLFM5z4_4000_6527_6645
+  Runtime: 199.35s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.764291
+    Final (single): 0.999994
+
+Dataset: 131_UCR_Anomaly_GP711MarkerLFM5z5_5000_8612_8716.txt
+  Entity: 131_UCR_Anomaly_GP711MarkerLFM5z5_5000_8612_8716
+  Runtime: 203.51s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.807903
+    Final (ensemble): 0.807903
+
+Dataset: 132_UCR_Anomaly_InternalBleeding10_3200_4526_4556.txt
+  Entity: 132_UCR_Anomaly_InternalBleeding10_3200_4526_4556
+  Runtime: 184.85s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.749464
+    Final (single): 0.799992
+
+Dataset: 133_UCR_Anomaly_InternalBleeding14_2800_5607_5634.txt
+  Entity: 133_UCR_Anomaly_InternalBleeding14_2800_5607_5634
+  Runtime: 181.94s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.714940
+    Final (single): 0.799992
+
+Dataset: 134_UCR_Anomaly_InternalBleeding15_1700_5684_5854.txt
+  Entity: 134_UCR_Anomaly_InternalBleeding15_1700_5684_5854
+  Runtime: 912.31s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.738247
+    Final (single): 0.838230
+
+Dataset: 136_UCR_Anomaly_InternalBleeding17_1600_3198_3309.txt
+  Entity: 136_UCR_Anomaly_InternalBleeding17_1600_3198_3309
+  Runtime: 882.50s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.754162
+    Final (single): 0.862064
+
+Dataset: 137_UCR_Anomaly_InternalBleeding18_2300_4485_4587.txt
+  Entity: 137_UCR_Anomaly_InternalBleeding18_2300_4485_4587
+  Runtime: 847.63s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.728553
+    Final (single): 0.774643
+
+Dataset: 138_UCR_Anomaly_InternalBleeding19_3000_4187_4197.txt
+  Entity: 138_UCR_Anomaly_InternalBleeding19_3000_4187_4197
+  Runtime: 177.34s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.718405
+    Final (single): 0.999992
+
+Dataset: 139_UCR_Anomaly_InternalBleeding20_2700_5759_5919.txt
+  Entity: 139_UCR_Anomaly_InternalBleeding20_2700_5759_5919
+  Runtime: 178.75s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.758129
+    Final (ensemble): 0.758129
+
+Dataset: 140_UCR_Anomaly_InternalBleeding4_1000_4675_5033.txt
+  Entity: 140_UCR_Anomaly_InternalBleeding4_1000_4675_5033
+  Runtime: 919.87s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.762471
+    Final (single): 0.799995
+
+Dataset: 141_UCR_Anomaly_InternalBleeding5_4000_6200_6370.txt
+  Entity: 141_UCR_Anomaly_InternalBleeding5_4000_6200_6370
+  Runtime: 185.03s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.757458
+    Final (single): 0.999993
+
+Dataset: 142_UCR_Anomaly_InternalBleeding6_1500_3474_3629.txt
+  Entity: 142_UCR_Anomaly_InternalBleeding6_1500_3474_3629
+  Runtime: 952.26s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.742154
+    Final (single): 0.813003
+
+Dataset: 143_UCR_Anomaly_InternalBleeding8_2500_5865_5974.txt
+  Entity: 143_UCR_Anomaly_InternalBleeding8_2500_5865_5974
+  Runtime: 908.43s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.743600
+    Final (single): 0.900758
+
+Dataset: 144_UCR_Anomaly_InternalBleeding9_4200_6599_6681.txt
+  Entity: 144_UCR_Anomaly_InternalBleeding9_4200_6599_6681
+  Runtime: 187.73s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.708217
+    Final (single): 0.799994
+
+Dataset: 145_UCR_Anomaly_Lab2Cmac011215EPG1_5000_17210_17260.txt
+  Entity: 145_UCR_Anomaly_Lab2Cmac011215EPG1_5000_17210_17260
+  Runtime: 249.11s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.760648
+    Final (single): 0.792448
+
+Dataset: 146_UCR_Anomaly_Lab2Cmac011215EPG2_5000_27862_27932.txt
+  Entity: 146_UCR_Anomaly_Lab2Cmac011215EPG2_5000_27862_27932
+  Runtime: 234.29s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.749896
+    Final (single): 0.837204
+
+Dataset: 147_UCR_Anomaly_Lab2Cmac011215EPG3_5000_16390_16420.txt
+  Entity: 147_UCR_Anomaly_Lab2Cmac011215EPG3_5000_16390_16420
+  Runtime: 230.44s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.746954
+    Final (single): 0.837204
+
+Dataset: 148_UCR_Anomaly_Lab2Cmac011215EPG4_6000_17390_17520.txt
+  Entity: 148_UCR_Anomaly_Lab2Cmac011215EPG4_6000_17390_17520
+  Runtime: 239.42s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.732985
+    Final (ensemble): 0.732985
+
+Dataset: 149_UCR_Anomaly_Lab2Cmac011215EPG5_7000_17390_17520.txt
+  Entity: 149_UCR_Anomaly_Lab2Cmac011215EPG5_7000_17390_17520
+  Runtime: 247.28s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.761562
+    Final (single): 0.780482
+
+Dataset: 150_UCR_Anomaly_Lab2Cmac011215EPG6_7000_12190_12420.txt
+  Entity: 150_UCR_Anomaly_Lab2Cmac011215EPG6_7000_12190_12420
+  Runtime: 253.99s
+  Avg Memory: 126.29 MB
+  Peak Memory: 126.29 MB
+  F1 Scores:
+    GA Ensemble: 0.741350
+    Final (single): 0.775505
+
+Dataset: 151_UCR_Anomaly_MesoplodonDensirostris_10000_19280_19440.txt
+  Entity: 151_UCR_Anomaly_MesoplodonDensirostris_10000_19280_19440
+  Runtime: 261.95s
+  Avg Memory: 131.05 MB
+  Peak Memory: 146.40 MB
+  F1 Scores:
+    GA Ensemble: 0.642004
+    Final (single): 0.727267
+
+Dataset: 152_UCR_Anomaly_PowerDemand1_9000_18485_18821.txt
+  Entity: 152_UCR_Anomaly_PowerDemand1_9000_18485_18821
+  Runtime: 266.15s
+  Avg Memory: 124.42 MB
+  Peak Memory: 124.73 MB
+  F1 Scores:
+    GA Ensemble: 0.646433
+    Final (single): 0.714280
+
+Dataset: 153_UCR_Anomaly_PowerDemand2_14000_23357_23717.txt
+  Entity: 153_UCR_Anomaly_PowerDemand2_14000_23357_23717
+  Runtime: 289.07s
+  Avg Memory: 134.18 MB
+  Peak Memory: 154.14 MB
+  F1 Scores:
+    GA Ensemble: 0.673888
+    Final (single): 0.838704
+
+Dataset: 154_UCR_Anomaly_PowerDemand3_16000_23405_23477.txt
+  Entity: 154_UCR_Anomaly_PowerDemand3_16000_23405_23477
+  Runtime: 303.32s
+  Avg Memory: 130.61 MB
+  Peak Memory: 141.81 MB
+  F1 Scores:
+    GA Ensemble: 0.672228
+    Final (single): 0.896546
+
+Dataset: 155_UCR_Anomaly_PowerDemand4_18000_24005_24077.txt
+  Entity: 155_UCR_Anomaly_PowerDemand4_18000_24005_24077
+  Runtime: 313.17s
+  Avg Memory: 130.24 MB
+  Peak Memory: 133.55 MB
+  F1 Scores:
+    GA Ensemble: 0.660166
+    Final (single): 0.761899
+
+Dataset: 156_UCR_Anomaly_TkeepFifthMARS_3500_5988_6085.txt
+  Entity: 156_UCR_Anomaly_TkeepFifthMARS_3500_5988_6085
+  Runtime: 194.71s
+  Avg Memory: 129.40 MB
+  Peak Memory: 130.43 MB
+  F1 Scores:
+    GA Ensemble: 0.749860
+    Final (single): 0.952375
+
+Dataset: 157_UCR_Anomaly_TkeepFirstMARS_3500_5365_5380.txt
+  Entity: 157_UCR_Anomaly_TkeepFirstMARS_3500_5365_5380
+  Runtime: 199.64s
+  Avg Memory: 130.43 MB
+  Peak Memory: 130.43 MB
+  F1 Scores:
+    GA Ensemble: 0.743714
+    Final (single): 0.799994
+
+Dataset: 158_UCR_Anomaly_TkeepForthMARS_3500_5988_6085.txt
+  Entity: 158_UCR_Anomaly_TkeepForthMARS_3500_5988_6085
+  Runtime: 190.03s
+  Avg Memory: 130.43 MB
+  Peak Memory: 130.58 MB
+  F1 Scores:
+    GA Ensemble: 0.750553
+    Final (single): 0.782603
+
+Dataset: 159_UCR_Anomaly_TkeepSecondMARS_3500_9330_9340.txt
+  Entity: 159_UCR_Anomaly_TkeepSecondMARS_3500_9330_9340
+  Runtime: 190.28s
+  Avg Memory: 130.80 MB
+  Peak Memory: 130.80 MB
+  F1 Scores:
+    GA Ensemble: 0.750506
+    Final (single): 0.899994
+
+Dataset: 160_UCR_Anomaly_TkeepThirdMARS_3500_4711_4809.txt
+  Entity: 160_UCR_Anomaly_TkeepThirdMARS_3500_4711_4809
+  Runtime: 198.27s
+  Avg Memory: 130.80 MB
+  Peak Memory: 130.80 MB
+  F1 Scores:
+    GA Ensemble: 0.746694
+    Final (single): 0.874994
+
+Dataset: 161_UCR_Anomaly_WalkingAceleration1_1500_2764_2995.txt
+  Entity: 161_UCR_Anomaly_WalkingAceleration1_1500_2764_2995
+  Runtime: 838.34s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.614496
+    Final (single): 0.876028
+
+Dataset: 162_UCR_Anomaly_WalkingAceleration5_2700_5920_5979.txt
+  Entity: 162_UCR_Anomaly_WalkingAceleration5_2700_5920_5979
+  Runtime: 179.22s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.621457
+    Final (single): 0.888882
+
+Dataset: 163_UCR_Anomaly_apneaecg2_10000_20950_21100.txt
+  Entity: 163_UCR_Anomaly_apneaecg2_10000_20950_21100
+  Runtime: 281.03s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.756271
+    Final (single): 0.812495
+
+Dataset: 164_UCR_Anomaly_apneaecg3_5000_11111_11211.txt
+  Entity: 164_UCR_Anomaly_apneaecg3_5000_11111_11211
+  Runtime: 421.92s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.732450
+    Final (single): 0.823524
+
+Dataset: 165_UCR_Anomaly_apneaecg4_6000_16000_16100.txt
+  Entity: 165_UCR_Anomaly_apneaecg4_6000_16000_16100
+  Runtime: 447.51s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.744720
+    Final (single): 0.749995
+
+Dataset: 166_UCR_Anomaly_apneaecg_10000_12240_12308.txt
+  Entity: 166_UCR_Anomaly_apneaecg_10000_12240_12308
+  Runtime: 285.71s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.758551
+    Final (single): 0.777773
+
+Dataset: 167_UCR_Anomaly_gait1_20000_38500_38800.txt
+  Entity: 167_UCR_Anomaly_gait1_20000_38500_38800
+  Runtime: 1009.60s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.842385
+    Final (ensemble): 0.842385
+
+Dataset: 168_UCR_Anomaly_gait2_22000_46500_46800.txt
+  Entity: 168_UCR_Anomaly_gait2_22000_46500_46800
+  Runtime: 681.80s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.844059
+    Final (single): 0.864192
+
+Dataset: 169_UCR_Anomaly_gait3_24500_59900_60500.txt
+  Entity: 169_UCR_Anomaly_gait3_24500_59900_60500
+  Runtime: 22325.13s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.827246
+    Final (ensemble): 0.827246
+
+Dataset: 170_UCR_Anomaly_gaitHunt1_18500_33070_33180.txt
+  Entity: 170_UCR_Anomaly_gaitHunt1_18500_33070_33180
+  Runtime: 640.99s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.814005
+    Final (single): 0.833328
+
+Dataset: 171_UCR_Anomaly_gaitHunt2_18500_31200_31850.txt
+  Entity: 171_UCR_Anomaly_gaitHunt2_18500_31200_31850
+  Runtime: 669.78s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.813185
+    Final (single): 0.859995
+
+Dataset: 172_UCR_Anomaly_gaitHunt3_23400_38400_39200.txt
+  Entity: 172_UCR_Anomaly_gaitHunt3_23400_38400_39200
+  Runtime: 668.73s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.825777
+    Final (single): 0.888884
+
+Dataset: 173_UCR_Anomaly_insectEPG1_3000_7000_7030.txt
+  Entity: 173_UCR_Anomaly_insectEPG1_3000_7000_7030
+  Runtime: 183.86s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.744517
+    Final (single): 0.909084
+
+Dataset: 175_UCR_Anomaly_insectEPG3_5200_7000_7050.txt
+  Entity: 175_UCR_Anomaly_insectEPG3_5200_7000_7050
+  Runtime: 203.00s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.707708
+    Final (single): 0.769225
+
+Dataset: 176_UCR_Anomaly_insectEPG4_1300_6508_6558.txt
+  Entity: 176_UCR_Anomaly_insectEPG4_1300_6508_6558
+  Runtime: 2358.01s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.827540
+    Final (ensemble): 0.827540
+
+Dataset: 177_UCR_Anomaly_insectEPG5_3200_8500_8501.txt
+  Entity: 177_UCR_Anomaly_insectEPG5_3200_8500_8501
+  Runtime: 183.10s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.725125
+    Final (single): 0.888883
+
+Dataset: 178_UCR_Anomaly_ltstdbs30791AI_17555_52600_52800.txt
+  Entity: 178_UCR_Anomaly_ltstdbs30791AI_17555_52600_52800
+  Runtime: 534.43s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.865591
+    Final (ensemble): 0.865591
+
+Dataset: 179_UCR_Anomaly_ltstdbs30791AS_23000_52600_52800.txt
+  Entity: 179_UCR_Anomaly_ltstdbs30791AS_23000_52600_52800
+  Runtime: 598.58s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.841731
+    Final (single): 0.888884
+
+Dataset: 180_UCR_Anomaly_ltstdbs30791ES_20000_52600_52800.txt
+  Entity: 180_UCR_Anomaly_ltstdbs30791ES_20000_52600_52800
+  Runtime: 560.27s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.719883
+    Final (ensemble): 0.719883
+
+Dataset: 181_UCR_Anomaly_park3m_60000_72150_72495.txt
+  Entity: 181_UCR_Anomaly_park3m_60000_72150_72495
+  Runtime: 566.67s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.808085
+    Final (single): 0.838704
+
+Dataset: 182_UCR_Anomaly_qtdbSel1005V_4000_12400_12800.txt
+  Entity: 182_UCR_Anomaly_qtdbSel1005V_4000_12400_12800
+  Runtime: 414.10s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.746930
+    Final (single): 0.868416
+
+Dataset: 183_UCR_Anomaly_qtdbSel100MLII_4000_13400_13800.txt
+  Entity: 183_UCR_Anomaly_qtdbSel100MLII_4000_13400_13800
+  Runtime: 233.37s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.798566
+    Final (single): 0.847452
+
+Dataset: 184_UCR_Anomaly_resperation10_48000_130700_131880.txt
+  Entity: 184_UCR_Anomaly_resperation10_48000_130700_131880
+  Runtime: 2783.76s
+  Avg Memory: 131.05 MB
+  Peak Memory: 131.05 MB
+  F1 Scores:
+    GA Ensemble: 0.782365
+    Final (single): 0.848998
+
+Dataset: 186_UCR_Anomaly_resperation1_100000_110260_110412.txt
+  Entity: 186_UCR_Anomaly_resperation1_100000_110260_110412
+  Runtime: 8891.46s
+  Avg Memory: 131.31 MB
+  Peak Memory: 131.31 MB
+  F1 Scores:
+    GA Ensemble: 0.785610
+    Final (single): 0.806278
+
+Dataset: 187_UCR_Anomaly_resperation2_30000_168250_168250.txt
+  Entity: 187_UCR_Anomaly_resperation2_30000_168250_168250
+  Runtime: 37071.27s
+  Avg Memory: 131.31 MB
+  Peak Memory: 131.31 MB
+  F1 Scores:
+    GA Ensemble: 0.776850
+    Final (ensemble): 0.776850
+
+Dataset: 188_UCR_Anomaly_resperation2_30000_168250_168251.txt
+  Entity: 188_UCR_Anomaly_resperation2_30000_168250_168251
+  Runtime: 6424.66s
+  Avg Memory: 131.62 MB
+  Peak Memory: 131.62 MB
+  F1 Scores:
+    GA Ensemble: 0.783902
+    Final (single): 0.809751
+
+Dataset: 189_UCR_Anomaly_resperation3_45000_158250_158251.txt
+  Entity: 189_UCR_Anomaly_resperation3_45000_158250_158251
+  Runtime: 12106.57s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.775027
+    Final (single): 0.786977
+
+Dataset: 191_UCR_Anomaly_resperation9_38000_143411_143511.txt
+  Entity: 191_UCR_Anomaly_resperation9_38000_143411_143511
+  Runtime: 6807.38s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.783575
+    Final (single): 0.797148
+
+Dataset: 192_UCR_Anomaly_s20101mML2_12000_35774_35874.txt
+  Entity: 192_UCR_Anomaly_s20101mML2_12000_35774_35874
+  Runtime: 713.24s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.805225
+    Final (single): 0.874995
+
+Dataset: 193_UCR_Anomaly_s20101m_10000_35774_35874.txt
+  Entity: 193_UCR_Anomaly_s20101m_10000_35774_35874
+  Runtime: 1254.03s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.759923
+    Final (ensemble): 0.759923
+
+Dataset: 194_UCR_Anomaly_sddb49_20000_67950_68200.txt
+  Entity: 194_UCR_Anomaly_sddb49_20000_67950_68200
+  Runtime: 2516.07s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.693642
+    Final (single): 0.762707
+
+Dataset: 195_UCR_Anomaly_sel840mECG1_17000_51370_51740.txt
+  Entity: 195_UCR_Anomaly_sel840mECG1_17000_51370_51740
+  Runtime: 1416.52s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.818494
+    Final (ensemble): 0.818494
+
+Dataset: 196_UCR_Anomaly_sel840mECG2_20000_49370_49740.txt
+  Entity: 196_UCR_Anomaly_sel840mECG2_20000_49370_49740
+  Runtime: 1496.72s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.721512
+    Final (ensemble): 0.721512
+
+Dataset: 197_UCR_Anomaly_tiltAPB1_100000_114283_114350.txt
+  Entity: 197_UCR_Anomaly_tiltAPB1_100000_114283_114350
+  Runtime: 1643.60s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.762848
+    Final (ensemble): 0.762848
+
+Dataset: 198_UCR_Anomaly_tiltAPB2_50000_124159_124985.txt
+  Entity: 198_UCR_Anomaly_tiltAPB2_50000_124159_124985
+  Runtime: 3018.73s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.736256
+    Final (single): 0.780215
+
+Dataset: 199_UCR_Anomaly_tiltAPB3_40000_114000_114370.txt
+  Entity: 199_UCR_Anomaly_tiltAPB3_40000_114000_114370
+  Runtime: 5078.73s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.721433
+    Final (single): 0.821617
+
+Dataset: 200_UCR_Anomaly_tiltAPB4_20000_67995_67996.txt
+  Entity: 200_UCR_Anomaly_tiltAPB4_20000_67995_67996
+  Runtime: 5217.99s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.675086
+    Final (single): 0.741458
+
+Dataset: 201_UCR_Anomaly_CHARISfive_10000_17001_17016.txt
+  Entity: 201_UCR_Anomaly_CHARISfive_10000_17001_17016
+  Runtime: 341.28s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.715259
+    Final (single): 0.818177
+
+Dataset: 202_UCR_Anomaly_CHARISfive_10411_10998_11028.txt
+  Entity: 202_UCR_Anomaly_CHARISfive_10411_10998_11028
+  Runtime: 1381.98s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.610440
+    Final (single): 0.935060
+
+Dataset: 203_UCR_Anomaly_CHARISfive_10500_10995_11028.txt
+  Entity: 203_UCR_Anomaly_CHARISfive_10500_10995_11028
+  Runtime: 511.71s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.734868
+    Final (ensemble): 0.734868
+
+Dataset: 204_UCR_Anomaly_CHARISfive_12412_15000_15070.txt
+  Entity: 204_UCR_Anomaly_CHARISfive_12412_15000_15070
+  Runtime: 1067.81s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.624074
+    Final (single): 0.759995
+
+Dataset: 205_UCR_Anomaly_CHARISfive_9812_28995_29085.txt
+  Entity: 205_UCR_Anomaly_CHARISfive_9812_28995_29085
+  Runtime: 1178.37s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.631800
+    Final (single): 0.739125
+
+Dataset: 206_UCR_Anomaly_CHARISten_25130_29080_29140.txt
+  Entity: 206_UCR_Anomaly_CHARISten_25130_29080_29140
+  Runtime: 353.87s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.750997
+    Final (single): 0.842100
+
+Dataset: 207_UCR_Anomaly_CHARISten_3165_26929_26989.txt
+  Entity: 207_UCR_Anomaly_CHARISten_3165_26929_26989
+  Runtime: 1337.40s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.652815
+    Final (single): 0.839501
+
+Dataset: 208_UCR_Anomaly_CHARISten_5130_27929_27989.txt
+  Entity: 208_UCR_Anomaly_CHARISten_5130_27929_27989
+  Runtime: 513.93s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.711355
+    Final (single): 0.921343
+
+Dataset: 209_UCR_Anomaly_Fantasia_19000_26970_27270.txt
+  Entity: 209_UCR_Anomaly_Fantasia_19000_26970_27270
+  Runtime: 941.08s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.812048
+    Final (ensemble): 0.812048
+
+Dataset: 210_UCR_Anomaly_Italianpowerdemand_36123_74900_74996.txt
+  Entity: 210_UCR_Anomaly_Italianpowerdemand_36123_74900_74996
+  Runtime: 1269.20s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.673433
+    Final (single): 0.681610
+
+Dataset: 211_UCR_Anomaly_Italianpowerdemand_38113_39240_39336.txt
+  Entity: 211_UCR_Anomaly_Italianpowerdemand_38113_39240_39336
+  Runtime: 1238.82s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.678985
+    Final (single): 0.738734
+
+Dataset: 212_UCR_Anomaly_Italianpowerdemand_8913_29480_29504.txt
+  Entity: 212_UCR_Anomaly_Italianpowerdemand_8913_29480_29504
+  Runtime: 262.13s
+  Avg Memory: 131.63 MB
+  Peak Memory: 131.63 MB
+  F1 Scores:
+    GA Ensemble: 0.675227
+    Final (single): 0.784308
+
+Dataset: 213_UCR_Anomaly_STAFFIIIDatabase_33211_126920_127370.txt
+  Entity: 213_UCR_Anomaly_STAFFIIIDatabase_33211_126920_127370
+  Runtime: 6452.84s
+  Avg Memory: 131.65 MB
+  Peak Memory: 131.83 MB
+  F1 Scores:
+    GA Ensemble: 0.815153
+    Final (ensemble): 0.815153
+
+Dataset: 214_UCR_Anomaly_STAFFIIIDatabase_34211_125720_126370.txt
+  Entity: 214_UCR_Anomaly_STAFFIIIDatabase_34211_125720_126370
+  Runtime: 6450.62s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.769695
+    Final (single): 0.856632
+
+Dataset: 215_UCR_Anomaly_STAFFIIIDatabase_36276_106720_107370.txt
+  Entity: 215_UCR_Anomaly_STAFFIIIDatabase_36276_106720_107370
+  Runtime: 5526.81s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.722027
+    Final (single): 0.728183
+
+Dataset: 216_UCR_Anomaly_STAFFIIIDatabase_37216_160720_161370.txt
+  Entity: 216_UCR_Anomaly_STAFFIIIDatabase_37216_160720_161370
+  Runtime: 3980.47s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.746671
+    Final (ensemble): 0.746671
+
+Dataset: 217_UCR_Anomaly_STAFFIIIDatabase_38211_150720_151370.txt
+  Entity: 217_UCR_Anomaly_STAFFIIIDatabase_38211_150720_151370
+  Runtime: 5134.21s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.772527
+    Final (single): 0.841374
+
+Dataset: 218_UCR_Anomaly_STAFFIIIDatabase_41117_210720_211370.txt
+  Entity: 218_UCR_Anomaly_STAFFIIIDatabase_41117_210720_211370
+  Runtime: 11573.16s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.815252
+    Final (ensemble): 0.815252
+
+Dataset: 219_UCR_Anomaly_STAFFIIIDatabase_41612_64632_64852.txt
+  Entity: 219_UCR_Anomaly_STAFFIIIDatabase_41612_64632_64852
+  Runtime: 8760.97s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.817410
+    Final (single): 0.843368
+
+Dataset: 220_UCR_Anomaly_STAFFIIIDatabase_43217_250720_251370.txt
+  Entity: 220_UCR_Anomaly_STAFFIIIDatabase_43217_250720_251370
+  Runtime: 11321.61s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.681380
+    Final (ensemble): 0.681380
+
+Dataset: 221_UCR_Anomaly_STAFFIIIDatabase_45616_163632_164852.txt
+  Entity: 221_UCR_Anomaly_STAFFIIIDatabase_45616_163632_164852
+  Runtime: 3942.28s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.737295
+    Final (ensemble): 0.737295
+
+Dataset: 222_UCR_Anomaly_mit14046longtermecg_56123_91200_91700.txt
+  Entity: 222_UCR_Anomaly_mit14046longtermecg_56123_91200_91700
+  Runtime: 2993.15s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.882483
+    Final (ensemble): 0.882483
+
+Dataset: 223_UCR_Anomaly_mit14046longtermecg_74123_131200_131700.txt
+  Entity: 223_UCR_Anomaly_mit14046longtermecg_74123_131200_131700
+  Runtime: 2477.51s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.850612
+    Final (ensemble): 0.850612
+
+Dataset: 224_UCR_Anomaly_mit14046longtermecg_76123_191200_191700.txt
+  Entity: 224_UCR_Anomaly_mit14046longtermecg_76123_191200_191700
+  Runtime: 2763.57s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.892818
+    Final (ensemble): 0.892818
+
+Dataset: 225_UCR_Anomaly_mit14046longtermecg_81214_143000_143300.txt
+  Entity: 225_UCR_Anomaly_mit14046longtermecg_81214_143000_143300
+  Runtime: 2542.06s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.849551
+    Final (single): 0.892699
+
+Dataset: 226_UCR_Anomaly_mit14046longtermecg_96123_123000_123300.txt
+  Entity: 226_UCR_Anomaly_mit14046longtermecg_96123_123000_123300
+  Runtime: 2617.49s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.848747
+    Final (ensemble): 0.848747
+
+Dataset: 227_UCR_Anomaly_mit14134longtermecg_11231_29000_29100.txt
+  Entity: 227_UCR_Anomaly_mit14134longtermecg_11231_29000_29100
+  Runtime: 747.32s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.759973
+    Final (single): 0.883328
+
+Dataset: 228_UCR_Anomaly_mit14134longtermecg_11361_47830_47850.txt
+  Entity: 228_UCR_Anomaly_mit14134longtermecg_11361_47830_47850
+  Runtime: 754.85s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.701574
+    Final (single): 0.738090
+
+Dataset: 229_UCR_Anomaly_mit14134longtermecg_16363_57960_57970.txt
+  Entity: 229_UCR_Anomaly_mit14134longtermecg_16363_57960_57970
+  Runtime: 739.69s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.759439
+    Final (ensemble): 0.759439
+
+Dataset: 230_UCR_Anomaly_mit14134longtermecg_19363_19510_19610.txt
+  Entity: 230_UCR_Anomaly_mit14134longtermecg_19363_19510_19610
+  Runtime: 734.20s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.696026
+    Final (single): 0.763153
+
+Dataset: 231_UCR_Anomaly_mit14134longtermecg_8763_47530_47790.txt
+  Entity: 231_UCR_Anomaly_mit14134longtermecg_8763_47530_47790
+  Runtime: 755.12s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.736889
+    Final (single): 0.785042
+
+Dataset: 232_UCR_Anomaly_mit14134longtermecg_8763_57530_57790.txt
+  Entity: 232_UCR_Anomaly_mit14134longtermecg_8763_57530_57790
+  Runtime: 716.32s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.739243
+    Final (single): 0.805750
+
+Dataset: 233_UCR_Anomaly_mit14157longtermecg_18913_24500_24501.txt
+  Entity: 233_UCR_Anomaly_mit14157longtermecg_18913_24500_24501
+  Runtime: 988.45s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.784261
+    Final (single): 0.787229
+
+Dataset: 234_UCR_Anomaly_mit14157longtermecg_18913_24600_24601.txt
+  Entity: 234_UCR_Anomaly_mit14157longtermecg_18913_24600_24601
+  Runtime: 1036.14s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.773982
+    Final (single): 0.786512
+
+Dataset: 235_UCR_Anomaly_mit14157longtermecg_18913_75450_75451.txt
+  Entity: 235_UCR_Anomaly_mit14157longtermecg_18913_75450_75451
+  Runtime: 1029.76s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.799736
+    Final (ensemble): 0.799736
+
+Dataset: 236_UCR_Anomaly_mit14157longtermecg_19313_46350_46390.txt
+  Entity: 236_UCR_Anomaly_mit14157longtermecg_19313_46350_46390
+  Runtime: 939.19s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.793454
+    Final (ensemble): 0.793454
+
+Dataset: 237_UCR_Anomaly_mit14157longtermecg_19313_89560_90370.txt
+  Entity: 237_UCR_Anomaly_mit14157longtermecg_19313_89560_90370
+  Runtime: 896.39s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.770851
+    Final (single): 0.866990
+
+Dataset: 238_UCR_Anomaly_mit14157longtermecg_21311_72600_72780.txt
+  Entity: 238_UCR_Anomaly_mit14157longtermecg_21311_72600_72780
+  Runtime: 908.90s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.778320
+    Final (single): 0.781060
+
+Dataset: 239_UCR_Anomaly_taichidbS0715Master_190037_593450_593514.txt
+  Entity: 239_UCR_Anomaly_taichidbS0715Master_190037_593450_593514
+  Runtime: 42396.84s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.975061
+    Final (ensemble): 0.975061
+
+Dataset: 240_UCR_Anomaly_taichidbS0715Master_240030_884100_884200.txt
+  Entity: 240_UCR_Anomaly_taichidbS0715Master_240030_884100_884200
+  Runtime: 135730.90s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.976251
+    Final (ensemble): 0.976251
+
+Dataset: 241_UCR_Anomaly_taichidbS0715Master_250000_837400_839100.txt
+  Entity: 241_UCR_Anomaly_taichidbS0715Master_250000_837400_839100
+  Runtime: 140968.47s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.974912
+    Final (ensemble): 0.974912
+
+Dataset: 242_UCR_Anomaly_tilt12744mtable_100000_104630_104890.txt
+  Entity: 242_UCR_Anomaly_tilt12744mtable_100000_104630_104890
+  Runtime: 3774.00s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.748612
+    Final (single): 0.753841
+
+Dataset: 243_UCR_Anomaly_tilt12744mtable_100000_203355_203400.txt
+  Entity: 243_UCR_Anomaly_tilt12744mtable_100000_203355_203400
+  Runtime: 3386.04s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.749225
+    Final (ensemble): 0.749225
+
+Dataset: 244_UCR_Anomaly_tilt12754table_100013_104630_104890.txt
+  Entity: 244_UCR_Anomaly_tilt12754table_100013_104630_104890
+  Runtime: 4456.60s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.756310
+    Final (single): 0.792345
+
+Dataset: 245_UCR_Anomaly_tilt12754table_100211_270800_271070.txt
+  Entity: 245_UCR_Anomaly_tilt12754table_100211_270800_271070
+  Runtime: 3757.80s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.751962
+    Final (ensemble): 0.751962
+
+Dataset: 246_UCR_Anomaly_tilt12755mtable_100211_270800_271070.txt
+  Entity: 246_UCR_Anomaly_tilt12755mtable_100211_270800_271070
+  Runtime: 4585.84s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.768618
+    Final (ensemble): 0.768618
+
+Dataset: 247_UCR_Anomaly_tilt12755mtable_50211_121900_121980.txt
+  Entity: 247_UCR_Anomaly_tilt12755mtable_50211_121900_121980
+  Runtime: 2799.76s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.722151
+    Final (ensemble): 0.722151
+
+Dataset: 248_UCR_Anomaly_weallwalk_2000_4702_4707.txt
+  Entity: 248_UCR_Anomaly_weallwalk_2000_4702_4707
+  Runtime: 1049.33s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.645778
+    Final (single): 0.737584
+
+Dataset: 249_UCR_Anomaly_weallwalk_2753_8285_8315.txt
+  Entity: 249_UCR_Anomaly_weallwalk_2753_8285_8315
+  Runtime: 200.64s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.630608
+    Final (single): 0.714280
+
+Dataset: 250_UCR_Anomaly_weallwalk_2951_7290_7296.txt
+  Entity: 250_UCR_Anomaly_weallwalk_2951_7290_7296
+  Runtime: 202.90s
+  Avg Memory: 133.05 MB
+  Peak Memory: 133.05 MB
+  F1 Scores:
+    GA Ensemble: 0.636940
+    Final (ensemble): 0.636940
+
+================================================================================
+END OF REPORT
+================================================================================

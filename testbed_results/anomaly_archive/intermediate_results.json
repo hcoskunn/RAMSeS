@@ -10438,5 +10438,545 @@
         "selected_f1": 0.78106
       }
     }
+  },
+  {
+    "dataset_file": "239_UCR_Anomaly_taichidbS0715Master_190037_593450_593514.txt",
+    "domain": "anomaly_archive",
+    "entity": "239_UCR_Anomaly_taichidbS0715Master_190037_593450_593514",
+    "total_runtime": 42396.84178543091,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 363.8205,
+        "2_Thompson_Sampling": 37680.8317,
+        "3_GAN_Robustness": 1227.7133,
+        "4_Borderline_Sensitivity": 730.1101,
+        "5_Monte_Carlo": 1523.9353,
+        "6_Rank_Aggregation": 0.0019,
+        "end_to_end": 41526.4166
+      },
+      "ga": {
+        "f1": 0.975061,
+        "pr_auc": 0.03874
+      },
+      "thompson": {
+        "f1": 0.810568,
+        "pr_auc": 0.90346
+      },
+      "gan": {
+        "f1": 0.942992,
+        "pr_auc": 0.957834
+      },
+      "borderline": {
+        "f1": 0.913976,
+        "pr_auc": 0.940268
+      },
+      "monte_carlo": {
+        "f1": 0.825984,
+        "pr_auc": 0.903731
+      },
+      "final_decision": {
+        "single_f1": 0.810239,
+        "ensemble_f1": 0.975061,
+        "selected": "ensemble",
+        "selected_f1": 0.975061
+      }
+    }
+  },
+  {
+    "dataset_file": "240_UCR_Anomaly_taichidbS0715Master_240030_884100_884200.txt",
+    "domain": "anomaly_archive",
+    "entity": "240_UCR_Anomaly_taichidbS0715Master_240030_884100_884200",
+    "total_runtime": 135730.89616394043,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 3504.3166,
+        "2_Thompson_Sampling": 66357.1633,
+        "3_GAN_Robustness": 1076.4248,
+        "4_Borderline_Sensitivity": 568.2905,
+        "5_Monte_Carlo": 1388.1679,
+        "6_Rank_Aggregation": 0.0019,
+        "end_to_end": 72894.3688
+      },
+      "ga": {
+        "f1": 0.976251,
+        "pr_auc": 0.04001
+      },
+      "thompson": {
+        "f1": 0.772913,
+        "pr_auc": 0.861922
+      },
+      "gan": {
+        "f1": 0.921845,
+        "pr_auc": 0.943956
+      },
+      "borderline": {
+        "f1": 0.881946,
+        "pr_auc": 0.918791
+      },
+      "monte_carlo": {
+        "f1": 0.853037,
+        "pr_auc": 0.865939
+      },
+      "final_decision": {
+        "single_f1": 0.853037,
+        "ensemble_f1": 0.976251,
+        "selected": "ensemble",
+        "selected_f1": 0.976251
+      }
+    }
+  },
+  {
+    "dataset_file": "241_UCR_Anomaly_taichidbS0715Master_250000_837400_839100.txt",
+    "domain": "anomaly_archive",
+    "entity": "241_UCR_Anomaly_taichidbS0715Master_250000_837400_839100",
+    "total_runtime": 140968.4716463089,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 3283.7441,
+        "2_Thompson_Sampling": 63971.0726,
+        "3_GAN_Robustness": 1081.4315,
+        "4_Borderline_Sensitivity": 630.2439,
+        "5_Monte_Carlo": 683.1616,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 69649.6622
+      },
+      "ga": {
+        "f1": 0.974912,
+        "pr_auc": 0.039872
+      },
+      "thompson": {
+        "f1": 0.791571,
+        "pr_auc": 0.884227
+      },
+      "gan": {
+        "f1": 0.940213,
+        "pr_auc": 0.954423
+      },
+      "borderline": {
+        "f1": 0.915087,
+        "pr_auc": 0.936984
+      },
+      "monte_carlo": {
+        "f1": 0.827063,
+        "pr_auc": 0.885411
+      },
+      "final_decision": {
+        "single_f1": 0.789531,
+        "ensemble_f1": 0.974912,
+        "selected": "ensemble",
+        "selected_f1": 0.974912
+      }
+    }
+  },
+  {
+    "dataset_file": "242_UCR_Anomaly_tilt12744mtable_100000_104630_104890.txt",
+    "domain": "anomaly_archive",
+    "entity": "242_UCR_Anomaly_tilt12744mtable_100000_104630_104890",
+    "total_runtime": 3774.002378463745,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 181.8009,
+        "2_Thompson_Sampling": 2607.1478,
+        "3_GAN_Robustness": 170.6514,
+        "4_Borderline_Sensitivity": 80.5984,
+        "5_Monte_Carlo": 161.3882,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 3201.5905
+      },
+      "ga": {
+        "f1": 0.748612,
+        "pr_auc": 0.501128
+      },
+      "thompson": {
+        "f1": 0.76444,
+        "pr_auc": 0.737256
+      },
+      "gan": {
+        "f1": 0.824854,
+        "pr_auc": 0.898365
+      },
+      "borderline": {
+        "f1": 0.773143,
+        "pr_auc": 0.736559
+      },
+      "monte_carlo": {
+        "f1": 0.771023,
+        "pr_auc": 0.735755
+      },
+      "final_decision": {
+        "single_f1": 0.753841,
+        "ensemble_f1": 0.748612,
+        "selected": "single",
+        "selected_f1": 0.753841
+      }
+    }
+  },
+  {
+    "dataset_file": "243_UCR_Anomaly_tilt12744mtable_100000_203355_203400.txt",
+    "domain": "anomaly_archive",
+    "entity": "243_UCR_Anomaly_tilt12744mtable_100000_203355_203400",
+    "total_runtime": 3386.0446033477783,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 134.1783,
+        "2_Thompson_Sampling": 2381.9174,
+        "3_GAN_Robustness": 138.177,
+        "4_Borderline_Sensitivity": 64.2587,
+        "5_Monte_Carlo": 130.7225,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 2849.2568
+      },
+      "ga": {
+        "f1": 0.749225,
+        "pr_auc": 0.507191
+      },
+      "thompson": {
+        "f1": 0.753458,
+        "pr_auc": 0.722737
+      },
+      "gan": {
+        "f1": 0.772272,
+        "pr_auc": 0.838866
+      },
+      "borderline": {
+        "f1": 0.775857,
+        "pr_auc": 0.73473
+      },
+      "monte_carlo": {
+        "f1": 0.763843,
+        "pr_auc": 0.734683
+      },
+      "final_decision": {
+        "single_f1": 0.723679,
+        "ensemble_f1": 0.749225,
+        "selected": "ensemble",
+        "selected_f1": 0.749225
+      }
+    }
+  },
+  {
+    "dataset_file": "244_UCR_Anomaly_tilt12754table_100013_104630_104890.txt",
+    "domain": "anomaly_archive",
+    "entity": "244_UCR_Anomaly_tilt12754table_100013_104630_104890",
+    "total_runtime": 4456.603721380234,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 118.8132,
+        "2_Thompson_Sampling": 3344.1262,
+        "3_GAN_Robustness": 180.7252,
+        "4_Borderline_Sensitivity": 85.2456,
+        "5_Monte_Carlo": 173.7337,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 3902.6484
+      },
+      "ga": {
+        "f1": 0.75631,
+        "pr_auc": 0.363542
+      },
+      "thompson": {
+        "f1": 0.801115,
+        "pr_auc": 0.770409
+      },
+      "gan": {
+        "f1": 0.841055,
+        "pr_auc": 0.895174
+      },
+      "borderline": {
+        "f1": 0.808859,
+        "pr_auc": 0.790485
+      },
+      "monte_carlo": {
+        "f1": 0.792345,
+        "pr_auc": 0.787472
+      },
+      "final_decision": {
+        "single_f1": 0.792345,
+        "ensemble_f1": 0.75631,
+        "selected": "single",
+        "selected_f1": 0.792345
+      }
+    }
+  },
+  {
+    "dataset_file": "245_UCR_Anomaly_tilt12754table_100211_270800_271070.txt",
+    "domain": "anomaly_archive",
+    "entity": "245_UCR_Anomaly_tilt12754table_100211_270800_271070",
+    "total_runtime": 3757.7951369285583,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 129.5412,
+        "2_Thompson_Sampling": 2622.0651,
+        "3_GAN_Robustness": 182.5841,
+        "4_Borderline_Sensitivity": 85.4667,
+        "5_Monte_Carlo": 172.6916,
+        "6_Rank_Aggregation": 0.0018,
+        "end_to_end": 3192.3527
+      },
+      "ga": {
+        "f1": 0.751962,
+        "pr_auc": 0.363344
+      },
+      "thompson": {
+        "f1": 0.737619,
+        "pr_auc": 0.689434
+      },
+      "gan": {
+        "f1": 0.792448,
+        "pr_auc": 0.852915
+      },
+      "borderline": {
+        "f1": 0.769995,
+        "pr_auc": 0.746486
+      },
+      "monte_carlo": {
+        "f1": 0.762831,
+        "pr_auc": 0.745935
+      },
+      "final_decision": {
+        "single_f1": 0.620419,
+        "ensemble_f1": 0.751962,
+        "selected": "ensemble",
+        "selected_f1": 0.751962
+      }
+    }
+  },
+  {
+    "dataset_file": "246_UCR_Anomaly_tilt12755mtable_100211_270800_271070.txt",
+    "domain": "anomaly_archive",
+    "entity": "246_UCR_Anomaly_tilt12755mtable_100211_270800_271070",
+    "total_runtime": 4585.839428186417,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 162.389,
+        "2_Thompson_Sampling": 3437.4024,
+        "3_GAN_Robustness": 183.0446,
+        "4_Borderline_Sensitivity": 86.3607,
+        "5_Monte_Carlo": 174.5392,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 4043.7419
+      },
+      "ga": {
+        "f1": 0.768618,
+        "pr_auc": 0.319342
+      },
+      "thompson": {
+        "f1": 0.753808,
+        "pr_auc": 0.773845
+      },
+      "gan": {
+        "f1": 0.806361,
+        "pr_auc": 0.851913
+      },
+      "borderline": {
+        "f1": 0.794253,
+        "pr_auc": 0.846625
+      },
+      "monte_carlo": {
+        "f1": 0.74545,
+        "pr_auc": 0.782236
+      },
+      "final_decision": {
+        "single_f1": 0.74545,
+        "ensemble_f1": 0.768618,
+        "selected": "ensemble",
+        "selected_f1": 0.768618
+      }
+    }
+  },
+  {
+    "dataset_file": "247_UCR_Anomaly_tilt12755mtable_50211_121900_121980.txt",
+    "domain": "anomaly_archive",
+    "entity": "247_UCR_Anomaly_tilt12755mtable_50211_121900_121980",
+    "total_runtime": 2799.7622480392456,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 79.2942,
+        "2_Thompson_Sampling": 2022.4264,
+        "3_GAN_Robustness": 137.6218,
+        "4_Borderline_Sensitivity": 62.8271,
+        "5_Monte_Carlo": 127.0429,
+        "6_Rank_Aggregation": 0.0017,
+        "end_to_end": 2429.216
+      },
+      "ga": {
+        "f1": 0.722151,
+        "pr_auc": 0.294597
+      },
+      "thompson": {
+        "f1": 0.789804,
+        "pr_auc": 0.690192
+      },
+      "gan": {
+        "f1": 0.834527,
+        "pr_auc": 0.867038
+      },
+      "borderline": {
+        "f1": 0.796173,
+        "pr_auc": 0.827522
+      },
+      "monte_carlo": {
+        "f1": 0.790118,
+        "pr_auc": 0.813992
+      },
+      "final_decision": {
+        "single_f1": 0.719293,
+        "ensemble_f1": 0.722151,
+        "selected": "ensemble",
+        "selected_f1": 0.722151
+      }
+    }
+  },
+  {
+    "dataset_file": "248_UCR_Anomaly_weallwalk_2000_4702_4707.txt",
+    "domain": "anomaly_archive",
+    "entity": "248_UCR_Anomaly_weallwalk_2000_4702_4707",
+    "total_runtime": 1049.332307100296,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 48.1284,
+        "2_Thompson_Sampling": 600.7987,
+        "3_GAN_Robustness": 63.523,
+        "4_Borderline_Sensitivity": 29.8487,
+        "5_Monte_Carlo": 58.8685,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 801.1704
+      },
+      "ga": {
+        "f1": 0.645778,
+        "pr_auc": 0.785703
+      },
+      "thompson": {
+        "f1": 0.719995,
+        "pr_auc": 0.765754
+      },
+      "gan": {
+        "f1": 0.747821,
+        "pr_auc": 0.759558
+      },
+      "borderline": {
+        "f1": 0.778518,
+        "pr_auc": 0.7769
+      },
+      "monte_carlo": {
+        "f1": 0.773328,
+        "pr_auc": 0.775876
+      },
+      "final_decision": {
+        "single_f1": 0.737584,
+        "ensemble_f1": 0.645778,
+        "selected": "single",
+        "selected_f1": 0.737584
+      }
+    }
+  },
+  {
+    "dataset_file": "249_UCR_Anomaly_weallwalk_2753_8285_8315.txt",
+    "domain": "anomaly_archive",
+    "entity": "249_UCR_Anomaly_weallwalk_2753_8285_8315",
+    "total_runtime": 200.63830161094666,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 12.3953,
+        "2_Thompson_Sampling": 7.5573,
+        "3_GAN_Robustness": 13.297,
+        "4_Borderline_Sensitivity": 4.1262,
+        "5_Monte_Carlo": 9.751,
+        "6_Rank_Aggregation": 0.0015,
+        "end_to_end": 47.1298
+      },
+      "ga": {
+        "f1": 0.630608,
+        "pr_auc": 0.427732
+      },
+      "thompson": {
+        "f1": 0.799994,
+        "pr_auc": 0.493696
+      },
+      "gan": {
+        "f1": 0.842099,
+        "pr_auc": 0.54118
+      },
+      "borderline": {
+        "f1": 0.842099,
+        "pr_auc": 0.54118
+      },
+      "monte_carlo": {
+        "f1": 0.842099,
+        "pr_auc": 0.471669
+      },
+      "final_decision": {
+        "single_f1": 0.71428,
+        "ensemble_f1": 0.630608,
+        "selected": "single",
+        "selected_f1": 0.71428
+      }
+    }
+  },
+  {
+    "dataset_file": "250_UCR_Anomaly_weallwalk_2951_7290_7296.txt",
+    "domain": "anomaly_archive",
+    "entity": "250_UCR_Anomaly_weallwalk_2951_7290_7296",
+    "total_runtime": 202.9046971797943,
+    "avg_memory_mb": 133.046875,
+    "peak_memory_mb": 133.046875,
+    "metrics": {
+      "timing": {
+        "1_Genetic_Algorithm": 15.0944,
+        "2_Thompson_Sampling": 6.4486,
+        "3_GAN_Robustness": 13.4792,
+        "4_Borderline_Sensitivity": 4.1499,
+        "5_Monte_Carlo": 9.1674,
+        "6_Rank_Aggregation": 0.0016,
+        "end_to_end": 48.3428
+      },
+      "ga": {
+        "f1": 0.63694,
+        "pr_auc": 0.674344
+      },
+      "thompson": {
+        "f1": 0.599994,
+        "pr_auc": 0.243696
+      },
+      "gan": {
+        "f1": 0.799994,
+        "pr_auc": 0.53333
+      },
+      "borderline": {
+        "f1": 0.666661,
+        "pr_auc": 0.345237
+      },
+      "monte_carlo": {
+        "f1": 0.727267,
+        "pr_auc": 0.295038
+      },
+      "final_decision": {
+        "single_f1": 0.545449,
+        "ensemble_f1": 0.63694,
+        "selected": "ensemble",
+        "selected_f1": 0.63694
+      }
+    }
   }
 ]
