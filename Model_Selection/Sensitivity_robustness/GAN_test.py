@@ -113,8 +113,19 @@ def integrate_gan_with_dataset(data, labels):
     generator = make_generator_model(input_dim)
     discriminator = make_discriminator_model(input_dim)
 
-    # Train the GAN
-    train_gan(generator, discriminator, data.T, epochs=100, batch_size=32, noise_dim=input_dim)
+    # Filter to only normal (non-anomaly) data for GAN training
+    # This ensures the GAN learns P(normal) and generates borderline points
+    # near the normal distribution boundary, avoiding leakage from anomaly patterns
+    normal_indices = np.where(labels == 0)[0]
+    if len(normal_indices) > 0:
+        clean_data = data[:, normal_indices]
+    else:
+        # Fallback: if no normal points labeled, use all data
+        logger.warning("No normal points found (all labels are 1), using all data for GAN training")
+        clean_data = data
+    
+    # Train the GAN on clean, non-anomalous data only
+    train_gan(generator, discriminator, clean_data.T, epochs=100, batch_size=32, noise_dim=input_dim)
 
     # Generate borderline points
     num_samples = int(0.1 * len(labels))  # % of the total number of data points
