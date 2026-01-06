@@ -380,8 +380,9 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     # -------------------------
     logger.info("  📊 Sub-stage 6.3: GAN Robustness Testing...")
     start_time = time.time()
+    test_data_for_gan = copy.deepcopy(test_data)
     gan_results = run_Gan(
-        test_data, trained_models, algorithm_list_instances, dataset, entity
+        test_data_for_gan, trained_models, algorithm_list_instances, dataset, entity
     )
     timing_dict['3_GAN_Robustness'] = time.time() - start_time
     Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
@@ -398,9 +399,10 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     # --------------------------------------------
     logger.info("  📊 Sub-stage 6.4: Off-by-Threshold Testing...")
     start_time = time.time()
+    test_data_for_borderline = copy.deepcopy(test_data)
     ranked_by_f1, ranked_by_pr_auc, \
     ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = run_off_by_threshold(
-        test_data, trained_models, algorithm_list_instances, dataset, entity
+        test_data_for_borderline, trained_models, algorithm_list_instances, dataset, entity
     )
     timing_dict['4_Borderline_Sensitivity'] = time.time() - start_time
     logger.info("  ✓ [Borderline] F1 names top-5: %s | Time=%.4fs", ranked_by_f1_names_sensitivity[:5],
@@ -412,8 +414,9 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     # ---------------------------------
     logger.info("  📊 Sub-stage 6.5: Monte Carlo Simulation...")
     start_time = time.time()
+    test_data_for_mc = copy.deepcopy(test_data)
     monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
-        test_data, trained_models, algorithm_list_instances, dataset, entity,
+        test_data_for_mc, trained_models, algorithm_list_instances, dataset, entity,
         n_simulations=2, noise_level=0.1,
     )
     timing_dict['5_Monte_Carlo'] = time.time() - start_time
