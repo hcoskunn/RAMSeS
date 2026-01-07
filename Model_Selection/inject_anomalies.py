@@ -64,6 +64,126 @@ def Inject(data, anomaly_types):
     return data, anomaly_sizes
 
 
+def InjectHybrid(data, anomaly_types, num_synthetic=5):
+    """
+    Inject synthetic anomalies while PRESERVING real anomalies.
+    Adds synthetic anomalies to specific locations in the original data.
+    
+    Parameters
+    ----------
+    data : Dataset
+        Original data with potential real anomalies
+    anomaly_types : list
+        Types of anomalies to inject (e.g., ['spikes', 'contextual'])
+    num_synthetic : int
+        Number of synthetic anomaly instances to add
+    
+    Returns
+    -------
+    data : Dataset
+        Data with both real and synthetic anomalies
+    anomaly_info : dict
+        Information about injected anomalies
+    """
+    random_state = np.random.randint(1, 10000)
+    np.random.seed(random_state)
+    
+    anomaly_obj = InjectAnomalies(random_state=random_state,
+                                  verbose=False,
+                                  max_window_size=32,  # Smaller windows
+                                  min_window_size=8)
+    
+    # Get original data
+    T_original = data.entities[0].Y.copy()  # Shape: (n_features, n_timestamps)
+    n_features, n_timestamps = T_original.shape
+    data_std = max(np.std(T_original), 0.01)
+    
+    # Preserve original labels if they exist
+    if hasattr(data.entities[0], 'labels') and data.entities[0].labels is not None:
+        labels = data.entities[0].labels.copy()
+        real_anomaly_count = int(np.sum(labels))
+        has_real_anomalies = real_anomaly_count > 0
+    else:
+        labels = np.zeros(n_timestamps)
+        real_anomaly_count = 0
+        has_real_anomalies = False
+    
+    # Get non-anomalous indices where we can inject synthetic anomalies
+    normal_indices = np.where(labels == 0)[0]
+    
+    if len(normal_indices) < 20:
+        # Not enough normal regions, return original
+        anomaly_info = {
+            'real_anomalies': real_anomaly_count,
+            'synthetic_added': 0,
+            'total_anomalies': real_anomaly_count,
+            'success_rate': 0.0
+        }
+        return data, anomaly_info
+    
+    synthetic_added = 0
+    T_modified = T_original.copy()
+    
+    # Inject synthetic anomalies at random normal locations
+    for _ in range(num_synthetic):
+        if len(normal_indices) < 20:
+            break
+            
+        # Choose a random normal location
+        idx = np.random.choice(normal_indices)
+        
+        # Choose anomaly window size
+        window_size = np.random.randint(8, min(33, len(normal_indices) // 2))
+        start_idx = max(0, idx - window_size // 2)
+        end_idx = min(n_timestamps, start_idx + window_size)
+        
+        # Skip if this would overlap with real anomalies
+        if np.any(labels[start_idx:end_idx] == 1):
+            continue
+        
+        # Choose random feature to inject anomaly
+        feature_id = np.random.randint(0, n_features)
+        
+        # Choose anomaly type
+        anomaly_type = np.random.choice(anomaly_types)
+        
+        # Inject synthetic anomaly at this specific location
+        try:
+            if anomaly_type == 'spikes':
+                # Add spike anomaly
+                spike_magnitude = data_std * np.random.uniform(2, 5)
+                spike_direction = np.random.choice([-1, 1])
+                T_modified[feature_id, start_idx:end_idx] += spike_direction * spike_magnitude
+                labels[start_idx:end_idx] = 1
+                synthetic_added += 1
+                
+            elif anomaly_type == 'contextual':
+                # Add contextual drift
+                drift = np.linspace(0, data_std * np.random.uniform(1.5, 3), end_idx - start_idx)
+                T_modified[feature_id, start_idx:end_idx] += drift
+                labels[start_idx:end_idx] = 1
+                synthetic_added += 1
+            
+            # Remove these indices from normal_indices
+            normal_indices = np.setdiff1d(normal_indices, np.arange(start_idx, end_idx))
+            
+        except Exception:
+            continue  # Skip on error
+    
+    # Update the data entity
+    data.entities[0].Y = T_modified
+    data.entities[0].labels = labels
+    
+    anomaly_info = {
+        'real_anomalies': real_anomaly_count,
+        'synthetic_added': synthetic_added,
+        'total_anomalies': int(np.sum(labels)),
+        'success_rate': synthetic_added / num_synthetic if num_synthetic > 0 else 0
+    }
+    
+    return data, anomaly_info
+
+
 class InjectAnomalies:
 
     def __init__(self,
@@ -165,14 +285,28 @@ class InjectAnomalies:
 
         # Find a suitable anomaly start and end time
         n_peaks = len(self.peaks)
-        first_peak_idx = self.peaks[np.random.randint(
-            np.ceil(0.1 * n_peaks),
-            n_peaks)]  # Such that anomalies don't start at the very beginning
-        self.anomaly_start = max(
-            first_peak_idx - self.estimated_window_size // 2, 0)
-        self.anomaly_end = min(
-            self.anomaly_start +
-            self.anomaly_length * self.estimated_window_size, n_time)
+        
+        # Handle case where there are too few peaks
+        if n_peaks == 0:
+            # No peaks detected - use random position in middle 80% of data
+            self.anomaly_start = int(0.1 * n_time)
+            self.anomaly_end = min(
+                self.anomaly_start + self.anomaly_length * self.estimated_window_size, 
+                n_time
+            )
+        else:
+            # Calculate safe range for peak selection
+            min_peak_idx = int(np.ceil(0.1 * n_peaks))
+            if min_peak_idx >= n_peaks:
+                min_peak_idx = 0  # Use first peak if 10% threshold is too high
+            
+            first_peak_idx = self.peaks[np.random.randint(min_peak_idx, n_peaks)]
+            self.anomaly_start = max(
+                first_peak_idx - self.estimated_window_size // 2, 0)
+            self.anomaly_end = min(
+                self.anomaly_start + self.anomaly_length * self.estimated_window_size, 
+                n_time
+            )
 
         if self.verbose:
             print(

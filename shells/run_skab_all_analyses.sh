@@ -2,7 +2,16 @@
 ################################################################################
 # SKAB Dataset - All Three Analyses
 # 
-# Dataset: SKAB (Skoltech Anomaly Benchmark)
+# Dataspython3 online_phase_analysis.py \
+    --dataset-list dataset_lists/skab_full.csv \
+    --data-dir ./Mononito/datasets \
+    --trained-model-dir ./Mononito/trained_models \
+    --output-dir ./results_skab/scalability \
+    --scalability-analysis \
+    --inject-synthetic \
+    --num-windows 50 \
+    --num-entities 3 \
+    --num-models-range "2,4,6,9"Skoltech Anomaly Benchmark)
 # Characteristics:
 #   - Entities: 16 (using subset for speed)
 #   - Dimensions: 11 columns (MULTIVARIATE)
@@ -95,6 +104,7 @@ echo "==========================================================================
 echo "Testing update intervals: 5, 10, 20, None"
 echo "Num windows: 50 (optimal for SKAB size)"
 echo "Injecting regime shifts: YES (at 25%, 50%, 75%)"
+echo "Injecting synthetic anomalies: YES (test data has no real anomalies)"
 echo ""
 
 python3 online_phase_analysis.py \
@@ -103,6 +113,7 @@ python3 online_phase_analysis.py \
     --trained-model-dir ./Mononito/trained_models \
     --output-dir ./results_skab/adaptive \
     --adaptive-analysis \
+    --inject-synthetic \
     --num-windows 50 \
     --num-entities 3 \
     --update-intervals "5,10,20,None"
@@ -131,6 +142,7 @@ echo "ANALYSIS 2/3: SCALABILITY ANALYSIS (R1.O3 - Resource Efficiency)"
 echo "================================================================================"
 echo "Testing pool sizes: 3, 5, 8 models"
 echo "Num windows: 60 (more windows for better scalability evidence)"
+echo "Injecting synthetic anomalies: YES"
 echo "Question: Does RAMSeS need 8 models or work well with 3-5?"
 echo ""
 
@@ -140,6 +152,7 @@ python3 online_phase_analysis.py \
     --trained-model-dir ./Mononito/trained_models \
     --output-dir ./results_skab/scalability \
     --scalability-analysis \
+    --inject-synthetic \
     --num-windows 60 \
     --num-entities 3 \
     --num-models-range "3,5,8"
@@ -167,6 +180,7 @@ echo "==========================================================================
 echo "ANALYSIS 3/3: WINDOW SIZE SENSITIVITY (R2.O5)"
 echo "================================================================================"
 echo "Auto-calculating smart window sizes: 2%, 5%, 10%, 20% of data length"
+echo "Injecting synthetic anomalies: YES"
 echo "Question: What's the optimal window size for SKAB?"
 echo ""
 
@@ -176,6 +190,7 @@ python3 online_phase_analysis.py \
     --trained-model-dir ./Mononito/trained_models \
     --output-dir ./results_skab/window_size \
     --window-size-analysis \
+    --inject-synthetic \
     --num-entities 3
 
 # Note: Removed --window-sizes and --num-windows flags

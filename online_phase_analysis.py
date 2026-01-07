@@ -445,9 +445,11 @@ def run_online_phase_experiment(
     
     # Optionally inject synthetic anomalies (for comparison with baseline behavior)
     if inject_synthetic_anomalies:
-        logger.info("Injecting synthetic anomalies for additional stress testing...")
-        test_data, _ = Inject(test_data, ['spikes', 'contextual'])
-        logger.info("✓ Injected synthetic anomalies")
+        logger.info("Injecting synthetic anomalies while preserving real anomalies...")
+        from Model_Selection.inject_anomalies import InjectHybrid
+        test_data, anomaly_info = InjectHybrid(test_data, ['spikes', 'contextual'], num_synthetic=10)
+        logger.info(f"✓ Hybrid injection complete: {anomaly_info['synthetic_added']} synthetic + "
+                   f"{anomaly_info['real_anomalies']} real = {anomaly_info['total_anomalies']} total anomalies")
     else:
         logger.info("Using real anomalies from ground-truth labels (no synthetic injection)")
     

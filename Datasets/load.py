@@ -99,13 +99,33 @@ def load_csv_file(data_path: str, name_of_data: str, group: str, normalize: bool
     date_column_name = df.columns[0]
     df.set_index(date_column_name, inplace=True)
 
-    X = df.values.T  # Shape: (n_features, n_timestamps)
+    # Check if last column is binary (anomaly labels)
+    last_col = df.iloc[:, -1]
+    is_binary_label = set(last_col.unique()).issubset({0, 1, 0.0, 1.0})
+    
+    if is_binary_label:
+        # Separate labels from features
+        labels = last_col.values
+        X = df.iloc[:, :-1].values.T  # All columns except last
+    else:
+        # No labels column, use all columns as features
+        labels = None
+        X = df.values.T  # Shape: (n_features, n_timestamps)
+    
     n_features, n_timestamps = X.shape
     
     # Sequential split: first 80% for training, last 20% for testing
     train_end = int(n_timestamps * 0.8)
     X_train = X[:, :train_end]
     X_test = X[:, train_end:]
+    
+    # Split labels if they exist
+    if labels is not None:
+        labels_train = labels[:train_end]
+        labels_test = labels[train_end:]
+    else:
+        labels_train = None
+        labels_test = None
     
     if group == 'train':
         name = f'{name_of_data}-train'
@@ -115,6 +135,9 @@ def load_csv_file(data_path: str, name_of_data: str, group: str, normalize: bool
         else:
             Y = X_train
         entity = Entity(Y=Y, name=name_of_data, verbose=verbose)
+        # Add labels if available
+        if labels_train is not None:
+            entity.labels = labels_train
         entities.append(entity)
 
     elif group == 'test':
@@ -127,6 +150,9 @@ def load_csv_file(data_path: str, name_of_data: str, group: str, normalize: bool
             Y = X_test
 
         entity = Entity(Y=Y, name=name_of_data, verbose=verbose)
+        # Add labels if available
+        if labels_test is not None:
+            entity.labels = labels_test
         entities.append(entity)
     dataset = Dataset(entities=entities, name=name, verbose=verbose)
 

@@ -4,22 +4,70 @@ Window Size Sensitivity Analysis - Summary
 
 Dataset: SKAB
 Entity: 0
-Window Sizes Tested: [128, 256, 512, 1024]
+Window Sizes Tested: [10, 20, 30, 50]
 
 ================================================================================
 RESULTS BY WINDOW SIZE
 ================================================================================
 
-Window Size: 128
+Window Size: 10
 ----------------------------------------
 Ensemble Branch:
-  Latency (ms):  131.86 ± 0.00
-  Memory (MB):   547.30
+  Latency (ms):  129.28 ± 4.38
+  Memory (MB):   545.70
   F1 Score:      0.0000 ± 0.0000
 Single Model Branch:
-  Latency (ms):  33.56 ± 0.00
-  Memory (MB):   548.36
+  Latency (ms):  23.76 ± 1.90
+  Memory (MB):   545.71
+  F1 Score:      N/A (no windows processed)
 
-Window Size: 256
+Window Size: 20
 ----------------------------------------
 Ensemble Branch:
+  Latency (ms):  129.51 ± 5.44
+  Memory (MB):   552.93
+  F1 Score:      0.0000 ± 0.0000
+Single Model Branch:
+  Latency (ms):  21.84 ± 0.22
+  Memory (MB):   552.93
+  F1 Score:      N/A (no windows processed)
+
+Window Size: 30
+----------------------------------------
+Ensemble Branch:
+  Latency (ms):  130.24 ± 4.91
+  Memory (MB):   553.06
+  F1 Score:      0.0000 ± 0.0000
+Single Model Branch:
+  Latency (ms):  20.62 ± 0.35
+  Memory (MB):   553.06
+  F1 Score:      N/A (no windows processed)
+
+Window Size: 50
+----------------------------------------
+Ensemble Branch:
+  Latency (ms):  130.06 ± 8.08
+  Memory (MB):   554.53
+  F1 Score:      0.0000 ± 0.0000
+Single Model Branch:
+  Latency (ms):  18.18 ± 0.21
+  Memory (MB):   554.53
+  F1 Score:      N/A (no windows processed)
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+Ensemble Branch:
+  Latency range: 129.28 - 130.24 ms
+  Latency scaling factor: 1.01x
+  F1 score range: 0.0000 - 0.0000
+  Optimal window size (F1): 10
+
+Single Model Branch:
+  Latency range: 18.18 - 23.76 ms
+  Latency scaling factor: 1.31x
+
+================================================================================
+END OF WINDOW SIZE SENSITIVITY ANALYSIS
+================================================================================
