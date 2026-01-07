@@ -1,6 +1,6 @@
 ADAPTIVE ONLINE PHASE ANALYSIS
 ================================================================================
-Dataset: SKAB, Entity: 0
+Dataset: skab, Entity: 0
 Total windows: 50
 Regime shift windows: {'mean_shift': 12, 'variance_change': 25, 'linear_trend': 37}
 
@@ -12,36 +12,60 @@ UPDATE 5
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
-  Re-optimizations: None (static selection)
+  Latency (ms): 49.66 ± 9.20
+  Memory (MB): 572.44 ± 5.32
+  F1 Score: 0.8133 ± 0.1137
+  Re-optimizations: 1 events, avg 0.00s each
 
 SINGLE-MODEL BRANCH:
+  Latency (ms): 25.35 ± 3.00
+  Memory (MB): 572.54 ± 5.28
+  F1 Score: 0.9557 ± 0.0323
 
 
 UPDATE 10
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
+  Latency (ms): 56.87 ± 13.89
+  Memory (MB): 599.45 ± 0.00
+  F1 Score: 0.9304 ± 0.0389
   Re-optimizations: None (static selection)
 
 SINGLE-MODEL BRANCH:
+  Latency (ms): 33.01 ± 5.15
+  Memory (MB): 599.45 ± 0.00
+  F1 Score: 0.9859 ± 0.0118
 
 
 UPDATE 20
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
+  Latency (ms): 50.24 ± 8.15
+  Memory (MB): 575.71 ± 0.18
+  F1 Score: 0.8872 ± 0.1005
   Re-optimizations: None (static selection)
 
 SINGLE-MODEL BRANCH:
+  Latency (ms): 34.28 ± 4.46
+  Memory (MB): 575.71 ± 0.18
+  F1 Score: 0.9859 ± 0.0118
 
 
 NO REOPT
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
+  Latency (ms): 55.76 ± 1.81
+  Memory (MB): 579.01 ± 0.02
+  F1 Score: 0.9230 ± 0.0485
   Re-optimizations: None (static selection)
 
 SINGLE-MODEL BRANCH:
+  Latency (ms): 35.84 ± 3.60
+  Memory (MB): 579.01 ± 0.02
+  F1 Score: 0.9859 ± 0.0118
 
 
 KEY FINDINGS

@@ -2,71 +2,73 @@
 Window Size Sensitivity Analysis - Summary
 ================================================================================
 
-Dataset: SKAB
+Dataset: skab
 Entity: 0
-Window Sizes Tested: [10, 20, 30, 50]
+Window Sizes Tested: [5, 11, 23, 46]
 
 ================================================================================
 RESULTS BY WINDOW SIZE
 ================================================================================
 
-Window Size: 10
+Window Size: 5
 ----------------------------------------
 Ensemble Branch:
-  Latency (ms):  129.28 ± 4.38
-  Memory (MB):   545.70
-  F1 Score:      0.0000 ± 0.0000
+  Latency (ms):  37.60 ± 3.88
+  Memory (MB):   542.30
+  F1 Score:      0.0145 ± 0.0680
 Single Model Branch:
-  Latency (ms):  23.76 ± 1.90
-  Memory (MB):   545.71
-  F1 Score:      N/A (no windows processed)
+  Latency (ms):  26.61 ± 6.91
+  Memory (MB):   542.30
+  F1 Score:      0.0181 ± 0.0867
 
-Window Size: 20
+Window Size: 11
 ----------------------------------------
 Ensemble Branch:
-  Latency (ms):  129.51 ± 5.44
-  Memory (MB):   552.93
-  F1 Score:      0.0000 ± 0.0000
+  Latency (ms):  37.96 ± 1.04
+  Memory (MB):   547.90
+  F1 Score:      0.0152 ± 0.0479
 Single Model Branch:
-  Latency (ms):  21.84 ± 0.22
-  Memory (MB):   552.93
-  F1 Score:      N/A (no windows processed)
+  Latency (ms):  26.08 ± 1.28
+  Memory (MB):   547.90
+  F1 Score:      0.0227 ± 0.0761
 
-Window Size: 30
+Window Size: 23
 ----------------------------------------
 Ensemble Branch:
-  Latency (ms):  130.24 ± 4.91
-  Memory (MB):   553.06
-  F1 Score:      0.0000 ± 0.0000
+  Latency (ms):  37.23 ± 1.53
+  Memory (MB):   548.34
+  F1 Score:      0.0167 ± 0.0333
 Single Model Branch:
-  Latency (ms):  20.62 ± 0.35
-  Memory (MB):   553.06
-  F1 Score:      N/A (no windows processed)
+  Latency (ms):  24.99 ± 2.05
+  Memory (MB):   548.34
+  F1 Score:      0.0333 ± 0.0764
 
-Window Size: 50
+Window Size: 46
 ----------------------------------------
 Ensemble Branch:
-  Latency (ms):  130.06 ± 8.08
-  Memory (MB):   554.53
-  F1 Score:      0.0000 ± 0.0000
+  Latency (ms):  35.82 ± 1.98
+  Memory (MB):   546.47
+  F1 Score:      0.2085 ± 0.3961
 Single Model Branch:
-  Latency (ms):  18.18 ± 0.21
-  Memory (MB):   554.53
-  F1 Score:      N/A (no windows processed)
+  Latency (ms):  22.83 ± 1.81
+  Memory (MB):   546.47
+  F1 Score:      0.0393 ± 0.0596
 
 ================================================================================
 KEY FINDINGS
 ================================================================================
 
 Ensemble Branch:
-  Latency range: 129.28 - 130.24 ms
-  Latency scaling factor: 1.01x
-  F1 score range: 0.0000 - 0.0000
-  Optimal window size (F1): 10
+  Latency range: 35.82 - 37.96 ms
+  Latency scaling factor: 1.06x
+  F1 score range: 0.0145 - 0.2085
+  Optimal window size (F1): 46
 
 Single Model Branch:
-  Latency range: 18.18 - 23.76 ms
-  Latency scaling factor: 1.31x
+  Latency range: 22.83 - 26.61 ms
+  Latency scaling factor: 1.17x
+  F1 score range: 0.0181 - 0.0393
+  Optimal window size (F1): 46
 
 ================================================================================
 END OF WINDOW SIZE SENSITIVITY ANALYSIS

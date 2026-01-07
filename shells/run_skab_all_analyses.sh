@@ -2,16 +2,7 @@
 ################################################################################
 # SKAB Dataset - All Three Analyses
 # 
-# Dataspython3 online_phase_analysis.py \
-    --dataset-list dataset_lists/skab_full.csv \
-    --data-dir ./Mononito/datasets \
-    --trained-model-dir ./Mononito/trained_models \
-    --output-dir ./results_skab/scalability \
-    --scalability-analysis \
-    --inject-synthetic \
-    --num-windows 50 \
-    --num-entities 3 \
-    --num-models-range "2,4,6,9"Skoltech Anomaly Benchmark)
+# Dataset: SKAB (Skoltech Anomaly Benchmark)
 # Characteristics:
 #   - Entities: 16 (using subset for speed)
 #   - Dimensions: 11 columns (MULTIVARIATE)
@@ -140,10 +131,10 @@ echo ""
 echo "================================================================================"
 echo "ANALYSIS 2/3: SCALABILITY ANALYSIS (R1.O3 - Resource Efficiency)"
 echo "================================================================================"
-echo "Testing pool sizes: 3, 5, 8 models"
+echo "Auto-determining pool sizes: start at 3, then increments of 5 up to total"
 echo "Num windows: 60 (more windows for better scalability evidence)"
 echo "Injecting synthetic anomalies: YES"
-echo "Question: Does RAMSeS need 8 models or work well with 3-5?"
+echo "Question: Does RAMSeS need all models or work well with fewer?"
 echo ""
 
 python3 online_phase_analysis.py \
@@ -154,8 +145,7 @@ python3 online_phase_analysis.py \
     --scalability-analysis \
     --inject-synthetic \
     --num-windows 60 \
-    --num-entities 3 \
-    --num-models-range "3,5,8"
+    --num-entities 3
 
 if [ $? -eq 0 ]; then
     echo ""

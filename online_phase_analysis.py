@@ -462,8 +462,10 @@ def run_online_phase_experiment(
     total_length = targets.flatten().shape[0]
     
     if window_size is None:
-        # Auto-calculate window size
-        window_size = max(total_length // num_windows, 256)
+        # Auto-calculate window size - adaptive based on data length
+        target_window_size = total_length // num_windows
+        window_size = max(min(target_window_size, 256), 32)  # Between 32 and 256
+        logger.info(f"Auto-calculated window size: {window_size} (data_length={total_length}, num_windows={num_windows})")
     
     stride = max(window_size - window_overlap, 1)
     
@@ -485,7 +487,7 @@ def run_online_phase_experiment(
     # Prepare for ensemble inference
     logger.info("Preparing ensemble meta-model...")
     # We need to evaluate individual models on train/test to get base predictions
-    from Metrics.Ensemble_GA import evaluate_individual_models
+    from Metrics.Ensemble_GA import evaluate_individual_models, train_meta_model_rf
     
     train_data_copy = copy.deepcopy(train_data)
     test_data_copy = copy.deepcopy(test_data)
@@ -502,7 +504,9 @@ def run_online_phase_experiment(
         test_data_copy, trained_models, best_ensemble, is_ensemble=True
     )
     
-    logger.info("✓ Prepared ensemble meta-model data")
+    # PRE-TRAIN the meta-model ONCE on training data (don't retrain per window!)
+    meta_model_rf = train_meta_model_rf(base_model_predictions_train, y_true_train_agg)
+    logger.info(f"✓ Pre-trained meta-model on training data: {base_model_predictions_train.shape}")
     
     # Initialize performance monitors
     ensemble_monitor = PerformanceMonitor()
@@ -537,15 +541,39 @@ def run_online_phase_experiment(
         # Use the already-transformed data (with regime shifts if enabled)
         # No need to re-inject anomalies per window since they're in the original data
         
-        # 1. Ensemble inference
-        ensemble_result = inference_ensemble(
-            best_ensemble, trained_models, train_data, window_test_data,
-            individual_predictions, base_model_predictions_train,
-            base_model_predictions_test, y_true_train_agg, y_true_test_agg,
-            meta_model_type, ensemble_monitor
-        )
-        if ensemble_result:
+        # 1. Ensemble inference with PRE-TRAINED meta-model (NO retraining!)
+        try:
+            ensemble_monitor.start()
+            
+            # Get base model predictions for this window only
+            y_true_window, base_predictions_window, _, _ = evaluate_model_consistently(
+                window_test_data, trained_models, best_ensemble, is_ensemble=True
+            )
+            
+            # Use PRE-TRAINED meta-model to make predictions
+            from Metrics.metrics import best_f1_linspace, prauc
+            y_scores_ensemble = meta_model_rf.predict_proba(base_predictions_window)[:, 1]
+            
+            # Calculate metrics
+            best_f1, precision, recall, y_pred_binary, _, best_threshold = best_f1_linspace(
+                y_scores_ensemble, y_true_window, n_splits=100, segment_adjust=True, f1_type='standard'
+            )
+            pr_auc = prauc(y_true_window, y_scores_ensemble)
+            
+            perf = ensemble_monitor.stop()
+            
+            ensemble_result = {
+                'ensemble_models': best_ensemble,
+                'meta_model_type': meta_model_type,
+                'f1': float(best_f1),
+                'pr_auc': float(pr_auc),
+                'fitness': float(best_f1),
+                'performance': perf,
+                'y_pred': y_pred_binary.tolist() if hasattr(y_pred_binary, 'tolist') else y_pred_binary
+            }
             results['ensemble']['windows'].append(ensemble_result)
+        except Exception as e:
+            logger.warning(f"Ensemble inference failed for window {window_idx}: {e}")
         
         # 2. Single model inference
         single_result = inference_single_model(
@@ -931,14 +959,25 @@ def run_window_size_sensitivity_analysis(
     # Auto-calculate smart window sizes if not provided
     if window_sizes is None:
         # Use 2%, 5%, 10%, and 20% of data length
+        # But ensure minimums are reasonable (at least 5 timesteps)
+        # and don't exceed the actual percentages too much
         window_sizes = [
-            max(10, int(total_length * 0.02)),  # 2% (min 10)
-            max(20, int(total_length * 0.05)),  # 5% (min 20)
-            max(30, int(total_length * 0.10)),  # 10% (min 30)
-            max(50, int(total_length * 0.20))   # 20% (min 50)
+            max(5, min(int(total_length * 0.02), total_length * 0.04)),   # ~2% (min 5, max 4%)
+            max(10, min(int(total_length * 0.05), total_length * 0.08)),  # ~5% (min 10, max 8%)
+            max(15, min(int(total_length * 0.10), total_length * 0.15)),  # ~10% (min 15, max 15%)
+            max(20, min(int(total_length * 0.20), total_length * 0.25))   # ~20% (min 20, max 25%)
         ]
-        # Remove duplicates and sort
+        
+        # Remove any window sizes that are >= 30% of total length (too large)
+        max_window = int(total_length * 0.3)
+        window_sizes = [ws for ws in window_sizes if ws <= max_window]
+        
+        # Remove duplicates, sort, and ensure we have at least one valid window
         window_sizes = sorted(list(set(window_sizes)))
+        if not window_sizes:
+            # Fallback: use 20% of data length
+            window_sizes = [max(5, int(total_length * 0.2))]
+        
         logger.info(f"Auto-calculated window sizes based on data length {total_length}: {window_sizes}")
     
     logger.info("="*80)
@@ -1163,9 +1202,9 @@ def plot_window_size_analysis(results: Dict, output_dir: str):
     """
     window_sizes = results['window_sizes']
     
-    # Extract metrics
-    ensemble_data = {'latency': [], 'memory': [], 'f1': [], 'pr_auc': []}
-    single_data = {'latency': [], 'memory': [], 'f1': [], 'pr_auc': []}
+    # Extract metrics (no PR-AUC!)
+    ensemble_data = {'latency': [], 'memory': [], 'f1': []}
+    single_data = {'latency': [], 'memory': [], 'f1': []}
     
     valid_ws = []
     
@@ -1182,7 +1221,6 @@ def plot_window_size_analysis(results: Dict, output_dir: str):
             ensemble_data['memory'].append(ws_result['ensemble']['stats']['memory_mb']['mean'])
             if ws_result['ensemble']['windows']:
                 ensemble_data['f1'].append(np.mean([w['f1'] for w in ws_result['ensemble']['windows']]))
-                ensemble_data['pr_auc'].append(np.mean([w['pr_auc'] for w in ws_result['ensemble']['windows']]))
         
         # Single model metrics
         if 'single_model' in ws_result and 'stats' in ws_result['single_model']:
@@ -1190,40 +1228,39 @@ def plot_window_size_analysis(results: Dict, output_dir: str):
             single_data['memory'].append(ws_result['single_model']['stats']['memory_mb']['mean'])
             if ws_result['single_model']['windows']:
                 single_data['f1'].append(np.mean([w['f1'] for w in ws_result['single_model']['windows']]))
-                single_data['pr_auc'].append(np.mean([w['pr_auc'] for w in ws_result['single_model']['windows']]))
     
     if not valid_ws:
         logger.warning("No valid window size results to plot")
         return
     
-    # Create 2x2 plot
+    # Create 2x2 plot: Latency, Memory, F1, and F1 Bar Comparison
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     
-    # Latency vs Window Size
-    axes[0, 0].plot(valid_ws, ensemble_data['latency'], marker='o', label='Ensemble', linewidth=2)
-    axes[0, 0].plot(valid_ws, single_data['latency'], marker='s', label='Single Model', linewidth=2)
-    axes[0, 0].set_xlabel('Window Size', fontsize=12)
+    # Plot 1: Latency vs Window Size
+    axes[0, 0].plot(valid_ws, ensemble_data['latency'], marker='o', label='Ensemble', linewidth=2, color='#e74c3c')
+    axes[0, 0].plot(valid_ws, single_data['latency'], marker='s', label='Single Model', linewidth=2, color='#3498db')
+    axes[0, 0].set_xlabel('Window Size (timesteps)', fontsize=12)
     axes[0, 0].set_ylabel('Latency (ms)', fontsize=12)
     axes[0, 0].set_title('Inference Latency vs Window Size', fontsize=14, fontweight='bold')
     axes[0, 0].legend(fontsize=11)
     axes[0, 0].grid(True, alpha=0.3)
     axes[0, 0].set_xscale('log')
     
-    # Memory vs Window Size
-    axes[0, 1].plot(valid_ws, ensemble_data['memory'], marker='o', label='Ensemble', linewidth=2)
-    axes[0, 1].plot(valid_ws, single_data['memory'], marker='s', label='Single Model', linewidth=2)
-    axes[0, 1].set_xlabel('Window Size', fontsize=12)
+    # Plot 2: Memory vs Window Size
+    axes[0, 1].plot(valid_ws, ensemble_data['memory'], marker='o', label='Ensemble', linewidth=2, color='#e74c3c')
+    axes[0, 1].plot(valid_ws, single_data['memory'], marker='s', label='Single Model', linewidth=2, color='#3498db')
+    axes[0, 1].set_xlabel('Window Size (timesteps)', fontsize=12)
     axes[0, 1].set_ylabel('Memory (MB)', fontsize=12)
     axes[0, 1].set_title('Memory Usage vs Window Size', fontsize=14, fontweight='bold')
     axes[0, 1].legend(fontsize=11)
     axes[0, 1].grid(True, alpha=0.3)
     axes[0, 1].set_xscale('log')
     
-    # F1 Score vs Window Size
+    # Plot 3: F1 Score vs Window Size (Line Plot)
     if ensemble_data['f1'] and single_data['f1']:
-        axes[1, 0].plot(valid_ws, ensemble_data['f1'], marker='o', label='Ensemble', linewidth=2)
-        axes[1, 0].plot(valid_ws, single_data['f1'], marker='s', label='Single Model', linewidth=2)
-        axes[1, 0].set_xlabel('Window Size', fontsize=12)
+        axes[1, 0].plot(valid_ws, ensemble_data['f1'], marker='o', label='Ensemble', linewidth=2, color='#2ecc71')
+        axes[1, 0].plot(valid_ws, single_data['f1'], marker='s', label='Single Model', linewidth=2, color='#f39c12')
+        axes[1, 0].set_xlabel('Window Size (timesteps)', fontsize=12)
         axes[1, 0].set_ylabel('F1 Score', fontsize=12)
         axes[1, 0].set_title('Detection Quality (F1) vs Window Size', fontsize=14, fontweight='bold')
         axes[1, 0].legend(fontsize=11)
@@ -1231,16 +1268,19 @@ def plot_window_size_analysis(results: Dict, output_dir: str):
         axes[1, 0].set_xscale('log')
         axes[1, 0].set_ylim([0, 1.05])
     
-    # PR-AUC vs Window Size
-    if ensemble_data['pr_auc'] and single_data['pr_auc']:
-        axes[1, 1].plot(valid_ws, ensemble_data['pr_auc'], marker='o', label='Ensemble', linewidth=2)
-        axes[1, 1].plot(valid_ws, single_data['pr_auc'], marker='s', label='Single Model', linewidth=2)
-        axes[1, 1].set_xlabel('Window Size', fontsize=12)
-        axes[1, 1].set_ylabel('PR-AUC', fontsize=12)
-        axes[1, 1].set_title('Detection Quality (PR-AUC) vs Window Size', fontsize=14, fontweight='bold')
+    # Plot 4: F1 Bar Chart Comparison
+    if ensemble_data['f1'] and single_data['f1']:
+        x = np.arange(len(valid_ws))
+        width = 0.35
+        axes[1, 1].bar(x - width/2, ensemble_data['f1'], width, label='Ensemble', color='#2ecc71', alpha=0.8)
+        axes[1, 1].bar(x + width/2, single_data['f1'], width, label='Single Model', color='#f39c12', alpha=0.8)
+        axes[1, 1].set_xlabel('Window Size (timesteps)', fontsize=12)
+        axes[1, 1].set_ylabel('F1 Score', fontsize=12)
+        axes[1, 1].set_title('Branch Comparison: F1 Score by Window Size', fontsize=14, fontweight='bold')
+        axes[1, 1].set_xticks(x)
+        axes[1, 1].set_xticklabels([str(ws) for ws in valid_ws])
         axes[1, 1].legend(fontsize=11)
-        axes[1, 1].grid(True, alpha=0.3)
-        axes[1, 1].set_xscale('log')
+        axes[1, 1].grid(True, alpha=0.3, axis='y')
         axes[1, 1].set_ylim([0, 1.05])
     
     plt.tight_layout()
@@ -1304,38 +1344,35 @@ def run_scalability_analysis(
     Dict
         Scalability analysis results showing F1/latency vs pool size
     """
-    if num_models_range is None:
-        num_models_range = [3, 5, 8]  # Test pool sizes: small, medium, full
-    
-    logger.info("="*80)
-    logger.info(f"SCALABILITY ANALYSIS: Model Pool Size Impact (R1.O3)")
-    logger.info(f"Dataset: {dataset}, Entity: {entity}")
-    logger.info(f"Testing POOL SIZES: {num_models_range}")
-    logger.info(f"Question: Does RAMSeS need 8 models or work well with 3-5?")
-    logger.info("="*80)
-    
-    # Load data
-    logger.info(f"Loading data from {data_dir}...")
-    train_data = load_data(
-        dataset=dataset, group='train', entities=entity,
-        downsampling=10, min_length=256, root_dir=data_dir,
-        normalize=True, verbose=False
-    )
-    test_data = load_data(
-        dataset=dataset, group='test', entities=entity,
-        downsampling=10, min_length=256, root_dir=data_dir,
-        normalize=True, verbose=False
-    )
-    
-    # Inject regime shifts for realistic evaluation
-    test_data = inject_regime_shifts_and_trends(test_data)
-    
-    # Load ALL trained models from the full pool
+    # Load ALL trained models first to determine available pool
     all_trained_models = load_trained_models(algorithm_list_instances, models_dir)
     if not all_trained_models:
         raise ValueError(f"No models loaded from {models_dir}")
     
+    total_models = len(all_trained_models)
+    
+    # Auto-generate pool sizes if not provided: start at 3, then increments of 5 up to total
+    if num_models_range is None:
+        num_models_range = [3]  # Start with minimum of 3
+        current = 5
+        while current <= total_models:
+            num_models_range.append(current)
+            current += 5
+        # Always include the full pool size if not already there
+        if total_models not in num_models_range and total_models >= 3:
+            num_models_range.append(total_models)
+        num_models_range = sorted(set(num_models_range))  # Remove duplicates and sort
+    
+    logger.info("="*80)
+    logger.info(f"SCALABILITY ANALYSIS: Model Pool Size Impact (R1.O3)")
+    logger.info(f"Dataset: {dataset}, Entity: {entity}")
+    logger.info(f"Total available models: {total_models}")
+    logger.info(f"Testing POOL SIZES: {num_models_range}")
+    logger.info(f"Question: Does RAMSeS need {total_models} models or work well with fewer?")
+    logger.info("="*80)
+    
     all_available_models = list(all_trained_models.keys())
+    logger.info(f"Loaded {len(all_available_models)}/{len(algorithm_list_instances)} models from {models_dir}")
     logger.info(f"Full model pool: {all_available_models} ({len(all_available_models)} models)")
     
     results = {
@@ -1385,90 +1422,69 @@ def run_scalability_analysis(
         model_subset = {k: restricted_models[k] for k in selected_ensemble}
         
         try:
-            # Run dual-branch inference with this pool size
-            X_test = test_data.entities[0].Y  # Fixed: Use .Y not .X
-            y_test = test_data.entities[0].labels
+            # Use the proper run_online_phase_experiment function with restricted models
+            # This ensures we use all the correct infrastructure
+            window_results = run_online_phase_experiment(
+                dataset=dataset,
+                entity=entity,
+                data_dir=data_dir,
+                models_dir=models_dir,
+                algorithm_list_instances=restricted_pool,  # Pass restricted pool
+                num_windows=num_windows,
+                window_size=None,  # Auto-calculate
+                window_overlap=0,
+                best_ensemble=selected_ensemble,
+                best_single_model=selected_single,
+                meta_model_type='rf',
+                baseline_models=[],
+                inject_regime_shifts=True,
+                inject_synthetic_anomalies=True  # Use synthetic for better evaluation
+            )
             
-            monitor_ensemble = PerformanceMonitor()
-            monitor_single = PerformanceMonitor()
+            # Extract metrics
+            ensemble_windows = window_results.get('ensemble', {}).get('windows', [])
+            single_windows = window_results.get('single_model', {}).get('windows', [])
+            ensemble_stats = window_results.get('ensemble', {}).get('stats', {})
+            single_stats = window_results.get('single_model', {}).get('stats', {})
             
-            ensemble_metrics = []
-            single_metrics = []
-            
-            # Process windows
-            window_size = 256
-            stride = 128
-            num_processed = 0
-            
-            logger.info(f"Processing {num_windows} windows...")
-            for start_idx in range(0, len(X_test) - window_size + 1, stride):
-                if num_processed >= num_windows:
-                    break
-                
-                end_idx = start_idx + window_size
-                X_window = X_test[:, start_idx:end_idx]  # (features, timesteps)
-                y_window = y_test[:, start_idx:end_idx]
-                
-                # ENSEMBLE branch inference
-                # For now, simplified - just use first model as proxy
-                # In full implementation, would run GA-optimized ensemble
-                try:
-                    model_key = selected_ensemble[0]
-                    model = restricted_models[model_key]
-                    pred_scores = evaluate_model_consistently(
-                        model, X_window.T, model_key
-                    )
-                    
-                    # Calculate metrics
-                    if pred_scores is not None and len(pred_scores) > 0:
-                        f1, _ = best_f1_linspace(y_window.flatten(), pred_scores)
-                        pr_auc = prauc(y_window.flatten(), pred_scores)
-                        ensemble_metrics.append({'f1': f1, 'pr_auc': pr_auc})
-                except Exception as e:
-                    logger.debug(f"Window {num_processed} ensemble error: {e}")
-                
-                # SINGLE-MODEL branch inference  
-                try:
-                    model_key = selected_single
-                    model = restricted_models[model_key]
-                    pred_scores = evaluate_model_consistently(
-                        model, X_window.T, model_key
-                    )
-                    
-                    if pred_scores is not None and len(pred_scores) > 0:
-                        f1, _ = best_f1_linspace(y_window.flatten(), pred_scores)
-                        pr_auc = prauc(y_window.flatten(), pred_scores)
-                        single_metrics.append({'f1': f1, 'pr_auc': pr_auc})
-                except Exception as e:
-                    logger.debug(f"Window {num_processed} single error: {e}")
-                
-                num_processed += 1
-            
-            # Compute statistics
-            ensemble_f1 = [m['f1'] for m in ensemble_metrics if 'f1' in m]
-            single_f1 = [m['f1'] for m in single_metrics if 'f1' in m]
+            ensemble_f1 = [w['f1'] for w in ensemble_windows if 'f1' in w and w['f1'] is not None]
+            single_f1 = [w['f1'] for w in single_windows if 'f1' in w and w['f1'] is not None]
             
             results['results'][pool_size] = {
                 'pool_size': pool_size,
                 'restricted_pool': restricted_pool,
                 'ensemble_selected': selected_ensemble,
                 'single_selected': selected_single,
-                'num_windows': num_processed,
+                'num_windows': len(ensemble_windows),
                 'ensemble': {
-                    'f1_mean': np.mean(ensemble_f1) if ensemble_f1 else 0.0,
-                    'f1_std': np.std(ensemble_f1) if ensemble_f1 else 0.0,
-                    'f1_scores': ensemble_f1
+                    'f1_mean': float(np.mean(ensemble_f1)) if ensemble_f1 else 0.0,
+                    'f1_std': float(np.std(ensemble_f1)) if ensemble_f1 else 0.0,
+                    'f1_scores': ensemble_f1,
+                    'num_valid_windows': len(ensemble_f1),
+                    'stats': ensemble_stats  # Include runtime/memory stats
                 },
                 'single_model': {
-                    'f1_mean': np.mean(single_f1) if single_f1 else 0.0,
-                    'f1_std': np.std(single_f1) if single_f1 else 0.0,
-                    'f1_scores': single_f1
+                    'f1_mean': float(np.mean(single_f1)) if single_f1 else 0.0,
+                    'f1_std': float(np.std(single_f1)) if single_f1 else 0.0,
+                    'f1_scores': single_f1,
+                    'num_valid_windows': len(single_f1),
+                    'stats': single_stats  # Include runtime/memory stats
                 }
             }
             
             logger.info(f"✓ Completed with pool_size={pool_size}:")
-            logger.info(f"  Ensemble F1: {np.mean(ensemble_f1):.4f} ± {np.std(ensemble_f1):.4f}" if ensemble_f1 else "  Ensemble F1: N/A")
-            logger.info(f"  Single F1: {np.mean(single_f1):.4f} ± {np.std(single_f1):.4f}" if single_f1 else "  Single F1: N/A")
+            if ensemble_f1:
+                logger.info(f"  Ensemble F1: {np.mean(ensemble_f1):.4f} ± {np.std(ensemble_f1):.4f} ({len(ensemble_f1)} windows)")
+                if ensemble_stats and 'latency_ms' in ensemble_stats:
+                    logger.info(f"  Ensemble Latency: {ensemble_stats['latency_ms']['mean']:.2f} ms, Memory: {ensemble_stats['memory_mb']['mean']:.2f} MB")
+            else:
+                logger.info(f"  Ensemble F1: N/A (no valid windows)")
+            if single_f1:
+                logger.info(f"  Single F1: {np.mean(single_f1):.4f} ± {np.std(single_f1):.4f} ({len(single_f1)} windows)")
+                if single_stats and 'latency_ms' in single_stats:
+                    logger.info(f"  Single Latency: {single_stats['latency_ms']['mean']:.2f} ms, Memory: {single_stats['memory_mb']['mean']:.2f} MB")
+            else:
+                logger.info(f"  Single F1: N/A (no valid windows)")
             
         except Exception as e:
             logger.error(f"Error testing with pool_size={pool_size}: {e}")
@@ -1529,9 +1545,24 @@ def save_scalability_analysis(results: Dict, output_dir: str):
                 f.write(f"  Ensemble selected: {res['ensemble_selected']} ({len(res['ensemble_selected'])} models)\n")
                 f.write(f"  Single-model selected: {res['single_selected']}\n")
                 f.write(f"\n  ENSEMBLE BRANCH:\n")
-                f.write(f"    F1 Score: {res['ensemble']['f1_mean']:.4f} ± {res['ensemble']['f1_std']:.4f}\n")
+                
+                # Add runtime/memory if available
+                if res['ensemble'].get('stats') and 'latency_ms' in res['ensemble']['stats']:
+                    estats = res['ensemble']['stats']
+                    f.write(f"    Latency (ms): {estats['latency_ms']['mean']:.2f} ± {estats['latency_ms']['std']:.2f}\n")
+                    f.write(f"    Memory (MB):  {estats['memory_mb']['mean']:.2f} ± {estats['memory_mb']['std']:.2f}\n")
+                
+                f.write(f"    F1 Score:     {res['ensemble']['f1_mean']:.4f} ± {res['ensemble']['f1_std']:.4f}\n")
+                
                 f.write(f"\n  SINGLE-MODEL BRANCH:\n")
-                f.write(f"    F1 Score: {res['single_model']['f1_mean']:.4f} ± {res['single_model']['f1_std']:.4f}\n")
+                
+                # Add runtime/memory if available
+                if res['single_model'].get('stats') and 'latency_ms' in res['single_model']['stats']:
+                    sstats = res['single_model']['stats']
+                    f.write(f"    Latency (ms): {sstats['latency_ms']['mean']:.2f} ± {sstats['latency_ms']['std']:.2f}\n")
+                    f.write(f"    Memory (MB):  {sstats['memory_mb']['mean']:.2f} ± {sstats['memory_mb']['std']:.2f}\n")
+                
+                f.write(f"    F1 Score:     {res['single_model']['f1_mean']:.4f} ± {res['single_model']['f1_std']:.4f}\n")
                 f.write("\n")
             
             # Analyze diminishing returns
@@ -1586,60 +1617,94 @@ def plot_scalability_analysis(results: Dict, output_dir: str):
     num_models_list = sorted(valid_results.keys())
     
     # Safely extract metrics with defaults for missing data
-    latencies = []
-    memories = []
-    f1_scores = []
-    pr_aucs = []
+    latencies_ensemble = []
+    latencies_single = []
+    memories_ensemble = []
+    memories_single = []
+    f1_scores_ensemble = []
+    f1_scores_single = []
     
     for n in num_models_list:
         result = valid_results[n]
         
-        # Check if stats exist, otherwise use placeholder
-        if 'stats' in result:
-            latencies.append(result['stats'].get('latency_ms', {}).get('mean', 0))
-            memories.append(result['stats'].get('memory_mb', {}).get('mean', 0))
+        # Ensemble metrics
+        if 'ensemble' in result and 'stats' in result['ensemble'] and result['ensemble']['stats']:
+            estats = result['ensemble']['stats']
+            latencies_ensemble.append(estats.get('latency_ms', {}).get('mean', 0))
+            memories_ensemble.append(estats.get('memory_mb', {}).get('mean', 0))
         else:
-            latencies.append(0)
-            memories.append(0)
+            latencies_ensemble.append(0)
+            memories_ensemble.append(0)
+        f1_scores_ensemble.append(result.get('ensemble', {}).get('f1_mean', 0))
         
-        f1_scores.append(result.get('f1_mean', 0))
-        pr_aucs.append(result.get('pr_auc_mean', 0))
+        # Single model metrics
+        if 'single_model' in result and 'stats' in result['single_model'] and result['single_model']['stats']:
+            sstats = result['single_model']['stats']
+            latencies_single.append(sstats.get('latency_ms', {}).get('mean', 0))
+            memories_single.append(sstats.get('memory_mb', {}).get('mean', 0))
+        else:
+            latencies_single.append(0)
+            memories_single.append(0)
+        f1_scores_single.append(result.get('single_model', {}).get('f1_mean', 0))
     
-    # Create 2x2 plot
+    # Create 2x2 plot: Latency (ensemble), Memory (ensemble), F1 (both), Latency vs F1
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
     
-    # Latency vs Number of Models
-    axes[0, 0].plot(num_models_list, latencies, marker='o', linewidth=2, markersize=8, color='#e74c3c')
-    axes[0, 0].set_xlabel('Number of Base Models', fontsize=12)
+    # Plot 1: Latency vs Number of Models (Both Branches)
+    axes[0, 0].plot(num_models_list, latencies_ensemble, marker='o', linewidth=2, markersize=8, 
+                    color='#e74c3c', label='Ensemble')
+    axes[0, 0].plot(num_models_list, latencies_single, marker='s', linewidth=2, markersize=8, 
+                    color='#3498db', label='Single Model')
+    axes[0, 0].set_xlabel('Number of Base Models in Pool', fontsize=12)
     axes[0, 0].set_ylabel('Latency (ms)', fontsize=12)
-    axes[0, 0].set_title('Inference Latency vs Number of Base Models', fontsize=14, fontweight='bold')
+    axes[0, 0].set_title('Inference Latency vs Pool Size', fontsize=14, fontweight='bold')
+    axes[0, 0].legend(fontsize=11)
     axes[0, 0].grid(True, alpha=0.3)
     axes[0, 0].set_xticks(num_models_list)
     
-    # Memory vs Number of Models
-    axes[0, 1].plot(num_models_list, memories, marker='s', linewidth=2, markersize=8, color='#3498db')
-    axes[0, 1].set_xlabel('Number of Base Models', fontsize=12)
+    # Plot 2: Memory vs Number of Models (Both Branches)
+    axes[0, 1].plot(num_models_list, memories_ensemble, marker='o', linewidth=2, markersize=8, 
+                    color='#e74c3c', label='Ensemble')
+    axes[0, 1].plot(num_models_list, memories_single, marker='s', linewidth=2, markersize=8, 
+                    color='#3498db', label='Single Model')
+    axes[0, 1].set_xlabel('Number of Base Models in Pool', fontsize=12)
     axes[0, 1].set_ylabel('Memory (MB)', fontsize=12)
-    axes[0, 1].set_title('Memory Usage vs Number of Base Models', fontsize=14, fontweight='bold')
+    axes[0, 1].set_title('Memory Usage vs Pool Size', fontsize=14, fontweight='bold')
+    axes[0, 1].legend(fontsize=11)
     axes[0, 1].grid(True, alpha=0.3)
     axes[0, 1].set_xticks(num_models_list)
     
-    # F1 Score vs Number of Models
-    axes[1, 0].plot(num_models_list, f1_scores, marker='o', linewidth=2, markersize=8, color='#2ecc71')
-    axes[1, 0].set_xlabel('Number of Base Models', fontsize=12)
+    # Plot 3: F1 Score vs Number of Models (Both Branches)
+    axes[1, 0].plot(num_models_list, f1_scores_ensemble, marker='o', linewidth=2, markersize=8, 
+                    color='#2ecc71', label='Ensemble')
+    axes[1, 0].plot(num_models_list, f1_scores_single, marker='s', linewidth=2, markersize=8, 
+                    color='#f39c12', label='Single Model')
+    axes[1, 0].set_xlabel('Number of Base Models in Pool', fontsize=12)
     axes[1, 0].set_ylabel('F1 Score', fontsize=12)
-    axes[1, 0].set_title('Detection Quality (F1) vs Number of Base Models', fontsize=14, fontweight='bold')
+    axes[1, 0].set_title('Detection Quality (F1) vs Pool Size', fontsize=14, fontweight='bold')
+    axes[1, 0].legend(fontsize=11)
     axes[1, 0].grid(True, alpha=0.3)
     axes[1, 0].set_xticks(num_models_list)
     axes[1, 0].set_ylim([0, 1.05])
     
-    # PR-AUC vs Number of Models
-    axes[1, 1].plot(num_models_list, pr_aucs, marker='s', linewidth=2, markersize=8, color='#9b59b6')
-    axes[1, 1].set_xlabel('Number of Base Models', fontsize=12)
-    axes[1, 1].set_ylabel('PR-AUC', fontsize=12)
-    axes[1, 1].set_title('Detection Quality (PR-AUC) vs Number of Base Models', fontsize=14, fontweight='bold')
+    # Plot 4: Latency vs F1 (Trade-off Analysis)
+    axes[1, 1].scatter(latencies_ensemble, f1_scores_ensemble, s=200, marker='o', 
+                      color='#2ecc71', alpha=0.7, edgecolors='black', linewidth=2, label='Ensemble')
+    axes[1, 1].scatter(latencies_single, f1_scores_single, s=200, marker='s', 
+                      color='#f39c12', alpha=0.7, edgecolors='black', linewidth=2, label='Single Model')
+    
+    # Annotate points with pool sizes
+    for i, n in enumerate(num_models_list):
+        axes[1, 1].annotate(f'{n}', (latencies_ensemble[i], f1_scores_ensemble[i]), 
+                           xytext=(5, 5), textcoords='offset points', fontsize=9)
+        axes[1, 1].annotate(f'{n}', (latencies_single[i], f1_scores_single[i]), 
+                           xytext=(5, -10), textcoords='offset points', fontsize=9)
+    
+    axes[1, 1].set_xlabel('Latency (ms)', fontsize=12)
+    axes[1, 1].set_ylabel('F1 Score', fontsize=12)
+    axes[1, 1].set_title('Efficiency-Quality Trade-off', fontsize=14, fontweight='bold')
+    axes[1, 1].legend(fontsize=11)
     axes[1, 1].grid(True, alpha=0.3)
-    axes[1, 1].set_xticks(num_models_list)
     axes[1, 1].set_ylim([0, 1.05])
     
     plt.tight_layout()
@@ -1658,7 +1723,8 @@ def run_adaptive_online_experiment(
     algorithm_list_instances: List[str],
     num_windows: int = 100,
     update_intervals: List[int] = None,
-    inject_regime_shifts: bool = True
+    inject_regime_shifts: bool = True,
+    inject_synthetic_anomalies: bool = False
 ) -> Dict:
     """
     Run adaptive online phase experiment testing multiple re-optimization intervals.
@@ -1686,6 +1752,8 @@ def run_adaptive_online_experiment(
         List of N values to test (e.g., [5, 10, 20, None] where None=no re-opt)
     inject_regime_shifts : bool
         Whether to inject regime shifts for realism
+    inject_synthetic_anomalies : bool
+        Whether to inject synthetic anomalies for evaluation
         
     Returns
     -------
@@ -1699,6 +1767,7 @@ def run_adaptive_online_experiment(
     logger.info(f"ADAPTIVE ONLINE PHASE EXPERIMENT: {dataset}/{entity}")
     logger.info(f"Testing update intervals: {update_intervals}")
     logger.info(f"Regime shifts: {'Enabled' if inject_regime_shifts else 'Disabled'}")
+    logger.info(f"Synthetic anomalies: {'Enabled' if inject_synthetic_anomalies else 'Disabled (real only)'}")
     logger.info("="*80)
     
     # Load data
@@ -1732,6 +1801,20 @@ def run_adaptive_online_experiment(
         }
     else:
         regime_shift_windows = {}
+    
+    # Inject synthetic anomalies if enabled
+    if inject_synthetic_anomalies:
+        logger.info("Injecting synthetic anomalies while preserving real anomalies...")
+        from Model_Selection.inject_anomalies import InjectHybrid
+        test_data, anomaly_info = InjectHybrid(test_data, ['spikes', 'contextual'], num_synthetic=10)
+        total_anomalies = anomaly_info['total_anomalies']
+        test_length = test_data.entities[0].Y.shape[1]
+        anomaly_pct = 100.0 * total_anomalies / test_length
+        logger.info(f"✓ Hybrid injection complete: {anomaly_info['synthetic_added']} synthetic + "
+                   f"{anomaly_info['real_anomalies']} real = {total_anomalies} total anomalies "
+                   f"({anomaly_pct:.1f}%)")
+    else:
+        logger.info("Using real anomalies only (no synthetic injection)")
     
     results = {
         'dataset': dataset,
@@ -1811,11 +1894,37 @@ def run_dual_branch_online(
     best_ensemble = available_models[:min(4, len(available_models))]
     best_single_model = available_models[0]  # Initial selection
     
-    # Sliding window parameters
-    window_size = 256
-    stride = 128
+    # Sliding window parameters - adaptive to data length
     X_test = test_data.entities[0].Y  # Main time series data (m_features × n_timesteps)
-    y_test = test_data.entities[0].labels  # Anomaly labels (1 × n_timesteps)
+    y_test = test_data.entities[0].labels  # Anomaly labels
+    
+    # Ensure labels are 2D (1, n_timesteps) for consistent indexing
+    if y_test.ndim == 1:
+        y_test = y_test.reshape(1, -1)
+    
+    test_length = X_test.shape[1]
+    window_size = min(64, test_length // 3)  # Adaptive window size
+    stride = window_size // 2
+    logger.info(f"Adaptive window sizing: test_length={test_length}, window_size={window_size}, stride={stride}")
+    logger.info(f"X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
+    
+    # PRE-TRAIN meta-model once on training data (don't retrain for every window!)
+    logger.info("Pre-training ensemble meta-model on training data...")
+    from Metrics.Ensemble_GA import evaluate_individual_models, train_meta_model_rf
+    
+    # Get base model predictions on training data ONCE
+    train_copy = copy.deepcopy(train_data)
+    ensemble_subset = {k: trained_models[k] for k in best_ensemble if k in trained_models}
+    individual_predictions_train, _, _, _ = evaluate_individual_models(
+        best_ensemble, train_copy, ensemble_subset
+    )
+    y_true_train, base_predictions_train, _, _ = evaluate_model_consistently(
+        train_copy, trained_models, best_ensemble, is_ensemble=True
+    )
+    
+    # Train meta-model ONCE on full training data
+    meta_model_rf = train_meta_model_rf(base_predictions_train, y_true_train)
+    logger.info(f"✓ Meta-model trained once on training data: {base_predictions_train.shape}")
     
     # Results storage
     results = {
@@ -1838,49 +1947,81 @@ def run_dual_branch_online(
     
     # Process windows
     window_idx = 0
-    for start_idx in range(0, len(X_test) - window_size + 1, stride):
+    for start_idx in range(0, test_length - window_size + 1, stride):
         if window_idx >= num_windows:
             break
         
         end_idx = start_idx + window_size
-        X_window = X_test[start_idx:end_idx]
-        y_window = y_test[start_idx:end_idx]
+        X_window = X_test[:, start_idx:end_idx]  # (features, timesteps)
+        y_window = y_test[:, start_idx:end_idx]  # (1, timesteps)
         
         # Check if this is a regime shift point
         is_regime_shift = any(window_idx == shift_idx for shift_idx in regime_shift_windows.values())
         
-        # ENSEMBLE BRANCH: Inference with current ensemble
-        ensemble_config = {
-            'models': best_ensemble,
-            'meta_model': 'rf'
-        }
-        ensemble_subset = {k: trained_models[k] for k in best_ensemble if k in trained_models}
+        # Create a proper window dataset for inference
+        window_test_data = copy.deepcopy(test_data)
+        window_test_data.entities[0].Y = X_window
+        window_test_data.entities[0].labels = y_window
+        window_test_data.entities[0].mask = np.ones_like(y_window)
+        window_test_data.entities[0].n_time = window_size
+        window_test_data.total_time = window_size
         
-        ensemble_metrics = inference_ensemble(
-            window_data=X_window,
-            window_labels=y_window,
-            trained_models=ensemble_subset,
-            ensemble_config=ensemble_config,
-            train_data=train_data,
-            test_data=test_data,
-            monitor=ensemble_monitor
-        )
-        ensemble_metrics['window_idx'] = window_idx
-        ensemble_metrics['is_regime_shift'] = is_regime_shift
-        results['ensemble']['windows'].append(ensemble_metrics)
+        # ENSEMBLE BRANCH: Inference with PRE-TRAINED meta-model
+        try:
+            ensemble_monitor.start()
+            
+            # Get base model predictions for this WINDOW only
+            y_true_window, base_predictions_window, _, _ = evaluate_model_consistently(
+                window_test_data, trained_models, best_ensemble, is_ensemble=True
+            )
+            
+            # Use PRE-TRAINED meta-model to make predictions (NO retraining!)
+            y_scores_ensemble = meta_model_rf.predict_proba(base_predictions_window)[:, 1]
+            
+            # Calculate metrics
+            from Metrics.metrics import best_f1_linspace, prauc
+            best_f1, precision, recall, y_pred_binary, _, best_threshold = best_f1_linspace(
+                y_scores_ensemble, y_true_window, n_splits=100, segment_adjust=True, f1_type='standard'
+            )
+            pr_auc = prauc(y_true_window, y_scores_ensemble)
+            
+            perf = ensemble_monitor.stop()
+            
+            ensemble_result = {
+                'ensemble_models': best_ensemble,
+                'meta_model_type': 'rf',
+                'f1': float(best_f1),
+                'pr_auc': float(pr_auc),
+                'fitness': float(best_f1),
+                'performance': perf,
+                'y_pred': y_pred_binary.tolist() if hasattr(y_pred_binary, 'tolist') else y_pred_binary,
+                'window_idx': window_idx,
+                'is_regime_shift': is_regime_shift
+            }
+            results['ensemble']['windows'].append(ensemble_result)
+            
+        except Exception as e:
+            logger.warning(f"Ensemble inference failed for window {window_idx}: {e}")
+            import traceback
+            traceback.print_exc()
         
         # SINGLE-MODEL BRANCH: Inference with current single model
-        single_metrics = inference_single_model(
-            window_data=X_window,
-            window_labels=y_window,
-            model_name=best_single_model,
-            trained_model=trained_models[best_single_model],
-            monitor=single_monitor
-        )
-        single_metrics['window_idx'] = window_idx
-        single_metrics['is_regime_shift'] = is_regime_shift
-        results['single_model']['windows'].append(single_metrics)
+        try:
+            single_result = inference_single_model(
+                trained_models[best_single_model],
+                best_single_model,
+                window_test_data,
+                single_monitor
+            )
+            
+            if single_result:
+                single_result['window_idx'] = window_idx
+                single_result['is_regime_shift'] = is_regime_shift
+                results['single_model']['windows'].append(single_result)
+        except Exception as e:
+            logger.warning(f"Single model inference failed for window {window_idx}: {e}")
         
+        window_idx += 1
         # BACKGROUND RE-OPTIMIZATION (every N windows)
         if update_interval and window_idx > 0 and window_idx % update_interval == 0:
             logger.info(f"  🔄 Re-optimization at window {window_idx} (interval={update_interval})")
@@ -1991,10 +2132,28 @@ def save_adaptive_results(results: Dict, output_dir: str):
     """
     os.makedirs(output_dir, exist_ok=True)
     
+    # Helper function to convert numpy arrays to lists for JSON serialization
+    def convert_numpy(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, dict):
+            return {k: convert_numpy(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_numpy(item) for item in obj]
+        else:
+            return obj
+    
+    # Convert all numpy arrays to lists
+    results_serializable = convert_numpy(results)
+    
     # Save JSON
     json_file = os.path.join(output_dir, 'adaptive_analysis.json')
     with open(json_file, 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(results_serializable, f, indent=2)
     logger.info(f"Saved adaptive results to {json_file}")
     
     # Generate summary report
@@ -2503,8 +2662,8 @@ def main():
     parser.add_argument(
         '--num-models-range',
         type=str,
-        default='1,2,3,5,8',
-        help='Comma-separated list of model counts to test (for scalability analysis)'
+        default=None,
+        help='Comma-separated list of pool sizes to test. If not provided, auto-generates: start at 3, then increments of 5 up to total available models.'
     )
     parser.add_argument(
         '--adaptive-analysis',
@@ -2528,7 +2687,7 @@ def main():
     
     # Parse window sizes (optional - will auto-calculate if None), model counts, and update intervals
     window_sizes = None if args.window_sizes is None else [int(ws.strip()) for ws in args.window_sizes.split(',')]
-    num_models_range = [int(n.strip()) for n in args.num_models_range.split(',')]
+    num_models_range = None if args.num_models_range is None else [int(n.strip()) for n in args.num_models_range.split(',')]
     update_intervals = [int(ui.strip()) if ui.strip().lower() != 'none' else None 
                        for ui in args.update_intervals.split(',')]
     
@@ -2569,7 +2728,8 @@ def main():
             algorithm_list_instances=algorithm_list_instances,
             num_windows=args.num_windows,
             update_intervals=update_intervals,
-            inject_regime_shifts=not args.no_regime_shifts
+            inject_regime_shifts=not args.no_regime_shifts,
+            inject_synthetic_anomalies=args.inject_synthetic
         )
         
         save_adaptive_results(results, output_dir)

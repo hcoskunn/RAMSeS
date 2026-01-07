@@ -1,24 +1,6 @@
 #!/bin/bash
 ################################################################################
-# SMD (Server Mapython3 online_phase_analysis.py \
-    --datasepython3 online_phase_analysis.py \
-    --dataset-list dataset_lists/smd_sample.csv \
-    --data-dir ./Mononito/datasets \
-    --trained-model-dir ./Mononito/trained_models \
-    --output-dir ./results_smd/scalability \
-    --scalability-analysis \
-    --inject-synthetic \
-    --num-windows 80 \
-    --num-entities 3 \
-    --num-models-range "3,5,8"taset_lists/smd_sample.csv \
-    --data-dir ./Mononito/datasets \
-    --trained-model-dir ./Mononito/trained_models \
-    --output-dir ./results_smd/adaptive \
-    --adaptive-analysis \
-    --inject-synthetic \
-    --num-windows 100 \
-    --num-entities 3 \
-    --update-intervals "10,20,40,None"aset) - All Three Analyses
+# SMD (Server Machine Dataset) - All Three Analyses
 #
 # Dataset: SMD (Server Machine Dataset)
 # Characteristics:

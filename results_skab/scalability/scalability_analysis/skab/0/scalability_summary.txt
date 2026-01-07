@@ -1,6 +1,6 @@
 SCALABILITY ANALYSIS: Model Pool Size Impact (R1.O3)
 ================================================================================
-Dataset: SKAB, Entity: 0
+Dataset: skab, Entity: 0
 Full Model Pool: ['LOF_1', 'NN_1', 'NN_2', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1'] (8 models)
 Tested Pool Sizes: [3, 5, 8]
 
@@ -17,10 +17,10 @@ POOL SIZE = 3 models
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    F1 Score: 0.0000 ± 0.0000
+    F1 Score: 0.6551 ± 0.1732
 
   SINGLE-MODEL BRANCH:
-    F1 Score: 0.0000 ± 0.0000
+    F1 Score: 0.9865 ± 0.0173
 
 POOL SIZE = 5 models
 --------------------------------------------------------------------------------
@@ -29,10 +29,10 @@ POOL SIZE = 5 models
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    F1 Score: 0.0000 ± 0.0000
+    F1 Score: 0.8419 ± 0.1939
 
   SINGLE-MODEL BRANCH:
-    F1 Score: 0.0000 ± 0.0000
+    F1 Score: 0.8448 ± 0.3204
 
 POOL SIZE = 8 models
 --------------------------------------------------------------------------------
@@ -41,18 +41,18 @@ POOL SIZE = 8 models
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    F1 Score: 0.0000 ± 0.0000
+    F1 Score: 0.6351 ± 0.4050
 
   SINGLE-MODEL BRANCH:
-    F1 Score: 0.0000 ± 0.0000
+    F1 Score: 0.6793 ± 0.4331
 
 
 ANALYSIS: Diminishing Returns
 ================================================================================
-Pool size 3: F1 = 0.0000
-Pool size 8: F1 = 0.0000
-Improvement: 0.0000 (0.0%)
+Pool size 3: F1 = 0.6551
+Pool size 8: F1 = 0.6351
+Improvement: -0.0200 (-3.1%)
 
 FINDING: RAMSeS achieves near-optimal F1 with only 3 models!
-         → Using 8 models improves F1 by only 0.0%
+         → Using 8 models improves F1 by only -3.1%
          → RECOMMENDATION: Pool of 3-5 models is sufficient
