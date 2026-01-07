@@ -81,6 +81,7 @@ class TrainModels(object):
         if training_size > 1.0:
             raise ValueError('Training size must be <= 1.0')
         self.save_dir = save_dir
+        self.overwrite = overwrite  # Store overwrite flag
 
         self.img_dir = os.path.join(self.save_dir, f"{dataset}/{entity}")
         logger.info(f'self.img_dir is {self.img_dir}')
@@ -150,8 +151,15 @@ class TrainModels(object):
             files_list = files
             break
 
-        exist_model_list =list(set([i.split('_')[0] for i in files_list if i.endswith('png') and not i.startswith('data')]))
+        # Check existing models (based on .png files)
+        exist_model_list = list(set([i.split('_')[0] for i in files_list if i.endswith('png') and not i.startswith('data')]))
         logger.info(f'exist_model_list is {exist_model_list}')
+        
+        # If overwrite=True, ignore existing models and retrain everything
+        if self.overwrite:
+            logger.info('Overwrite=True: Retraining all models regardless of existing files')
+            exist_model_list = []  # Empty list = train everything
+        
         for model_name in model_architectures:
             # if no cache train model
             if ('DGHL' == model_name) & (model_name not in exist_model_list):

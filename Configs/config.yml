@@ -1,7 +1,7 @@
 # General parameters
 random_seed: 13
 n_jobs: 5
-overwrite: False  # Set to False to skip already-trained models and only train missing ones
+overwrite: True  # Set to True to force retraining all models (RERUNNING SKAB WITH GAN FIX)
 
 # Model training parameters
 downsampling: 10
@@ -11,7 +11,6 @@ dataset_path: "/home/maxoud/local-storage/projects/RAMSeS/Mononito/datasets"
 #docker path
 #trained_model_path: '/trained_models/'
 #dataset_path: '/datasets/'
-
 
 min_length: 256
 verbose: True

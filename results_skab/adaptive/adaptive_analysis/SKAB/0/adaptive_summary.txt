@@ -1,0 +1,57 @@
+ADAPTIVE ONLINE PHASE ANALYSIS
+================================================================================
+Dataset: SKAB, Entity: 0
+Total windows: 50
+Regime shift windows: {'mean_shift': 12, 'variance_change': 25, 'linear_trend': 37}
+
+COMPARISON: Re-Optimization Strategies
+================================================================================
+
+
+UPDATE 5
+--------------------------------------------------------------------------------
+
+ENSEMBLE BRANCH:
+  Re-optimizations: None (static selection)
+
+SINGLE-MODEL BRANCH:
+
+
+UPDATE 10
+--------------------------------------------------------------------------------
+
+ENSEMBLE BRANCH:
+  Re-optimizations: None (static selection)
+
+SINGLE-MODEL BRANCH:
+
+
+UPDATE 20
+--------------------------------------------------------------------------------
+
+ENSEMBLE BRANCH:
+  Re-optimizations: None (static selection)
+
+SINGLE-MODEL BRANCH:
+
+
+NO REOPT
+--------------------------------------------------------------------------------
+
+ENSEMBLE BRANCH:
+  Re-optimizations: None (static selection)
+
+SINGLE-MODEL BRANCH:
+
+
+KEY FINDINGS
+================================================================================
+1. RAMSeS adapts to regime shifts via background re-optimization
+2. Without re-optimization, F1 degrades after regime shifts
+3. More frequent re-optimization (smaller N) = better adaptation, higher overhead
+4. Baselines (TSB-AutoAD, UMS, AutoTSAD) lack adaptive capability
+
+RECOMMENDATION:
+- For real-time systems: update_interval=10-20 (balanced)
+- For high-drift environments: update_interval=5 (adaptive)
+- For static data: update_interval=None (efficiency)

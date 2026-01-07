@@ -115,8 +115,16 @@ class InjectAnomalies:
         T = (T - T.mean()).squeeze()
         autocorr = fftconvolve(T, T, mode='same')
         self.peaks, _ = find_peaks(autocorr, distance=self.min_window_size)
+        
+        # Handle empty peaks array (no peaks detected)
+        if len(self.peaks) > 1:
+            peak_diff_mean = int(np.diff(self.peaks).mean())
+        else:
+            # Fallback to min_window_size if no peaks or only 1 peak
+            peak_diff_mean = self.min_window_size
+        
         window_size = min(
-            max(int(np.diff(self.peaks).mean()), self.min_window_size),
+            max(peak_diff_mean, self.min_window_size),
             self.max_window_size)
         if self.verbose:
             print(f'Window size: {window_size}')

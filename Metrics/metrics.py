@@ -235,10 +235,19 @@ def adjusted_precision_recall_f1_auc(y_true: np.ndarray, y_scores: np.ndarray, n
     return adjusted_precision, adjusted_recall, best_adjusted_f1, adjusted_prauc, adjusted_y_pred
 
 
-def range_based_precision_recall_f1_auc(y_true: np.ndarray, y_scores: np.ndarray, n_splits=1000, window_size=1000):
+def range_based_precision_recall_f1_auc(y_true: np.ndarray, y_scores: np.ndarray, n_splits=1000, window_size=None):
     from sklearn.metrics import auc
     import numpy as np
     """Function to compute range-based precision, recall, range-based F1, PR-AUC, and predictions."""
+    
+    # Auto-select adaptive window size if not provided
+    if window_size is None:
+        # Use 10% of dataset size, capped between 10 and 1000
+        # This prevents the bug where window >= dataset size (which makes all points see global metrics)
+        window_size = max(10, min(1000, len(y_true) // 10))
+        from loguru import logger
+        logger.debug(f"Auto-selected window_size={window_size} for dataset of size {len(y_true)}")
+    
     thresholds = np.linspace(y_scores.min(), y_scores.max(), n_splits)
     range_precision = np.zeros(thresholds.shape)
     range_recall = np.zeros(thresholds.shape)

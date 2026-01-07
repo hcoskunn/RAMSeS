@@ -883,7 +883,7 @@ def run_window_size_sensitivity_analysis(
     data_dir: str,
     models_dir: str,
     algorithm_list_instances: List[str],
-    window_sizes: List[int],
+    window_sizes: List[int] = None,
     best_ensemble: List[str] = None,
     best_single_model: str = None,
     meta_model_type: str = 'rf'
@@ -903,8 +903,9 @@ def run_window_size_sensitivity_analysis(
         Directory where trained models are stored
     algorithm_list_instances : List[str]
         List of all available model instances
-    window_sizes : List[int]
-        List of window sizes to test
+    window_sizes : List[int], optional
+        List of window sizes to test. If None, auto-calculates based on data length.
+        Uses 2%, 5%, 10%, and 20% of data length.
     best_ensemble : List[str], optional
         Pre-selected ensemble models
     best_single_model : str, optional
@@ -917,35 +918,63 @@ def run_window_size_sensitivity_analysis(
     Dict
         Results for each window size
     """
+    # Load data to get length for smart window size calculation
+    temp_test_data = load_data(
+        dataset=dataset, group='test', entities=entity,
+        downsampling=10, min_length=256, root_dir=data_dir,
+        normalize=True, verbose=False
+    )
+    total_length = temp_test_data.entities[0].labels.flatten().shape[0]
+    
+    # Auto-calculate smart window sizes if not provided
+    if window_sizes is None:
+        # Use 2%, 5%, 10%, and 20% of data length
+        window_sizes = [
+            max(10, int(total_length * 0.02)),  # 2% (min 10)
+            max(20, int(total_length * 0.05)),  # 5% (min 20)
+            max(30, int(total_length * 0.10)),  # 10% (min 30)
+            max(50, int(total_length * 0.20))   # 20% (min 50)
+        ]
+        # Remove duplicates and sort
+        window_sizes = sorted(list(set(window_sizes)))
+        logger.info(f"Auto-calculated window sizes based on data length {total_length}: {window_sizes}")
+    
     logger.info("="*80)
     logger.info(f"Window Size Sensitivity Analysis: {dataset}/{entity}")
+    logger.info(f"Data length: {total_length}")
     logger.info(f"Testing window sizes: {window_sizes}")
     logger.info("="*80)
     
     results = {
         'dataset': dataset,
         'entity': entity,
+        'data_length': total_length,
         'window_sizes': window_sizes,
         'results': {}
     }
     
     for ws in window_sizes:
         logger.info(f"\n{'='*60}")
-        logger.info(f"Testing window size: {ws}")
+        logger.info(f"Testing window size: {ws} ({100*ws/total_length:.1f}% of data)")
         logger.info(f"{'='*60}")
+        
+        # Skip if window size is larger than data
+        if ws > total_length:
+            logger.warning(f"  Skipping: Window size {ws} > data length {total_length}")
+            results['results'][ws] = {
+                'error': f'Window size {ws} exceeds data length {total_length}',
+                'ensemble': {'windows': [], 'stats': {}},
+                'single_model': {'windows': [], 'stats': {}}
+            }
+            continue
         
         try:
             # Calculate number of windows based on data length and window size
-            # Load data temporarily to get length
-            temp_test_data = load_data(
-                dataset=dataset, group='test', entities=entity,
-                downsampling=10, min_length=256, root_dir=data_dir,
-                normalize=True, verbose=False
-            )
-            total_length = temp_test_data.entities[0].labels.flatten().shape[0]
-            num_windows = max(total_length // ws, 5)  # At least 5 windows
+            # Use 50% overlap for smoother transitions
+            max_possible_windows = max(1, (total_length - ws) // (ws // 2) + 1)
+            num_windows = min(max_possible_windows, 10)  # Cap at 10 windows for efficiency
             
-            logger.info(f"  Data length: {total_length}, Windows: {num_windows}")
+            logger.info(f"  Data length: {total_length}, Window size: {ws}, Num windows: {num_windows}")
             
             ws_results = run_online_phase_experiment(
                 dataset=dataset,
@@ -1021,23 +1050,43 @@ def save_window_size_analysis(results: Dict, output_dir: str):
             if 'ensemble' in ws_result and 'stats' in ws_result['ensemble']:
                 stats = ws_result['ensemble']['stats']
                 f.write("Ensemble Branch:\n")
-                f.write(f"  Latency (ms):  {stats['latency_ms']['mean']:.2f} ± {stats['latency_ms']['std']:.2f}\n")
-                f.write(f"  Memory (MB):   {stats['memory_mb']['mean']:.2f}\n")
+                # Safe access with fallback for empty stats
+                if 'latency_ms' in stats and stats['latency_ms']:
+                    f.write(f"  Latency (ms):  {stats['latency_ms']['mean']:.2f} ± {stats['latency_ms']['std']:.2f}\n")
+                else:
+                    f.write(f"  Latency (ms):  N/A (no windows processed)\n")
+                
+                if 'memory_mb' in stats and stats['memory_mb']:
+                    f.write(f"  Memory (MB):   {stats['memory_mb']['mean']:.2f}\n")
+                else:
+                    f.write(f"  Memory (MB):   N/A (no windows processed)\n")
                 
                 if ws_result['ensemble']['windows']:
                     f1_scores = [w['f1'] for w in ws_result['ensemble']['windows']]
                     f.write(f"  F1 Score:      {np.mean(f1_scores):.4f} ± {np.std(f1_scores):.4f}\n")
+                else:
+                    f.write(f"  F1 Score:      N/A (no windows processed)\n")
             
             # Single model stats
             if 'single_model' in ws_result and 'stats' in ws_result['single_model']:
                 stats = ws_result['single_model']['stats']
                 f.write("Single Model Branch:\n")
-                f.write(f"  Latency (ms):  {stats['latency_ms']['mean']:.2f} ± {stats['latency_ms']['std']:.2f}\n")
-                f.write(f"  Memory (MB):   {stats['memory_mb']['mean']:.2f}\n")
+                # Safe access with fallback for empty stats
+                if 'latency_ms' in stats and stats['latency_ms']:
+                    f.write(f"  Latency (ms):  {stats['latency_ms']['mean']:.2f} ± {stats['latency_ms']['std']:.2f}\n")
+                else:
+                    f.write(f"  Latency (ms):  N/A (no windows processed)\n")
+                
+                if 'memory_mb' in stats and stats['memory_mb']:
+                    f.write(f"  Memory (MB):   {stats['memory_mb']['mean']:.2f}\n")
+                else:
+                    f.write(f"  Memory (MB):   N/A (no windows processed)\n")
                 
                 if ws_result['single_model']['windows']:
                     f1_scores = [w['f1'] for w in ws_result['single_model']['windows']]
                     f.write(f"  F1 Score:      {np.mean(f1_scores):.4f} ± {np.std(f1_scores):.4f}\n")
+                else:
+                    f.write(f"  F1 Score:      N/A (no windows processed)\n")
             
             f.write("\n")
         
@@ -1533,10 +1582,26 @@ def plot_scalability_analysis(results: Dict, output_dir: str):
         return
     
     num_models_list = sorted(valid_results.keys())
-    latencies = [valid_results[n]['stats']['latency_ms']['mean'] for n in num_models_list]
-    memories = [valid_results[n]['stats']['memory_mb']['mean'] for n in num_models_list]
-    f1_scores = [valid_results[n]['f1_mean'] for n in num_models_list]
-    pr_aucs = [valid_results[n]['pr_auc_mean'] for n in num_models_list]
+    
+    # Safely extract metrics with defaults for missing data
+    latencies = []
+    memories = []
+    f1_scores = []
+    pr_aucs = []
+    
+    for n in num_models_list:
+        result = valid_results[n]
+        
+        # Check if stats exist, otherwise use placeholder
+        if 'stats' in result:
+            latencies.append(result['stats'].get('latency_ms', {}).get('mean', 0))
+            memories.append(result['stats'].get('memory_mb', {}).get('mean', 0))
+        else:
+            latencies.append(0)
+            memories.append(0)
+        
+        f1_scores.append(result.get('f1_mean', 0))
+        pr_aucs.append(result.get('pr_auc_mean', 0))
     
     # Create 2x2 plot
     fig, axes = plt.subplots(2, 2, figsize=(16, 12))
@@ -2425,8 +2490,8 @@ def main():
     parser.add_argument(
         '--window-sizes',
         type=str,
-        default='128,256,512,1024,2048',
-        help='Comma-separated list of window sizes to test (for sensitivity analysis)'
+        default=None,
+        help='Comma-separated list of window sizes to test. If not provided, auto-calculates as 2%%, 5%%, 10%%, 20%% of data length.'
     )
     parser.add_argument(
         '--scalability-analysis',
@@ -2459,8 +2524,8 @@ def main():
         'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1'
     ]
     
-    # Parse window sizes, model counts, and update intervals
-    window_sizes = [int(ws.strip()) for ws in args.window_sizes.split(',')]
+    # Parse window sizes (optional - will auto-calculate if None), model counts, and update intervals
+    window_sizes = None if args.window_sizes is None else [int(ws.strip()) for ws in args.window_sizes.split(',')]
     num_models_range = [int(n.strip()) for n in args.num_models_range.split(',')]
     update_intervals = [int(ui.strip()) if ui.strip().lower() != 'none' else None 
                        for ui in args.update_intervals.split(',')]
@@ -2481,7 +2546,13 @@ def main():
         # Select first entity from first domain for analysis
         first_row = df.iloc[0]
         domain = first_row['domain_name']  # Keep original case for dataset/model paths
-        entity = first_row['file_name'].replace('.csv', '').replace('.txt', '')
+        
+        # Handle entity as string or integer
+        entity_raw = first_row['file_name']
+        if isinstance(entity_raw, (int, float, np.integer)):
+            entity = str(int(entity_raw))  # Convert to string, ensure no .0
+        else:
+            entity = str(entity_raw).replace('.csv', '').replace('.txt', '')
         
         logger.info(f"Analyzing {domain}/{entity} with update intervals: {update_intervals}")
         
@@ -2528,7 +2599,13 @@ def main():
         # Select first entity from first domain for analysis
         first_row = df.iloc[0]
         domain = first_row['domain_name']  # Keep original case
-        entity = first_row['file_name'].replace('.csv', '').replace('.txt', '')
+        
+        # Handle entity as string or integer
+        entity_raw = first_row['file_name']
+        if isinstance(entity_raw, (int, float, np.integer)):
+            entity = str(int(entity_raw))  # Convert to string, ensure no .0
+        else:
+            entity = str(entity_raw).replace('.csv', '').replace('.txt', '')
         
         logger.info(f"Analyzing {domain}/{entity} with ensemble sizes: {num_models_range}")
         
@@ -2569,7 +2646,13 @@ def main():
         # Select first entity from first domain for analysis
         first_row = df.iloc[0]
         domain = first_row['domain_name']  # Keep original case
-        entity = first_row['file_name'].replace('.csv', '').replace('.txt', '')
+        
+        # Handle entity as string or integer
+        entity_raw = first_row['file_name']
+        if isinstance(entity_raw, (int, float, np.integer)):
+            entity = str(int(entity_raw))  # Convert to string, ensure no .0
+        else:
+            entity = str(entity_raw).replace('.csv', '').replace('.txt', '')
         
         logger.info(f"Analyzing {domain}/{entity} with window sizes: {window_sizes}")
         

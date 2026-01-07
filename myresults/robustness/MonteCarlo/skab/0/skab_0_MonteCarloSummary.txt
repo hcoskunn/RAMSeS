@@ -2,11 +2,14 @@ Summary of Monte Carlo Simulation:
 Model: LOF_1
   F1 Mean: 1.0000, F1 Std: 0.0000
   PR AUC Mean: 0.0000, PR AUC Std: 0.0000
+Model: LOF_2
+  F1 Mean: 1.0000, F1 Std: 0.0000
+  PR AUC Mean: 0.0000, PR AUC Std: 0.0000
 Model: NN_1
-  F1 Mean: 0.5714, F1 Std: 0.0000
+  F1 Mean: 0.6667, F1 Std: 0.0000
   PR AUC Mean: 0.0000, PR AUC Std: 0.0000
 Model: NN_2
-  F1 Mean: 0.5714, F1 Std: 0.0000
+  F1 Mean: 0.6667, F1 Std: 0.0000
   PR AUC Mean: 0.0000, PR AUC Std: 0.0000
 Model: RNN_1
   F1 Mean: 1.0000, F1 Std: 0.0000
@@ -21,25 +24,27 @@ Model: DGHL_1
   F1 Mean: 1.0000, F1 Std: 0.0000
   PR AUC Mean: 0.0000, PR AUC Std: 0.0000
 Model: LSTMVAE_1
-  F1 Mean: 0.8000, F1 Std: 0.0000
-  PR AUC Mean: 0.3333, PR AUC Std: 0.0000
+  F1 Mean: 1.0000, F1 Std: 0.0000
+  PR AUC Mean: 0.0000, PR AUC Std: 0.0000
 
 Models ranked by F1 score:
 1. LOF_1
-2. RNN_1
-3. CBLOF_1
-4. MD_1
-5. DGHL_1
-6. LSTMVAE_1
-7. NN_1
-8. NN_2
+2. LOF_2
+3. RNN_1
+4. CBLOF_1
+5. MD_1
+6. DGHL_1
+7. LSTMVAE_1
+8. NN_1
+9. NN_2
 
 Models ranked by PR AUC score:
-1. LSTMVAE_1
-2. LOF_1
+1. LOF_1
+2. LOF_2
 3. NN_1
 4. NN_2
 5. RNN_1
 6. CBLOF_1
 7. MD_1
 8. DGHL_1
+9. LSTMVAE_1
