@@ -16,6 +16,7 @@ old/
 Mononito/
 output/
 Outputs/
+docs/
 
 # OS / Jupyter junk
 .DS_Store

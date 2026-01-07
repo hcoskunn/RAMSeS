@@ -1,0 +1,15 @@
+# Configuration file for Online Phase Analysis
+# This file specifies pre-selected models from the offline phase
+# 
+# Format: dataset,entity,ensemble_models,single_model,baseline_models
+#
+# - ensemble_models: Comma-separated list (e.g., "LOF_1|NN_1|RNN_1")
+# - single_model: Single best model (e.g., "NN_1")
+# - baseline_models: Comma-separated list for comparison (e.g., "LOF_1|RNN_1")
+#
+# Leave fields empty for auto-selection
+
+dataset,entity,ensemble_models,single_model,baseline_models
+skab,0,LOF_1|NN_1|RNN_1,NN_1,LOF_1|RNN_1|CBLOF_1
+skab,1,LOF_1|NN_2|CBLOF_1,LOF_1,LOF_1|NN_1|RNN_1
+skab,2,NN_1|RNN_1|CBLOF_1,RNN_1,LOF_1|NN_2|MD_1

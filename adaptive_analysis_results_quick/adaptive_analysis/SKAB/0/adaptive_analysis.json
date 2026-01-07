@@ -1,0 +1,90 @@
+{
+  "dataset": "SKAB",
+  "entity": "0",
+  "num_windows": 30,
+  "regime_shift_windows": {
+    "mean_shift": 7,
+    "variance_change": 15,
+    "linear_trend": 22
+  },
+  "update_intervals": {
+    "update_5": {
+      "ensemble": {
+        "windows": [],
+        "reopt_events": [],
+        "config_history": [
+          [
+            "LOF_1",
+            "NN_1",
+            "NN_2",
+            "RNN_1"
+          ]
+        ],
+        "stats": {},
+        "regime_analysis": {}
+      },
+      "single_model": {
+        "windows": [],
+        "reopt_events": [],
+        "config_history": [
+          "LOF_1"
+        ],
+        "stats": {},
+        "regime_analysis": {}
+      },
+      "update_interval": 5
+    },
+    "update_10": {
+      "ensemble": {
+        "windows": [],
+        "reopt_events": [],
+        "config_history": [
+          [
+            "LOF_1",
+            "NN_1",
+            "NN_2",
+            "RNN_1"
+          ]
+        ],
+        "stats": {},
+        "regime_analysis": {}
+      },
+      "single_model": {
+        "windows": [],
+        "reopt_events": [],
+        "config_history": [
+          "LOF_1"
+        ],
+        "stats": {},
+        "regime_analysis": {}
+      },
+      "update_interval": 10
+    },
+    "no_reopt": {
+      "ensemble": {
+        "windows": [],
+        "reopt_events": [],
+        "config_history": [
+          [
+            "LOF_1",
+            "NN_1",
+            "NN_2",
+            "RNN_1"
+          ]
+        ],
+        "stats": {},
+        "regime_analysis": {}
+      },
+      "single_model": {
+        "windows": [],
+        "reopt_events": [],
+        "config_history": [
+          "LOF_1"
+        ],
+        "stats": {},
+        "regime_analysis": {}
+      },
+      "update_interval": null
+    }
+  }
+}
