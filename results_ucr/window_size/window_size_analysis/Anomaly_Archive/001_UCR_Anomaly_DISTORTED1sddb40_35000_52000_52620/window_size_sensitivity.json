@@ -1,0 +1,25 @@
+{
+  "dataset": "Anomaly_Archive",
+  "entity": "001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620",
+  "data_length": 4480,
+  "window_sizes": [
+    89,
+    224,
+    448,
+    896
+  ],
+  "results": {
+    "89": {
+      "error": "No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620"
+    },
+    "224": {
+      "error": "No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620"
+    },
+    "448": {
+      "error": "No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620"
+    },
+    "896": {
+      "error": "No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620"
+    }
+  }
+}

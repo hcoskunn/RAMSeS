@@ -1,0 +1,29 @@
+================================================================================
+Window Size Sensitivity Analysis - Summary
+================================================================================
+
+Dataset: Anomaly_Archive
+Entity: 001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620
+Window Sizes Tested: [89, 224, 448, 896]
+
+================================================================================
+RESULTS BY WINDOW SIZE
+================================================================================
+
+Window Size 89: FAILED - No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620
+
+Window Size 224: FAILED - No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620
+
+Window Size 448: FAILED - No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620
+
+Window Size 896: FAILED - No models loaded from ./Mononito/trained_models/Anomaly_Archive/001_UCR_Anomaly_DISTORTED1sddb40_35000_52000_52620
+
+================================================================================
+KEY FINDINGS
+================================================================================
+
+
+
+================================================================================
+END OF WINDOW SIZE SENSITIVITY ANALYSIS
+================================================================================

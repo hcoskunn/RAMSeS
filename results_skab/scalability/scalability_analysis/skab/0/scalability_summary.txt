@@ -1,8 +1,8 @@
 SCALABILITY ANALYSIS: Model Pool Size Impact (R1.O3)
 ================================================================================
 Dataset: skab, Entity: 0
-Full Model Pool: ['LOF_1', 'NN_1', 'NN_2', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1'] (8 models)
-Tested Pool Sizes: [3, 5, 8]
+Full Model Pool: ['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1'] (14 models)
+Tested Pool Sizes: [3, 5, 10, 14]
 
 QUESTION: Does RAMSeS need 8 models or work well with 3-5?
 ================================================================================
@@ -12,59 +12,74 @@ RESULTS BY POOL SIZE
 
 POOL SIZE = 3 models
 --------------------------------------------------------------------------------
-  Restricted pool: ['LOF_1', 'NN_1', 'NN_2']
-  Ensemble selected: ['LOF_1', 'NN_1', 'NN_2'] (3 models)
+  Restricted pool: ['LOF_1', 'LOF_2', 'NN_1']
+  Ensemble selected: ['LOF_1', 'LOF_2', 'NN_1'] (3 models)
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    Latency (ms): 33.89 ± 3.32
-    Memory (MB):  535.64 ± 0.00
+    Latency (ms): 36.21 ± 0.46
+    Memory (MB):  546.49 ± 0.00
     F1 Score:     0.6551 ± 0.1732
 
   SINGLE-MODEL BRANCH:
-    Latency (ms): 23.37 ± 2.14
-    Memory (MB):  535.64 ± 0.00
+    Latency (ms): 22.29 ± 0.23
+    Memory (MB):  546.49 ± 0.00
     F1 Score:     0.9865 ± 0.0173
 
 POOL SIZE = 5 models
 --------------------------------------------------------------------------------
-  Restricted pool: ['LOF_1', 'NN_1', 'NN_2', 'RNN_1', 'CBLOF_1']
-  Ensemble selected: ['LOF_1', 'NN_1', 'NN_2', 'RNN_1'] (4 models)
+  Restricted pool: ['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3']
+  Ensemble selected: ['LOF_1', 'LOF_2', 'NN_1', 'NN_2'] (4 models)
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    Latency (ms): 36.56 ± 1.18
-    Memory (MB):  568.04 ± 0.07
-    F1 Score:     0.8419 ± 0.1939
+    Latency (ms): 39.18 ± 3.50
+    Memory (MB):  547.52 ± 0.00
+    F1 Score:     0.7611 ± 0.1572
 
   SINGLE-MODEL BRANCH:
-    Latency (ms): 22.52 ± 0.29
-    Memory (MB):  568.04 ± 0.07
+    Latency (ms): 23.27 ± 2.21
+    Memory (MB):  547.52 ± 0.00
     F1 Score:     0.8448 ± 0.3204
 
-POOL SIZE = 8 models
+POOL SIZE = 10 models
 --------------------------------------------------------------------------------
-  Restricted pool: ['LOF_1', 'NN_1', 'NN_2', 'RNN_1', 'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1']
-  Ensemble selected: ['LOF_1', 'NN_1', 'NN_2', 'RNN_1'] (4 models)
+  Restricted pool: ['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3']
+  Ensemble selected: ['LOF_1', 'LOF_2', 'NN_1', 'NN_2'] (4 models)
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    Latency (ms): 38.05 ± 4.14
-    Memory (MB):  611.50 ± 1.20
-    F1 Score:     0.6351 ± 0.4050
+    Latency (ms): 40.57 ± 2.82
+    Memory (MB):  556.91 ± 0.00
+    F1 Score:     0.4169 ± 0.2878
 
   SINGLE-MODEL BRANCH:
-    Latency (ms): 23.38 ± 2.72
-    Memory (MB):  611.51 ± 1.20
+    Latency (ms): 22.84 ± 3.00
+    Memory (MB):  556.91 ± 0.00
     F1 Score:     0.6793 ± 0.4331
+
+POOL SIZE = 14 models
+--------------------------------------------------------------------------------
+  Restricted pool: ['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1']
+  Ensemble selected: ['LOF_1', 'LOF_2', 'NN_1', 'NN_2'] (4 models)
+  Single-model selected: LOF_1
+
+  ENSEMBLE BRANCH:
+    Latency (ms): 40.57 ± 4.38
+    Memory (MB):  618.39 ± 0.00
+    F1 Score:     0.7985 ± 0.1071
+
+  SINGLE-MODEL BRANCH:
+    Latency (ms): 22.64 ± 0.76
+    Memory (MB):  618.39 ± 0.00
+    F1 Score:     0.9487 ± 0.0915
 
 
 ANALYSIS: Diminishing Returns
 ================================================================================
 Pool size 3: F1 = 0.6551
-Pool size 8: F1 = 0.6351
-Improvement: -0.0200 (-3.1%)
+Pool size 14: F1 = 0.7985
+Improvement: 0.1433 (21.9%)
 
-FINDING: RAMSeS achieves near-optimal F1 with only 3 models!
-         → Using 8 models improves F1 by only -3.1%
-         → RECOMMENDATION: Pool of 3-5 models is sufficient
+FINDING: Larger pool size provides 21.9% F1 improvement
+         → RECOMMENDATION: Use pool of 14 models for best performance

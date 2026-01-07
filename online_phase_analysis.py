@@ -1904,8 +1904,7 @@ def run_dual_branch_online(
     
     test_length = X_test.shape[1]
     window_size = min(64, test_length // 3)  # Adaptive window size
-    stride = window_size // 2
-    logger.info(f"Adaptive window sizing: test_length={test_length}, window_size={window_size}, stride={stride}")
+    logger.info(f"Adaptive window sizing: test_length={test_length}, window_size={window_size}")
     logger.info(f"X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
     
     # PRE-TRAIN meta-model once on training data (don't retrain for every window!)
@@ -1945,12 +1944,26 @@ def run_dual_branch_online(
     ensemble_monitor = PerformanceMonitor()
     single_monitor = PerformanceMonitor()
     
+    # Accumulate recent windows for re-optimization
+    accumulated_X = []
+    accumulated_y = []
+    max_accumulated_windows = 10  # Keep last N windows for re-optimization
+    
+    # Calculate stride to generate exactly num_windows
+    # We want: num_windows windows of size window_size from test_length timesteps
+    if num_windows > 1:
+        # Stride should space windows evenly across available data
+        max_start = test_length - window_size
+        stride = max(1, max_start // (num_windows - 1))
+    else:
+        stride = test_length  # Single window case
+    
+    logger.info(f"Calculated stride={stride} to generate {num_windows} windows from {test_length} timesteps")
+    
     # Process windows
     window_idx = 0
-    for start_idx in range(0, test_length - window_size + 1, stride):
-        if window_idx >= num_windows:
-            break
-        
+    for i in range(num_windows):
+        start_idx = min(i * stride, test_length - window_size)  # Ensure we don't exceed bounds
         end_idx = start_idx + window_size
         X_window = X_test[:, start_idx:end_idx]  # (features, timesteps)
         y_window = y_test[:, start_idx:end_idx]  # (1, timesteps)
@@ -1965,6 +1978,13 @@ def run_dual_branch_online(
         window_test_data.entities[0].mask = np.ones_like(y_window)
         window_test_data.entities[0].n_time = window_size
         window_test_data.total_time = window_size
+        
+        # Accumulate this window for future re-optimization
+        accumulated_X.append(X_window)
+        accumulated_y.append(y_window)
+        if len(accumulated_X) > max_accumulated_windows:
+            accumulated_X.pop(0)
+            accumulated_y.pop(0)
         
         # ENSEMBLE BRANCH: Inference with PRE-TRAINED meta-model
         try:
@@ -2021,20 +2041,143 @@ def run_dual_branch_online(
         except Exception as e:
             logger.warning(f"Single model inference failed for window {window_idx}: {e}")
         
-        window_idx += 1
         # BACKGROUND RE-OPTIMIZATION (every N windows)
         if update_interval and window_idx > 0 and window_idx % update_interval == 0:
             logger.info(f"  🔄 Re-optimization at window {window_idx} (interval={update_interval})")
             reopt_start_time = time.time()
             
-            # Simulate ensemble re-optimization (GA would run here)
-            # For now, just rotate ensemble composition
-            best_ensemble = available_models[:min(4, len(available_models))]
-            np.random.shuffle(best_ensemble)
-            best_ensemble = best_ensemble[:min(4, len(best_ensemble))]
+            # Build recent data from accumulated windows
+            recent_X = np.concatenate(accumulated_X, axis=1)  # Concatenate along time axis
+            recent_y = np.concatenate(accumulated_y, axis=1) if accumulated_y[0].ndim > 1 else np.concatenate(accumulated_y, axis=0)
             
-            # Simulate single-model re-selection (Thompson Sampling + tests)
-            best_single_model = np.random.choice(available_models)
+            # Create dataset object for recent windows
+            recent_data = copy.deepcopy(test_data)
+            recent_data.entities[0].Y = recent_X
+            recent_data.entities[0].labels = recent_y
+            recent_data.entities[0].mask = np.ones_like(recent_y)
+            recent_data.entities[0].n_time = recent_X.shape[1]
+            recent_data.total_time = recent_X.shape[1]
+            logger.info(f"    📊 Re-optimizing on {len(accumulated_X)} recent windows ({recent_X.shape[1]} timesteps)")
+            
+            # REAL ensemble re-optimization using GA (as in app.py) - on RECENT data
+            from Metrics.Ensemble_GA import genetic_algorithm
+            try:
+                best_ensemble_new, _, _, _, _, _, _, _, _, _ = genetic_algorithm(
+                    dataset=None,
+                    entity=None,
+                    train_data=recent_data,
+                    test_data=recent_data,
+                    algorithm_list=available_models,
+                    trained_models=trained_models,
+                    meta_model_type='rf',
+                    population_size=20,
+                    generations=10,
+                    mutation_rate=0.2
+                )
+                best_ensemble = best_ensemble_new
+                logger.info(f"    ✓ GA re-optimized ensemble: {best_ensemble}")
+            except Exception as e:
+                logger.warning(f"    ✗ GA re-optimization failed: {e}, keeping current ensemble")
+            
+            # REAL single-model re-selection: Thompson Sampling + Robustness Tests + Markov Rank Aggregation (as in app.py) - on RECENT data
+            from Model_Selection.Sensitivity_robustness.GAN_test import run_Gan
+            from Model_Selection.Sensitivity_robustness.Monte_Carlo_Simulation import run_monte_carlo_simulation
+            from Model_Selection.Sensitivity_robustness.off_by_threshold_testing import run_off_by_threshold
+            from Model_Selection.rank_aggregation import enhanced_markov_chain_rank_aggregator_text
+            
+            try:
+                # For re-optimization: Use simple ranking by recent F1 performance instead of full Thompson Sampling
+                # (Thompson Sampling's windowing breaks with small accumulated data)
+                thompson_model_names = []
+                model_f1_scores = {}
+                
+                for model_name in available_models:
+                    if model_name not in trained_models:
+                        continue
+                    try:
+                        # Evaluate each model on recent data
+                        y_true_recent, y_scores_recent, _, _ = evaluate_model_consistently(
+                            recent_data, trained_models[model_name], model_name, is_ensemble=False
+                        )
+                        from Metrics.metrics import f1_score
+                        f1_val, _, _, _, _, _, _ = f1_score(y_scores_recent, y_true_recent)
+                        model_f1_scores[model_name] = f1_val
+                    except Exception as e:
+                        logger.warning(f"    ⚠ Could not evaluate {model_name}: {e}")
+                        model_f1_scores[model_name] = 0.0
+                
+                # Rank models by F1 score (descending)
+                thompson_model_names = sorted(model_f1_scores.keys(), key=lambda x: model_f1_scores[x], reverse=True)
+                logger.info(f"    ✓ Thompson-style ranking by F1: {thompson_model_names[:5]}")
+                
+                # Run 3 robustness tests (GAN, off-by-threshold, Monte Carlo) on recent data
+                # Wrap in try/except to handle failures gracefully
+                try:
+                    Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names, _, _ = run_Gan(
+                        recent_data, trained_models, available_models, None, None
+                    )
+                except Exception as e:
+                    logger.warning(f"    ⚠ GAN test failed: {e}, using empty ranking")
+                    Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = [], []
+                
+                try:
+                    _, _, ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = run_off_by_threshold(
+                        recent_data, trained_models, available_models, None, None
+                    )
+                except Exception as e:
+                    logger.warning(f"    ⚠ Off-by-threshold test failed: {e}, using empty ranking")
+                    ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = [], []
+                
+                try:
+                    monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
+                        recent_data, trained_models, available_models, None, None, 2, 0.1
+                    )
+                except Exception as e:
+                    logger.warning(f"    ⚠ Monte Carlo test failed: {e}, using empty ranking")
+                    monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = [], []
+                
+                # Markov rank aggregation: first aggregate robustness tests
+                # Filter out empty rankings
+                test_for_rank = [
+                    ranking for ranking in [
+                        Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names,
+                        ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity,
+                        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR,
+                    ] if ranking and len(ranking) > 0
+                ]
+                
+                if not test_for_rank:
+                    logger.warning("    ⚠ No valid robustness rankings, skipping Markov aggregation")
+                    # Keep current single model
+                else:
+                    robust_agg = enhanced_markov_chain_rank_aggregator_text(test_for_rank)
+                    
+                    # Then aggregate robustness with Thompson Sampling
+                    full_ = [robust_agg[1], thompson_model_names]
+                    full_aggregated = enhanced_markov_chain_rank_aggregator_text(full_)
+                    
+                    # Select top model with safety check
+                    if full_aggregated and len(full_aggregated) >= 2 and full_aggregated[1] and len(full_aggregated[1]) > 0:
+                        best_single_model = full_aggregated[1][0]
+                        logger.info(f"    ✓ Re-selected single model: {best_single_model} (Thompson + Robustness + Markov)")
+                    else:
+                        logger.warning(f"    ⚠ Markov aggregation returned empty result, keeping current model: {best_single_model}")
+            except Exception as e:
+                logger.warning(f"    ✗ Single-model re-selection failed: {e}")
+            
+            # RE-TRAIN meta-model with new ensemble composition
+            try:
+                ensemble_subset = {k: trained_models[k] for k in best_ensemble if k in trained_models}
+                individual_predictions_train, _, _, _ = evaluate_individual_models(
+                    best_ensemble, train_copy, ensemble_subset
+                )
+                y_true_train, base_predictions_train, _, _ = evaluate_model_consistently(
+                    train_copy, trained_models, best_ensemble, is_ensemble=True
+                )
+                meta_model_rf = train_meta_model_rf(base_predictions_train, y_true_train)
+                logger.info(f"    ✓ Re-trained meta-model with new ensemble")
+            except Exception as e:
+                logger.warning(f"    ✗ Meta-model re-training failed: {e}")
             
             reopt_time = time.time() - reopt_start_time
             
@@ -2679,10 +2822,11 @@ def main():
     
     args = parser.parse_args()
     
-    # Algorithm list
+    # Algorithm list - MUST MATCH app.py!
     algorithm_list_instances = [
-        'LOF_1', 'NN_1', 'NN_2', 'RNN_1',
-        'CBLOF_1', 'MD_1', 'DGHL_1', 'LSTMVAE_1'
+        'LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2',
+        'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1',
+        'DGHL_1', 'LSTMVAE_1'
     ]
     
     # Parse window sizes (optional - will auto-calculate if None), model counts, and update intervals

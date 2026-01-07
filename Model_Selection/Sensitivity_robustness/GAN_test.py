@@ -125,6 +125,8 @@ def integrate_gan_with_dataset(data, labels):
         clean_data = data
     
     # Train the GAN on clean, non-anomalous data only
+    # REDUCED epochs from 100 to 10 for online phase re-optimization speed
+    # 10 epochs is sufficient for borderline point generation
     train_gan(generator, discriminator, clean_data.T, epochs=100, batch_size=32, noise_dim=input_dim)
 
     # Generate borderline points
@@ -234,7 +236,7 @@ def run_Gan(test_data, trained_models, model_names, dataset, entity):
     ranked_by_pr_auc = sorted(valid_results.items(), key=lambda x: x[1][0]['pr_auc'], reverse=True)
     ranked_by_pr_auc_names = [item[0] for item in ranked_by_pr_auc]
 
-    true_values = np.array(test_data.entities[0].labels)  # 1 for anomaly, 0 for normal
+    true_values = np.array(test_data.entities[0].labels).flatten()  # 1 for anomaly, 0 for normal, FLATTEN to 1D
     print(10 * '=')
     predicted_values = np.array(adjusted_y_pred_dict[ranked_by_f1_names[0]]).flatten()  # Flatten the list of arrays
 

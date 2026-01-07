@@ -1,19 +1,19 @@
 Summary of robust tests (order: GAN → Borderline → Monte Carlo):
 
 [GAN]
-['CBLOF_4', 'LSTMVAE_1', 'LOF_1', 'LOF_2', 'RNN_1', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'MD_1', 'RNN_2', 'DGHL_1', 'NN_1', 'NN_2', 'NN_3']
-['CBLOF_4', 'LSTMVAE_1', 'LOF_1', 'LOF_2', 'RNN_1', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'MD_1', 'RNN_2', 'DGHL_1', 'NN_1', 'NN_2', 'NN_3']
+['LOF_1', 'LOF_2', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1', 'NN_1', 'NN_2', 'NN_3']
+['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1']
 
 [Borderline / Off-by-threshold]
-['CBLOF_4', 'LSTMVAE_1', 'LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'MD_1', 'DGHL_1']
-['CBLOF_4', 'LSTMVAE_1', 'LOF_1', 'LOF_2', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'MD_1', 'DGHL_1', 'NN_1', 'NN_2', 'NN_3']
+['LOF_1', 'LOF_2', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1', 'NN_1', 'NN_2', 'NN_3']
+['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1']
 
 [Monte Carlo]
-['LSTMVAE_1', 'LOF_1', 'LOF_2', 'CBLOF_1', 'CBLOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1']
-['LSTMVAE_1', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'LOF_1', 'LOF_2', 'RNN_1', 'RNN_2', 'DGHL_1', 'NN_1', 'NN_2', 'NN_3']
+['LOF_1', 'LOF_2', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1', 'NN_1', 'NN_2', 'NN_3']
+['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'DGHL_1', 'LSTMVAE_1']
 
 [Robust rank aggregate]
-(2.1968515357132423, ['LSTMVAE_1', 'LOF_1', 'LOF_2', 'CBLOF_4', 'CBLOF_1', 'CBLOF_2', 'RNN_1', 'CBLOF_3', 'RNN_2', 'MD_1', 'NN_1', 'DGHL_1', 'NN_2', 'NN_3'])
+(2.3852125445511487, ['LOF_1', 'LOF_2', 'RNN_1', 'RNN_2', 'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1', 'NN_1', 'DGHL_1', 'NN_2', 'NN_3', 'LSTMVAE_1'])
 
 [Final aggregate vs Thompson]
-(2.600753078185841, ['LSTMVAE_1', 'CBLOF_2', 'RNN_1', 'RNN_2', 'CBLOF_4', 'LOF_2', 'MD_1', 'NN_2', 'LOF_1', 'NN_1', 'NN_3', 'CBLOF_1', 'CBLOF_3', 'DGHL_1'])
+(2.615241810833676, ['RNN_1', 'LOF_2', 'CBLOF_1', 'LOF_1', 'NN_1', 'CBLOF_3', 'MD_1', 'RNN_2', 'NN_2', 'LSTMVAE_1', 'NN_3', 'CBLOF_2', 'DGHL_1', 'CBLOF_4'])
