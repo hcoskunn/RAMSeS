@@ -24,7 +24,8 @@ echo "Total estimated time: 45 minutes"
 echo "================================================================================"
 echo ""
 
-read -p "Press ENTER to start, or Ctrl+C to cancel..."
+echo "Starting automatically..."
+echo ""
 
 # Activate environment
 echo ""
@@ -60,11 +61,6 @@ if [ $? -eq 0 ]; then
 else
     echo ""
     echo "✗ Adaptive analysis failed!"
-    echo "Continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
 fi
 
 # ============================================================================
@@ -88,11 +84,6 @@ if [ $? -eq 0 ]; then
 else
     echo ""
     echo "✗ Scalability analysis failed!"
-    echo "Continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
 fi
 
 # ============================================================================

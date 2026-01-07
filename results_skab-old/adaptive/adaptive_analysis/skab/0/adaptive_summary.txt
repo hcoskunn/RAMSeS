@@ -12,14 +12,14 @@ UPDATE 5
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
-  Latency (ms): 51.15 ± 5.78
-  Memory (MB): 567.91 ± 0.93
+  Latency (ms): 49.66 ± 9.20
+  Memory (MB): 572.44 ± 5.32
   F1 Score: 0.8133 ± 0.1137
   Re-optimizations: 1 events, avg 0.00s each
 
 SINGLE-MODEL BRANCH:
-  Latency (ms): 30.51 ± 5.04
-  Memory (MB): 568.22 ± 1.00
+  Latency (ms): 25.35 ± 3.00
+  Memory (MB): 572.54 ± 5.28
   F1 Score: 0.9557 ± 0.0323
 
 
@@ -27,14 +27,14 @@ UPDATE 10
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
-  Latency (ms): 53.90 ± 12.47
-  Memory (MB): 592.74 ± 0.66
+  Latency (ms): 56.87 ± 13.89
+  Memory (MB): 599.45 ± 0.00
   F1 Score: 0.9304 ± 0.0389
   Re-optimizations: None (static selection)
 
 SINGLE-MODEL BRANCH:
-  Latency (ms): 32.99 ± 5.22
-  Memory (MB): 592.74 ± 0.66
+  Latency (ms): 33.01 ± 5.15
+  Memory (MB): 599.45 ± 0.00
   F1 Score: 0.9859 ± 0.0118
 
 
@@ -42,14 +42,14 @@ UPDATE 20
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
-  Latency (ms): 57.17 ± 3.37
-  Memory (MB): 593.73 ± 0.00
+  Latency (ms): 50.24 ± 8.15
+  Memory (MB): 575.71 ± 0.18
   F1 Score: 0.8872 ± 0.1005
   Re-optimizations: None (static selection)
 
 SINGLE-MODEL BRANCH:
-  Latency (ms): 38.58 ± 2.62
-  Memory (MB): 593.73 ± 0.00
+  Latency (ms): 34.28 ± 4.46
+  Memory (MB): 575.71 ± 0.18
   F1 Score: 0.9859 ± 0.0118
 
 
@@ -57,14 +57,14 @@ NO REOPT
 --------------------------------------------------------------------------------
 
 ENSEMBLE BRANCH:
-  Latency (ms): 53.22 ± 4.63
-  Memory (MB): 595.23 ± 0.33
+  Latency (ms): 55.76 ± 1.81
+  Memory (MB): 579.01 ± 0.02
   F1 Score: 0.9230 ± 0.0485
   Re-optimizations: None (static selection)
 
 SINGLE-MODEL BRANCH:
-  Latency (ms): 36.20 ± 3.81
-  Memory (MB): 595.24 ± 0.33
+  Latency (ms): 35.84 ± 3.60
+  Memory (MB): 579.01 ± 0.02
   F1 Score: 0.9859 ± 0.0118
 
 

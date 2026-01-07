@@ -39,7 +39,8 @@ echo ""
 echo "================================================================================"
 echo ""
 
-read -p "Press ENTER to start 5-6 hour complete analysis, or Ctrl+C to cancel..."
+echo "Starting automatically..."
+echo ""
 
 START_TIME=$(date +%s)
 
@@ -62,10 +63,6 @@ else
     echo ""
     echo "✗ SKAB analysis failed!"
     echo "Continue with UCR anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
 fi
 
 SKAB_END=$(date +%s)
@@ -91,10 +88,6 @@ else
     echo ""
     echo "✗ UCR analysis failed!"
     echo "Continue with SMD anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
 fi
 
 UCR_END=$(date +%s)

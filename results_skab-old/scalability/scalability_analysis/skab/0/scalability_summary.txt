@@ -17,14 +17,10 @@ POOL SIZE = 3 models
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    Latency (ms): 33.89 ± 3.32
-    Memory (MB):  535.64 ± 0.00
-    F1 Score:     0.6551 ± 0.1732
+    F1 Score: 0.6551 ± 0.1732
 
   SINGLE-MODEL BRANCH:
-    Latency (ms): 23.37 ± 2.14
-    Memory (MB):  535.64 ± 0.00
-    F1 Score:     0.9865 ± 0.0173
+    F1 Score: 0.9865 ± 0.0173
 
 POOL SIZE = 5 models
 --------------------------------------------------------------------------------
@@ -33,14 +29,10 @@ POOL SIZE = 5 models
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    Latency (ms): 36.56 ± 1.18
-    Memory (MB):  568.04 ± 0.07
-    F1 Score:     0.8419 ± 0.1939
+    F1 Score: 0.8419 ± 0.1939
 
   SINGLE-MODEL BRANCH:
-    Latency (ms): 22.52 ± 0.29
-    Memory (MB):  568.04 ± 0.07
-    F1 Score:     0.8448 ± 0.3204
+    F1 Score: 0.8448 ± 0.3204
 
 POOL SIZE = 8 models
 --------------------------------------------------------------------------------
@@ -49,14 +41,10 @@ POOL SIZE = 8 models
   Single-model selected: LOF_1
 
   ENSEMBLE BRANCH:
-    Latency (ms): 38.05 ± 4.14
-    Memory (MB):  611.50 ± 1.20
-    F1 Score:     0.6351 ± 0.4050
+    F1 Score: 0.6351 ± 0.4050
 
   SINGLE-MODEL BRANCH:
-    Latency (ms): 23.38 ± 2.72
-    Memory (MB):  611.51 ± 1.20
-    F1 Score:     0.6793 ± 0.4331
+    F1 Score: 0.6793 ± 0.4331
 
 
 ANALYSIS: Diminishing Returns

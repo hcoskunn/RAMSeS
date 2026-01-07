@@ -1,5 +1,18 @@
 #!/bin/bash
-################################################################################
+######################echo "Workflow:"
+echo "  → Train models on 80% of data (offline phase)"
+echo "  → Run adaptive online analysis on 20% of data"
+echo ""
+echo "⚠️  ESTIMATED TIME: 12-20 HOURS"
+echo ""
+echo "════════════════════════════════════════════════════════════════════════════════"
+echo ""
+echo "Starting pipeline automatically..."
+echo ""
+
+# Activate environment
+echo ""
+echo "Activating RAMS conda environment..."############################################
 # run_complete_ucr_pipeline.sh - Complete RAMSeS Pipeline (UCR Dataset Only)
 #
 # This script runs the COMPLETE workflow for UCR dataset:
@@ -41,7 +54,8 @@ echo ""
 echo "════════════════════════════════════════════════════════════════════════════════"
 echo ""
 
-read -p "Press ENTER to start, or Ctrl+C to cancel..."
+echo "Starting pipeline automatically..."
+echo ""
 
 # Activate environment
 echo ""

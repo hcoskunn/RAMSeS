@@ -44,8 +44,8 @@ from comprehensive_results_writer import write_comprehensive_results
 # Old hardcoded path was causing wrong models to load for different datasets
 
 algorithm_list = ['LSTMVAE', 'DGHL', 'NN', 'RNN', 'LOF', 'MD', 'CBLOF']
-algorithm_list_instances = ['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'RNN_1',
-    'CBLOF_1', 'MD_1', 
+algorithm_list_instances = ['LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2',
+    'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4','MD_1', 
     'DGHL_1',  'LSTMVAE_1', 
 ]
 

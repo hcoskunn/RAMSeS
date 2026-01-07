@@ -34,8 +34,8 @@ echo ""
 echo "Total estimated time: 70 minutes"
 echo "================================================================================"
 echo ""
-
-read -p "Press ENTER to start, or Ctrl+C to cancel..."
+echo "Starting analyses automatically..."
+echo ""
 
 # Activate environment
 echo ""
@@ -72,17 +72,14 @@ done
 if [ "$all_trained" = false ]; then
     echo ""
     echo "════════════════════════════════════════════════════════════════"
-    echo "ERROR: Models not fully trained!"
+    echo "WARNING: Models not fully trained!"
     echo "════════════════════════════════════════════════════════════════"
     echo ""
     echo "You need to run OFFLINE training first:"
     echo "  ./shells/train_all_skab.sh"
     echo ""
-    echo "Or continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
+    echo "Continuing anyway with available models..."
+    echo ""
 fi
 echo ""
 
@@ -116,12 +113,8 @@ if [ $? -eq 0 ]; then
     echo ""
 else
     echo ""
-    echo "✗ Adaptive analysis failed!"
-    echo "Continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
+    echo "✗ Adaptive analysis failed! Continuing anyway..."
+    echo ""
 fi
 
 # ============================================================================
@@ -154,12 +147,8 @@ if [ $? -eq 0 ]; then
     echo ""
 else
     echo ""
-    echo "✗ Scalability analysis failed!"
-    echo "Continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
+    echo "✗ Scalability analysis failed! Continuing anyway..."
+    echo ""
 fi
 
 # ============================================================================
@@ -193,7 +182,8 @@ if [ $? -eq 0 ]; then
     echo ""
 else
     echo ""
-    echo "✗ Window size analysis failed!"
+    echo "✗ Window size analysis failed! Continuing anyway..."
+    echo ""
 fi
 
 # ============================================================================

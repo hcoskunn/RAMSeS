@@ -56,7 +56,8 @@ echo "Total estimated time: 75 minutes"
 echo "================================================================================"
 echo ""
 
-read -p "Press ENTER to start, or Ctrl+C to cancel..."
+echo "Starting analyses automatically..."
+echo ""
 
 # Activate environment
 echo ""
@@ -101,11 +102,7 @@ if [ "$all_trained" = false ]; then
     echo "  # Edit to use: --dataset anomaly_archive"
     echo "  ./shells/train_all_ucr.sh"
     echo ""
-    echo "Or continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
+    echo "Continuing anyway with available models..."
 fi
 echo ""
 
@@ -139,11 +136,7 @@ if [ $? -eq 0 ]; then
 else
     echo ""
     echo "✗ Adaptive analysis failed!"
-    echo "Continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
+    echo "Continuing anyway..."
 fi
 
 # ============================================================================
@@ -177,11 +170,7 @@ if [ $? -eq 0 ]; then
 else
     echo ""
     echo "✗ Scalability analysis failed!"
-    echo "Continue anyway? (y/n)"
-    read -r response
-    if [ "$response" != "y" ]; then
-        exit 1
-    fi
+    echo "Continuing anyway..."
 fi
 
 # ============================================================================

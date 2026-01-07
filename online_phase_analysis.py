@@ -1025,7 +1025,7 @@ def run_window_size_sensitivity_analysis(
                 algorithm_list_instances=algorithm_list_instances,
                 num_windows=num_windows,
                 window_overlap=min(5, ws // 10),  # 10% overlap
-                inject_synthetic_anomalies=False,
+                inject_synthetic_anomalies=True,  # FIXED: Use synthetic for proper evaluation
                 inject_regime_shifts=True,
                 best_ensemble=best_ensemble,
                 best_single_model=best_single_model,

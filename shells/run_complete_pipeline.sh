@@ -45,7 +45,8 @@ echo ""
 echo "════════════════════════════════════════════════════════════════════════════════"
 echo ""
 
-read -p "Press ENTER to start, or Ctrl+C to cancel..."
+echo "Starting pipeline automatically..."
+echo ""
 
 # Activate environment
 echo ""
