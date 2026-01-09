@@ -28,6 +28,7 @@ Plots/
 testbed_results/
 testbed_results_test/
 testbed_results_collected/
+Misc/
 
 # OS / Jupyter junk
 .DS_Store
