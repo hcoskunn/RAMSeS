@@ -77,15 +77,25 @@ def inject_synthetic_anomalies(y_true):
     Inject synthetic anomalies into the training labels.
 
     Args:
-        y_true (np.ndarray): Array of true labels.
+        y_true (np.ndarray): Array of true labels (1D or 2D with shape (1, N)).
 
     Returns:
-        np.ndarray: Array of true labels with injected anomalies.
+        np.ndarray: Array of true labels with injected anomalies (same shape as input).
     """
+    # Handle 2D arrays with batch dimension
+    original_shape = y_true.shape
+    if y_true.ndim == 2:
+        y_true = y_true.flatten()
+    
     num_anomalies = int(len(y_true) / 10)
     # num_anomalies = 1
     indices = np.random.choice(len(y_true), num_anomalies, replace=False)
     y_true[indices] = 1
+    
+    # Restore original shape
+    if len(original_shape) == 2:
+        y_true = y_true.reshape(original_shape)
+    
     return y_true
 
 
@@ -191,6 +201,11 @@ def evaluate_model_consistently(data, model, model_name, is_ensemble=False):
     Returns:
         tuple: True labels and predictions.
     """
+    # Debug: Check raw labels before evaluation
+    if hasattr(data, 'entities') and len(data.entities) > 0:
+        raw_labels = data.entities[0].labels
+        logger.info(f"RAW LABELS in data before evaluation: shape={raw_labels.shape}, unique={np.unique(raw_labels)}, sum={np.sum(raw_labels)}")
+    
     y_true_agg_dict = {}
     base_model_predictions_dict = {}
     if is_ensemble:
@@ -200,14 +215,30 @@ def evaluate_model_consistently(data, model, model_name, is_ensemble=False):
         for sub_model_name in model_name:
             sub_model = model.get(sub_model_name)
             if sub_model:
-                evaluation = evaluate_model(data, sub_model, sub_model_name)
-                y_true = evaluation['anomaly_labels'].flatten()
-                y_scores = evaluation['entity_scores'].flatten()
-                base_model_predictions.append(y_scores)
-                base_model_predictions_dict[sub_model_name] = y_scores
-                if y_true_agg is None:
-                    y_true_agg = y_true
-                    y_true_agg_dict[sub_model_name] = y_true
+                try:
+                    evaluation = evaluate_model(data, sub_model, sub_model_name)
+                    y_true = evaluation['anomaly_labels'].flatten()
+                    y_scores = evaluation['entity_scores'].flatten()
+                    
+                    # Validate shapes match
+                    if len(y_true) != len(y_scores):
+                        logger.error(f"Shape mismatch for {sub_model_name}: y_true={len(y_true)}, y_scores={len(y_scores)}")
+                        logger.error(f"  Data shape: {data.entities[0].Y.shape}, labels: {data.entities[0].labels.shape}")
+                        continue
+                    
+                    base_model_predictions.append(y_scores)
+                    base_model_predictions_dict[sub_model_name] = y_scores
+                    if y_true_agg is None:
+                        y_true_agg = y_true
+                        y_true_agg_dict[sub_model_name] = y_true
+                except Exception as e:
+                    logger.error(f"Inference failed for {sub_model_name}: {e}")
+                    continue
+                    
+        if len(base_model_predictions) == 0:
+            logger.error("No successful model evaluations in ensemble")
+            return None, None, {}, {}
+            
         base_model_predictions = np.array(base_model_predictions).T
         return y_true_agg, base_model_predictions, y_true_agg_dict, base_model_predictions_dict
     else:
@@ -238,6 +269,10 @@ def evaluate_individual_models(algorithm_list, test_data, trained_models):
         model = trained_models.get(model_name)
         if model:
             y_true, y_scores, y_true_agg_dict, y_scores_dict = evaluate_model_consistently(test_data, model, model_name)
+            
+            # Debug: Check y_true
+            logger.info(f"y_true shape: {np.array(y_true).shape}, unique values: {np.unique(y_true)}, sum: {np.sum(y_true)}")
+            logger.info(f"y_scores shape: {np.array(y_scores).shape}, min: {np.min(y_scores)}, max: {np.max(y_scores)}, mean: {np.mean(y_scores)}")
             
             # Use best_f1_linspace to find optimal threshold and get proper F1 score
             from Metrics.metrics import best_f1_linspace
@@ -325,7 +360,7 @@ def fitness_function(ensemble, train_data, test_data, trained_models,
     # Inject synthetic anomalies if the test labels have only one class
     if len(np.unique(y_true_test)) < 2:
         logger.warning(f"Ensemble {ensemble} has only one class in the test labels. Injecting synthetic anomalies.")
-        # y_true_test = inject_synthetic_anomalies(y_true_test)
+        y_true_test = inject_synthetic_anomalies(y_true_test)
 
     # Clean test predictions: replace inf/nan values before prediction
     base_model_predictions_test = np.array(base_model_predictions_test, dtype=np.float32)
@@ -337,9 +372,24 @@ def fitness_function(ensemble, train_data, test_data, trained_models,
     # Generate prediction scores using the meta-model
     y_scores = meta_model.predict_proba(base_model_predictions_test)[:, 1]
 
+    # Convert probabilities to binary predictions using optimal threshold
+    # We need to threshold y_scores for F1 calculation
+    thresholds = np.linspace(0.1, 0.9, 50)
+    best_threshold = 0.5
+    best_temp_f1 = 0
+    for threshold in thresholds:
+        y_pred_binary = (y_scores >= threshold).astype(int)
+        temp_f1, _, _, _, _, _, _ = f1_score(y_pred_binary, y_true_test)
+        if temp_f1 > best_temp_f1:
+            best_temp_f1 = temp_f1
+            best_threshold = threshold
+    
+    # Use the best threshold for final predictions
+    y_pred_binary = (y_scores >= best_threshold).astype(int)
+    
     # Calculate evaluation metrics: F1 score and PR AUC
     # _, _, best_f1, pr_auc, adjusted_y_pred = range_based_precision_recall_f1_auc(y_true_test, y_scores)
-    best_f1, precision, recall, TP, TN, FP, FN = f1_score(y_scores, y_true_test)
+    best_f1, precision, recall, TP, TN, FP, FN = f1_score(y_pred_binary, y_true_test)
     # best_f1, precision, recall, TP, TN, FP, FN = f1_soft_score(y_scores, y_true_test)
     # best_f1 = get_composite_fscore_raw(y_scores, y_true_test)
     pr_auc = prauc(y_true_test, y_scores)

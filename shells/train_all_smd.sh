@@ -8,6 +8,10 @@ echo "  OFFLINE PHASE: Training Models for SMD Dataset"
 echo "════════════════════════════════════════════════════════════════"
 echo ""
 
+# Clean Python environment variables to prevent conflicts
+unset PYTHONPATH
+unset PYTHONHOME
+
 # Activate conda environment
 source /raid0_ssd1/anaconda3/etc/profile.d/conda.sh
 conda activate RAMS

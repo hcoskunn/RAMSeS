@@ -28,6 +28,8 @@ cd /home/maxoud/local-storage/projects/RAMSeS || {
 echo "✓ Changed to RAMSeS directory: $(pwd)"
 
 # Activate conda environment
+unset PYTHONPATH
+unset PYTHONHOME
 source /raid0_ssd1/anaconda3/etc/profile.d/conda.sh
 conda activate RAMS
 

@@ -1,24 +1,6 @@
 #!/bin/bash
 ################################################################################
-# UCR Anomalpython3 online_phase_analysis.py \
-    --datasepython3 online_phase_analysis.py \
-    --dataset-list dataset_lists/ucr_sample.csv \
-    --data-dir ./Mononito/datasets \
-    --trained-model-dir ./Mononito/trained_models \
-    --output-dir ./results_ucr/scalability \
-    --scalability-analysis \
-    --inject-synthetic \
-    --num-windows 50 \
-    --num-entities 5 \
-    --num-models-range "3,5,8"taset_lists/ucr_sample.csv \
-    --data-dir ./Mononito/datasets \
-    --trained-model-dir ./Mononito/trained_models \
-    --output-dir ./results_ucr/adaptive \
-    --adaptive-analysis \
-    --inject-synthetic \
-    --num-windows 60 \
-    --num-entities 5 \
-    --update-intervals "5,10,20,None" - All Three Analyses
+# UCR Anomaly Archive - All Three Analyses
 #
 # Dataset: UCR Anomaly Archive
 # Characteristics:
@@ -62,6 +44,8 @@ echo ""
 # Activate environment
 echo ""
 echo "Activating RAMS conda environment..."
+unset PYTHONPATH
+unset PYTHONHOME
 source /raid0_ssd1/anaconda3/etc/profile.d/conda.sh
 conda activate RAMS
 

@@ -29,6 +29,26 @@ def monte_carlo_simulation(test_data, trained_models, model_names, dataset, enti
     Returns:
         A dictionary containing aggregated performance metrics for each model.
     """
+    # Validation: Check if data is too small for Monte Carlo testing
+    labels = test_data.entities[0].labels
+    
+    # Ensure labels are 2D
+    if labels.ndim == 1:
+        labels = labels.reshape(1, -1)
+    
+    min_data_size = 50  # Minimum required data points for Monte Carlo
+    data_size = labels.shape[1] if labels.ndim > 1 else labels.shape[0]
+    
+    if data_size < min_data_size:
+        logger.warning(f"Monte Carlo simulation skipped: data size {data_size} < minimum {min_data_size}")
+        return {}
+    
+    # Check if we have both classes
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2:
+        logger.warning(f"Monte Carlo simulation skipped: only one class present in labels (unique values: {unique_labels})")
+        return {}
+    
     results = {model_name: {'f1_scores': [], 'pr_auc_scores': []} for model_name in model_names}
 
     for sim in range(n_simulations):
@@ -57,9 +77,19 @@ def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, 
     # Run Monte Carlo simulation
     results = monte_carlo_simulation(test_data, trained_models, model_names, dataset, entity, n_simulations,
                                      noise_level)
+    
+    # Handle empty results (when data is too small or invalid)
+    if not results:
+        logger.warning("Monte Carlo simulation returned empty results")
+        return [], []
 
     # Summarize results
     summary = summarize_results(results)
+    
+    # Handle empty summary
+    if not summary or 'ranked_by_f1' not in summary or 'ranked_by_pr_auc' not in summary:
+        logger.warning("Monte Carlo summary is empty or incomplete")
+        return [], []
 
     # Print summary and rankings
     print("Summary of Monte Carlo Simulation:")

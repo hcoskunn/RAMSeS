@@ -17,8 +17,17 @@ Mononito/
 output/
 Outputs/
 docs/
-old/
 archive/
+results_smd/
+results_ucr/
+results_skab/
+results_skab-old/
+important-new-graphs/
+dataset_lists/
+Plots/
+testbed_results/
+testbed_results_test/
+testbed_results_collected/
 
 # OS / Jupyter junk
 .DS_Store

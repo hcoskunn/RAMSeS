@@ -85,9 +85,28 @@ def intersperse_borderline_normal_points(data, labels, factor, min_scale=0.95, m
 
 
 def run_off_by_threshold(test_data, trained_models, model_names, dataset, entity):
-    dataSet_before = copy.deepcopy(test_data)
+    # Validation: Check if data is too small for off-by-threshold testing
     data = test_data.entities[0].Y
     labels = test_data.entities[0].labels
+    
+    # Ensure labels are 2D
+    if labels.ndim == 1:
+        labels = labels.reshape(1, -1)
+    
+    min_data_size = 100  # Minimum required data points
+    data_size = labels.shape[1] if labels.ndim > 1 else labels.shape[0]
+    
+    if data_size < min_data_size:
+        logger.warning(f"Off-by-threshold test skipped: data size {data_size} < minimum {min_data_size}")
+        return [], [], [], []
+    
+    # Check if we have both classes
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2:
+        logger.warning(f"Off-by-threshold test skipped: only one class present in labels (unique values: {unique_labels})")
+        return [], [], [], []
+    
+    dataSet_before = copy.deepcopy(test_data)
     factor = .1
     augmented_data, augmented_labels, injected_normal_indices, injected_anomaly_indices = intersperse_borderline_normal_points(
         data, labels, factor)

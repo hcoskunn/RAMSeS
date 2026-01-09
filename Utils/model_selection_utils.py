@@ -117,10 +117,36 @@ def evaluate_model(data: Union[Dataset, Entity],
 
     anomaly_labels = data.entities[0].labels
 
+    # Handle adaptive window_size and window_step for models trained with -1
+    model_window_size = model.window_size if model.window_size > 0 else data.entities[0].Y.shape[1]
+    model_window_step = model.window_step if model.window_step > 0 else max(1, model_window_size // 4)
+
+    # CRITICAL FIX: Ensure labels match the data length
+    # In online phase, data might be a window subset, so trim labels to match
+    data_length = data.entities[0].Y.shape[1]  # Actual data length (might be a window)
+    
+    # Convert to numpy and ensure 2D for consistent handling
+    if isinstance(anomaly_labels, t.Tensor):
+        anomaly_labels = anomaly_labels.detach().cpu().numpy()
+    if anomaly_labels.ndim == 1:
+        anomaly_labels = anomaly_labels[np.newaxis, :]
+    
+    # Trim labels to match data window if needed
+    if anomaly_labels.shape[1] > data_length:
+        # Labels are longer than data - this happens in online phase with windows
+        # Trim labels to match the data window
+        anomaly_labels = anomaly_labels[:, :data_length]
+
+    # CRITICAL FIX: Use model-specific batch size for models like RNN that require batch_size=1
+    model_type = model_name.split('_')[0]
+    if model_type == 'RNN':
+        # RNN has a hardcoded assertion: batch_size must be 1
+        eval_batch_size = 1
+    
     dataloader = Loader(dataset=data,
                         batch_size=eval_batch_size,
-                        window_size=model.window_size,
-                        window_step=model.window_step,
+                        window_size=model_window_size,
+                        window_step=model_window_step,
                         shuffle=False,
                         padding_type=padding_type,
                         sample_with_replace=False,
@@ -132,6 +158,9 @@ def evaluate_model(data: Union[Dataset, Entity],
         window_size = data.entities[0].Y.shape[1]
     else:
         window_size = model.window_size
+    
+    # Use the same value we calculated for the dataloader
+    window_size = model_window_size
 
     entity_scores = t.zeros((len(dataloader), data.n_features, window_size))
 
@@ -197,13 +226,44 @@ def evaluate_model(data: Union[Dataset, Entity],
     Y_hat = np.nan_to_num(Y_hat, nan=0.0, posinf=1e10, neginf=-1e10)
     Y_sigma = np.nan_to_num(Y_sigma, nan=0.0, posinf=1e10, neginf=0.0)
 
+    # CRITICAL FIX: Adjust anomaly_labels to match the processed entity_scores shape
+    # Convert anomaly_labels to numpy if it's a tensor
+    if isinstance(anomaly_labels, t.Tensor):
+        anomaly_labels = anomaly_labels.detach().cpu().numpy()
+    
+    # Ensure anomaly_labels is 2D (n_features, n_timesteps)
+    if anomaly_labels.ndim == 1:
+        anomaly_labels = anomaly_labels[np.newaxis, :]
+    
+    # CRITICAL FIX: Labels don't need padding adjustment - they're already the correct length!
+    # entity_scores was adjusted for padding, but labels are ground truth and weren't padded
+    # So we just use them as-is
+    anomaly_labels_adjusted = anomaly_labels
+    
+    # Convert anomaly_labels_adjusted to numpy if it's still a tensor
+    if isinstance(anomaly_labels_adjusted, t.Tensor):
+        anomaly_labels_adjusted = anomaly_labels_adjusted.detach().cpu().numpy()
+    
+    # Verify shapes match (they should now!)
+    if entity_scores.shape[-1] != anomaly_labels_adjusted.shape[-1]:
+        from loguru import logger
+        logger.error(
+            f"Shape mismatch after processing: entity_scores={entity_scores.shape}, "
+            f"anomaly_labels_adjusted={anomaly_labels_adjusted.shape}. "
+            f"This should not happen after the fix!"
+        )
+        raise ValueError(
+            f"Shape mismatch: entity_scores has length {entity_scores.shape[-1]}, "
+            f"but anomaly_labels_adjusted has length {anomaly_labels_adjusted.shape[-1]}"
+        )
+
     return {
         'entity_scores': entity_scores,
         'Y': Y,
         'Y_hat': Y_hat,
         'Y_sigma': Y_sigma,
         'mask': mask,
-        'anomaly_labels': anomaly_labels
+        'anomaly_labels': anomaly_labels_adjusted
     }
 
 

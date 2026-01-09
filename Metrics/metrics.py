@@ -23,6 +23,16 @@ random.seed(42)
 
 
 def f1_score(predict, actual):
+    # Defensive: Convert tensors to numpy
+    if hasattr(predict, 'detach'):
+        predict = predict.detach().cpu().numpy()
+    if hasattr(actual, 'detach'):
+        actual = actual.detach().cpu().numpy()
+    
+    # Ensure numpy arrays
+    predict = np.asarray(predict)
+    actual = np.asarray(actual)
+    
     TP = np.sum(predict * actual)
     TN = np.sum((1 - predict) * (1 - actual))
     FP = np.sum(predict * (1 - actual))
@@ -159,6 +169,20 @@ def adjust_predicts(score, label,
 
 
 def best_f1_linspace(scores, labels, n_splits, segment_adjust, f1_type='standard'):
+    # Defensive fix: Convert PyTorch tensors to NumPy arrays if needed
+    if hasattr(scores, 'detach'):  # Check if it's a PyTorch tensor
+        scores = scores.detach().cpu().numpy()
+    if hasattr(labels, 'detach'):  # Check if it's a PyTorch tensor
+        labels = labels.detach().cpu().numpy()
+    
+    # Ensure both are 1D numpy arrays
+    scores = np.asarray(scores).flatten()
+    labels = np.asarray(labels).flatten()
+    
+    # Validate lengths match
+    if len(scores) != len(labels):
+        raise ValueError(f"Shape mismatch in best_f1_linspace: scores={len(scores)}, labels={len(labels)}")
+    
     best_threshold = 0
     best_f1 = 0
     thresholds = np.linspace(scores.min(), scores.max(), n_splits)

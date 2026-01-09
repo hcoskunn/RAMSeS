@@ -47,7 +47,13 @@ def initialize_sliding_windows(data: np.ndarray, targets: np.ndarray, mask: np.n
     while start_index + window_size <= data.shape[1]:
         end_index = start_index + window_size
         data_windows.append(data[:, start_index:end_index])
-        targets_windows.append(targets[start_index:end_index])
+        
+        # Handle both 1D and 2D targets
+        if targets.ndim == 1:
+            targets_windows.append(targets[start_index:end_index])
+        else:
+            targets_windows.append(targets[:, start_index:end_index])
+        
         masks_windows.append(mask[:, start_index:end_index])
         start_index += step_size
 

@@ -19,6 +19,10 @@ Author: RAMSeS Team
 Date: January 2026
 """
 
+# CRITICAL: Set matplotlib backend to non-GUI before importing pyplot
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend to avoid Qt errors
+
 import argparse
 import copy
 import json
@@ -198,6 +202,28 @@ def inference_single_model(model, model_name: str, test_data, monitor: Performan
         y_true, y_scores, _, _ = evaluate_model_consistently(
             test_data_copy, model, model_name, is_ensemble=False
         )
+        
+        # Validate we got valid results
+        if y_true is None or y_scores is None:
+            logger.error(f"Inference failed for {model_name}: Got None results")
+            monitor.stop()
+            return None
+        
+        # Ensure both are numpy arrays and 1D
+        if hasattr(y_true, 'detach'):
+            y_true = y_true.detach().cpu().numpy()
+        if hasattr(y_scores, 'detach'):
+            y_scores = y_scores.detach().cpu().numpy()
+        if hasattr(y_true, 'flatten'):
+            y_true = y_true.flatten()
+        if hasattr(y_scores, 'flatten'):
+            y_scores = y_scores.flatten()
+        
+        # Validate shapes match
+        if len(y_true) != len(y_scores):
+            logger.error(f"Shape mismatch for {model_name} after flatten: y_true={len(y_true)}, y_scores={len(y_scores)}")
+            monitor.stop()
+            return None
         
         # Calculate F1 and PR-AUC
         best_f1, precision, recall, y_pred_binary, _, best_threshold = best_f1_linspace(
@@ -552,7 +578,20 @@ def run_online_phase_experiment(
             
             # Use PRE-TRAINED meta-model to make predictions
             from Metrics.metrics import best_f1_linspace, prauc
-            y_scores_ensemble = meta_model_rf.predict_proba(base_predictions_window)[:, 1]
+            try:
+                proba = meta_model_rf.predict_proba(base_predictions_window)
+                # Handle case where only 1 class is present (binary classifier needs 2 classes)
+                if proba.shape[1] == 1:
+                    # Only one class seen during training - use the single probability
+                    logger.warning(f"Meta-model only has 1 class - using single probability column")
+                    y_scores_ensemble = proba[:, 0]
+                else:
+                    # Normal case: get probability of positive class (anomaly)
+                    y_scores_ensemble = proba[:, 1]
+            except Exception as e:
+                logger.error(f"predict_proba failed: {e}, using fallback (mean of base predictions)")
+                # Fallback: use mean of base predictions
+                y_scores_ensemble = np.mean(base_predictions_window, axis=1)
             
             # Calculate metrics
             best_f1, precision, recall, y_pred_binary, _, best_threshold = best_f1_linspace(
@@ -730,12 +769,18 @@ def save_results(results: Dict, output_dir: str):
         single_latency = results['single_model']['stats']['latency_ms']['mean']
         
         f.write("Latency Speedup:\n")
-        f.write(f"  Single Model vs Ensemble: {ensemble_latency/single_latency:.2f}x\n")
+        if single_latency > 0:
+            f.write(f"  Single Model vs Ensemble: {ensemble_latency/single_latency:.2f}x\n")
+        else:
+            f.write(f"  Single Model vs Ensemble: N/A (single_latency=0)\n")
         
         for baseline_model, baseline_results in results['baselines'].items():
             if baseline_results.get('stats'):
                 baseline_latency = baseline_results['stats']['latency_ms']['mean']
-                f.write(f"  {baseline_model} vs Ensemble: {ensemble_latency/baseline_latency:.2f}x\n")
+                if baseline_latency > 0:
+                    f.write(f"  {baseline_model} vs Ensemble: {ensemble_latency/baseline_latency:.2f}x\n")
+                else:
+                    f.write(f"  {baseline_model} vs Ensemble: N/A (baseline_latency=0)\n")
         
         f.write("\n")
         f.write("="*80 + "\n")
@@ -837,10 +882,15 @@ def plot_results(results: Dict, output_dir: str):
     
     plt.tight_layout()
     plot_file = os.path.join(output_dir, 'online_phase_performance.png')
-    plt.savefig(plot_file, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    logger.info(f"Saved performance plot to {plot_file}")
+    try:
+        plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"✓ Successfully saved performance plot to {plot_file}")
+    except Exception as e:
+        plt.close()
+        logger.error(f"❌ Failed to save performance plot to {plot_file}: {e}")
+        import traceback
+        traceback.print_exc()
     
     # 2. Box plots for distributions
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
@@ -901,10 +951,15 @@ def plot_results(results: Dict, output_dir: str):
     
     plt.tight_layout()
     box_plot_file = os.path.join(output_dir, 'online_phase_distributions.png')
-    plt.savefig(box_plot_file, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    logger.info(f"Saved distribution plot to {box_plot_file}")
+    try:
+        plt.savefig(box_plot_file, dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"✓ Successfully saved distribution plot to {box_plot_file}")
+    except Exception as e:
+        plt.close()
+        logger.error(f"❌ Failed to save distribution plot to {box_plot_file}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def run_window_size_sensitivity_analysis(
@@ -1012,10 +1067,19 @@ def run_window_size_sensitivity_analysis(
         try:
             # Calculate number of windows based on data length and window size
             # Use 50% overlap for smoother transitions
-            max_possible_windows = max(1, (total_length - ws) // (ws // 2) + 1)
+            if ws >= total_length:
+                logger.warning(f"Window size {ws} >= data length {total_length}, skipping")
+                results['results'][ws] = {
+                    'error': f'Window size {ws} exceeds or equals data length {total_length}',
+                    'ensemble': {'windows': [], 'stats': {}},
+                    'single_model': {'windows': [], 'stats': {}}
+                }
+                continue
+            
+            max_possible_windows = max(1, (total_length - ws) // max(1, ws // 2) + 1)
             num_windows = min(max_possible_windows, 10)  # Cap at 10 windows for efficiency
             
-            logger.info(f"  Data length: {total_length}, Window size: {ws}, Num windows: {num_windows}")
+            logger.info(f"  Data length: {total_length}, Window size: {ws}, Num windows: {num_windows}, max_possible: {max_possible_windows}")
             
             ws_results = run_online_phase_experiment(
                 dataset=dataset,
@@ -1147,12 +1211,18 @@ def save_window_size_analysis(results: Dict, output_dir: str):
                 continue
             
             if 'ensemble' in ws_result and 'stats' in ws_result['ensemble']:
-                ensemble_latencies.append(ws_result['ensemble']['stats']['latency_ms']['mean'])
+                stats = ws_result['ensemble']['stats']
+                # Safely check if latency_ms exists and has data
+                if 'latency_ms' in stats and stats['latency_ms'] and 'mean' in stats['latency_ms']:
+                    ensemble_latencies.append(stats['latency_ms']['mean'])
                 if ws_result['ensemble']['windows']:
                     ensemble_f1s.append(np.mean([w['f1'] for w in ws_result['ensemble']['windows']]))
             
             if 'single_model' in ws_result and 'stats' in ws_result['single_model']:
-                single_latencies.append(ws_result['single_model']['stats']['latency_ms']['mean'])
+                stats = ws_result['single_model']['stats']
+                # Safely check if latency_ms exists and has data
+                if 'latency_ms' in stats and stats['latency_ms'] and 'mean' in stats['latency_ms']:
+                    single_latencies.append(stats['latency_ms']['mean'])
                 if ws_result['single_model']['windows']:
                     single_f1s.append(np.mean([w['f1'] for w in ws_result['single_model']['windows']]))
         
@@ -1217,15 +1287,21 @@ def plot_window_size_analysis(results: Dict, output_dir: str):
         
         # Ensemble metrics
         if 'ensemble' in ws_result and 'stats' in ws_result['ensemble']:
-            ensemble_data['latency'].append(ws_result['ensemble']['stats']['latency_ms']['mean'])
-            ensemble_data['memory'].append(ws_result['ensemble']['stats']['memory_mb']['mean'])
+            stats = ws_result['ensemble']['stats']
+            if 'latency_ms' in stats and 'mean' in stats['latency_ms']:
+                ensemble_data['latency'].append(stats['latency_ms']['mean'])
+            if 'memory_mb' in stats and 'mean' in stats['memory_mb']:
+                ensemble_data['memory'].append(stats['memory_mb']['mean'])
             if ws_result['ensemble']['windows']:
                 ensemble_data['f1'].append(np.mean([w['f1'] for w in ws_result['ensemble']['windows']]))
         
         # Single model metrics
         if 'single_model' in ws_result and 'stats' in ws_result['single_model']:
-            single_data['latency'].append(ws_result['single_model']['stats']['latency_ms']['mean'])
-            single_data['memory'].append(ws_result['single_model']['stats']['memory_mb']['mean'])
+            stats = ws_result['single_model']['stats']
+            if 'latency_ms' in stats and 'mean' in stats['latency_ms']:
+                single_data['latency'].append(stats['latency_ms']['mean'])
+            if 'memory_mb' in stats and 'mean' in stats['memory_mb']:
+                single_data['memory'].append(stats['memory_mb']['mean'])
             if ws_result['single_model']['windows']:
                 single_data['f1'].append(np.mean([w['f1'] for w in ws_result['single_model']['windows']]))
     
@@ -1285,10 +1361,15 @@ def plot_window_size_analysis(results: Dict, output_dir: str):
     
     plt.tight_layout()
     plot_file = os.path.join(output_dir, 'window_size_sensitivity.png')
-    plt.savefig(plot_file, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    logger.info(f"Saved window size sensitivity plot to {plot_file}")
+    try:
+        plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"✓ Successfully saved window size sensitivity plot to {plot_file}")
+    except Exception as e:
+        plt.close()
+        logger.error(f"❌ Failed to save window size sensitivity plot to {plot_file}: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 def run_scalability_analysis(
@@ -1902,8 +1983,17 @@ def run_dual_branch_online(
     if y_test.ndim == 1:
         y_test = y_test.reshape(1, -1)
     
+    # Detect if dataset is univariate or multivariate
+    n_features = X_test.shape[0]
+    is_univariate = (n_features == 1)
+    
+    # Ensure y_test is numpy array (not tensor)
+    if hasattr(y_test, 'detach'):
+        y_test = y_test.detach().cpu().numpy()
+    
     test_length = X_test.shape[1]
     window_size = min(64, test_length // 3)  # Adaptive window size
+    logger.info(f"Dataset type: {'UNIVARIATE' if is_univariate else 'MULTIVARIATE'} ({n_features} features)")
     logger.info(f"Adaptive window sizing: test_length={test_length}, window_size={window_size}")
     logger.info(f"X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
     
@@ -1978,6 +2068,14 @@ def run_dual_branch_online(
         window_test_data.entities[0].mask = np.ones_like(y_window)
         window_test_data.entities[0].n_time = window_size
         window_test_data.total_time = window_size
+        # Ensure n_features is correct for both univariate and multivariate
+        window_test_data.n_features = X_window.shape[0]
+        window_test_data.entities[0].n_features = X_window.shape[0]
+        
+        # Debug: Verify window data shapes
+        logger.debug(f"Window {window_idx}: X_window={X_window.shape}, y_window={y_window.shape}")
+        logger.debug(f"  window_test_data.entities[0].Y={window_test_data.entities[0].Y.shape}")
+        logger.debug(f"  window_test_data.entities[0].labels={window_test_data.entities[0].labels.shape}")
         
         # Accumulate this window for future re-optimization
         accumulated_X.append(X_window)
@@ -1990,13 +2088,31 @@ def run_dual_branch_online(
         try:
             ensemble_monitor.start()
             
+            # Debug logging for window data
+            logger.debug(f"  Window {window_idx}: X_window shape={X_window.shape}, y_window shape={y_window.shape}")
+            logger.debug(f"  window_test_data.entities[0].Y shape={window_test_data.entities[0].Y.shape}")
+            logger.debug(f"  window_test_data.n_features={window_test_data.n_features}, n_time={window_test_data.entities[0].n_time}")
+            
             # Get base model predictions for this WINDOW only
             y_true_window, base_predictions_window, _, _ = evaluate_model_consistently(
                 window_test_data, trained_models, best_ensemble, is_ensemble=True
             )
             
+            # Skip if no successful evaluations
+            if y_true_window is None or base_predictions_window is None:
+                logger.warning(f"  No successful ensemble evaluations for window {window_idx}, skipping...")
+                continue
+            
             # Use PRE-TRAINED meta-model to make predictions (NO retraining!)
-            y_scores_ensemble = meta_model_rf.predict_proba(base_predictions_window)[:, 1]
+            proba = meta_model_rf.predict_proba(base_predictions_window)
+            # Handle case where only 1 class is present (binary classifier needs 2 classes)
+            if proba.shape[1] == 1:
+                # Only one class seen during training - use the single probability
+                logger.warning(f"Meta-model only has 1 class - using single probability column")
+                y_scores_ensemble = proba[:, 0]
+            else:
+                # Normal case: get probability of positive class (anomaly)
+                y_scores_ensemble = proba[:, 1]
             
             # Calculate metrics
             from Metrics.metrics import best_f1_linspace, prauc
@@ -2057,6 +2173,15 @@ def run_dual_branch_online(
             recent_data.entities[0].mask = np.ones_like(recent_y)
             recent_data.entities[0].n_time = recent_X.shape[1]
             recent_data.total_time = recent_X.shape[1]
+            
+            # CRITICAL FIX: Inject synthetic anomalies if recent windows have no anomalies
+            if len(np.unique(recent_y)) < 2:
+                logger.info(f"    ⚠️  Recent windows have no anomalies (all {np.unique(recent_y)[0]}). Injecting synthetic anomalies...")
+                from Metrics.Ensemble_GA import inject_synthetic_anomalies
+                recent_y_injected = inject_synthetic_anomalies(recent_y)
+                recent_data.entities[0].labels = recent_y_injected
+                logger.info(f"    ✓ Synthetic injection complete: {np.sum(recent_y_injected)} anomalies in {len(recent_y_injected)} points")
+            
             logger.info(f"    📊 Re-optimizing on {len(accumulated_X)} recent windows ({recent_X.shape[1]} timesteps)")
             
             # REAL ensemble re-optimization using GA (as in app.py) - on RECENT data
@@ -2824,9 +2949,8 @@ def main():
     
     # Algorithm list - MUST MATCH app.py!
     algorithm_list_instances = [
-        'LOF_1', 'LOF_2', 'NN_1', 'NN_2', 'NN_3', 'RNN_1', 'RNN_2',
-        'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4', 'MD_1',
-        'DGHL_1', 'LSTMVAE_1'
+        'LOF_1', 'LOF_2', 'LOF_3', 'LOF_4', 'NN_1', 'NN_2', 'NN_3',
+        'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4'
     ]
     
     # Parse window sizes (optional - will auto-calculate if None), model counts, and update intervals

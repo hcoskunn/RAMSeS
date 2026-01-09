@@ -57,6 +57,10 @@ echo ""
 echo "Starting pipeline automatically..."
 echo ""
 
+# Clean Python environment variables to prevent conflicts
+unset PYTHONPATH
+unset PYTHONHOME
+
 # Activate environment
 echo ""
 echo "Activating RAMS conda environment..."

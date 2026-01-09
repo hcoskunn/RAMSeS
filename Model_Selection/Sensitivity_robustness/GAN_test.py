@@ -189,14 +189,33 @@ def integrate_gan_with_dataset(data, labels):
 
 
 def run_Gan(test_data, trained_models, model_names, dataset, entity):
+    # Validation: Check if data is too small for GAN testing
+    data = test_data.entities[0].Y
+    labels = test_data.entities[0].labels
+    
+    # Ensure labels are 2D
+    if labels.ndim == 1:
+        labels = labels.reshape(1, -1)
+    
+    min_data_size = 100  # Minimum required data points for GAN testing
+    data_size = labels.shape[1] if labels.ndim > 1 else labels.shape[0]
+    
+    if data_size < min_data_size:
+        logger.warning(f"GAN test skipped: data size {data_size} < minimum {min_data_size}")
+        return [], [], [], []
+    
+    # Check if we have both classes (anomalies and normal points)
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2:
+        logger.warning(f"GAN test skipped: only one class present in labels (unique values: {unique_labels})")
+        return [], [], [], []
+    
     # Get the current date and time
     now = datetime.now()
 
     # Format the date and time as a string
     date_time_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     dataSet_before = copy.deepcopy(test_data)
-    data = test_data.entities[0].Y
-    labels = test_data.entities[0].labels
     factor = .1
     augmented_data, augmented_labels, injected_normal_indices, injected_anomaly_indices, total_labels_count = integrate_gan_with_dataset(
         data, labels)

@@ -9,6 +9,8 @@ echo "════════════════════════�
 echo ""
 
 # Activate conda environment
+unset PYTHONPATH
+unset PYTHONHOME
 source /raid0_ssd1/anaconda3/etc/profile.d/conda.sh
 conda activate RAMS
 
