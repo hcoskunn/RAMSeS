@@ -12,39 +12,6 @@ from sklearn.svm import SVC
 from Metrics.metrics import prauc, f1_score
 from Utils.model_selection_utils import evaluate_model
 
-
-# class Mevaluation(object):
-#     def __init__(self):
-#         args = get_args_from_cmdline()
-#         self.data_dir = args['dataset_path']
-#         self.result_dir = args['results_path']
-#         self.trained_model_path = args['trained_model_path']
-#         self.overwrite = args['overwrite']
-#         self.verbose = args['verbose']
-#
-#     def evaluate_model(self, _dataset_type: Optional[str] = None, _dataset_entity: Optional[str] = None):
-#         inject_abn_types = select_inject_abn_types_by_data_entity(_data_name=_dataset_entity)
-#         inject_abn_list = inject_abn_types.split('_')
-#         algorithms = select_algorithms_by_data_entity(_data_name=_dataset_entity)
-#         model_name_list = algorithms
-#         logger.info(f'evaluate_model method inject_abn_list is {inject_abn_list}, model_name_list is {model_name_list}')
-#         rank_model_params = {
-#             'dataset': _dataset_type,
-#             'entity': _dataset_entity,
-#             'inject_abn_list': inject_abn_list,
-#             'model_name_list': model_name_list,
-#             'trained_model_path': self.trained_model_path,
-#             'downsampling': 10,
-#             'min_length': 256,
-#             'root_dir': self.data_dir,
-#             'normalize': True,
-#             'verbose': False
-#         }
-#         rankingObj = RankModels(**rank_model_params)
-#         return rankingObj.evaluate_models(n_repeats=1, n_neighbors=[4], split='test', synthetic_ranking_criterion='f1',
-#                                           n_splits=100)
-
-
 def initialize_population(algorithm_list, population_size):
     """
     Initialize the population for the genetic algorithm.
