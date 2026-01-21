@@ -30,6 +30,7 @@ testbed_results_test/
 testbed_results_collected/
 Misc/
 results/
+shells/
 
 # OS / Jupyter junk
 .DS_Store
