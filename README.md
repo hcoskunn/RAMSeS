@@ -421,16 +421,6 @@ If you use RAMSeS in your research, please cite our paper:
 
 ```
 
-If you use the **Mononito datasets**, please also cite:
-
-```bibtex
-@article{mononito2022,
-  title={Mononito: A Time Series Anomaly Detection Benchmark},
-  journal={arXiv preprint arXiv:2210.01078},
-  year={2022}
-}
-```
-
 ---
 
 ## 👥 Contributing
