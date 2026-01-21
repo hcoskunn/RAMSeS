@@ -45,10 +45,32 @@ def get_args_from_cmdline():
                         type=str,
                         default='false',
                         help='Run model selection in parallel (true/false, t/f, T/F, True/False)')
+    parser.add_argument('--enable_online',
+                        action='store_true',
+                        help='Enable online phase processing (flag, no value needed)')
     parser.add_argument('--update_interval',
                         type=int,
                         default=5,
                         help='Number of windows between model selection re-optimization (default: 5)')
+    parser.add_argument('--iteration',
+                        type=int,
+                        default=5,
+                        help='Number of iterations for window sizing (window_size = online_data / iteration, default: 5)')
+    parser.add_argument('--strategy',
+                        type=str,
+                        default='adaptive',
+                        choices=['adaptive', 'fixed-best', 'fixed-random'],
+                        help='Online adaptation strategy: adaptive (re-optimize), fixed-best (no reopt, use best offline), fixed-random (no reopt, random model)')
+    parser.add_argument('--inject_online_regime',
+                        action='store_true',
+                        help='Inject regime shifts (scale+wander) into online data only (flag, no value needed)')
+    parser.add_argument('--max_online_windows',
+                        type=int,
+                        default=None,
+                        help='Maximum number of online windows to process (default: None = all windows)')
+    parser.add_argument('--skip_gan',
+                        action='store_true',
+                        help='Skip GAN robustness testing for faster execution (testing/debugging)')
     
     cmd_args = parser.parse_args()
     
@@ -69,6 +91,27 @@ def get_args_from_cmdline():
     # Parse parallel flag (accepts: true, t, T, True, TRUE, 1, yes, y, Y, Yes, YES)
     parallel_str = cmd_args.parallel.lower()
     args['parallel'] = parallel_str in ['true', 't', '1', 'yes', 'y']
+    
+    # Parse enable_online flag (now it's a boolean action flag)
+    args['enable_online'] = cmd_args.enable_online  # Already boolean from action='store_true'
+    
+    # Update interval from command line
+    args['update_interval'] = cmd_args.update_interval
+    
+    # Iteration parameter for window sizing
+    args['iteration'] = cmd_args.iteration
+    
+    # Strategy for online adaptation
+    args['strategy'] = cmd_args.strategy
+    
+    # Online regime shift injection flag
+    args['inject_online_regime'] = cmd_args.inject_online_regime
+    
+    # Max online windows parameter
+    args['max_online_windows'] = cmd_args.max_online_windows
+    
+    # Skip GAN flag
+    args['skip_gan'] = cmd_args.skip_gan
     
     return args
 

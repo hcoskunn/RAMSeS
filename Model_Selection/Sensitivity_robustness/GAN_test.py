@@ -160,12 +160,20 @@ def integrate_gan_with_dataset(data, labels):
     for window in indices_to_insert:
         # Add the original data points for this window
         integrated_data.append(data[:, window])
-        integrated_labels.append(labels[window])
+        
+        # Handle labels consistently - always flatten to 1D for concatenation
+        if labels.ndim == 1:
+            window_labels = labels[window]
+        else:
+            # If 2D (1, n), extract the row and index columns
+            window_labels = labels.flatten()[window]
+        integrated_labels.append(window_labels)
         current_index += len(window)
 
         # Add a generated point in the middle of the window
         if len(borderline_points) > 0:
             integrated_data.append(borderline_points[:1].T)
+            # Add single label as scalar (will be concatenated properly)
             integrated_labels.append(new_labels[:1])
             if new_labels[0] == 0:
                 injected_normal_indices.append(current_index)
@@ -176,6 +184,7 @@ def integrate_gan_with_dataset(data, labels):
             new_labels = new_labels[1:]
 
     integrated_data = np.concatenate(integrated_data, axis=1)
+    # Concatenate all label arrays (all are now 1D)
     integrated_labels = np.concatenate(integrated_labels, axis=0)
 
     # Count the total number of labels after integration

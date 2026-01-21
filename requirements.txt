@@ -9,6 +9,7 @@ networkx==3.5
 numpy==2.3.3
 pandas==2.3.3
 Pillow==11.3.0
+psutil==6.1.1
 pyod==2.0.5
 PyYAML==6.0.2
 PyYAML==6.0.3

@@ -10,6 +10,7 @@
 
 from itertools import combinations, permutations
 from typing import Optional, Tuple, List
+import logging
 
 import cvxpy as cp
 import networkx as nx
@@ -18,6 +19,8 @@ from scipy.spatial.distance import pdist, squareform
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import MinMaxScaler
+
+logger = logging.getLogger(__name__)
 
 from distributions import mallows_kendall as mk
 
@@ -351,11 +354,30 @@ def enhanced_markov_chain_rank_aggregator_text(rankings: List[List[str]], base_s
     Tuple[float, List[str]]
         A tuple containing the objective score and the aggregated rank in terms of the algorithm names.
     """
-    transition_matrix = calculate_transition_matrix_with_dynamic_weighting(rankings, base_smoothing, smoothing_factor)
+    # Handle empty or all-empty rankings
+    non_empty_rankings = [r for r in rankings if len(r) > 0]
+    if len(non_empty_rankings) == 0:
+        logger.warning("All rankings are empty - returning empty aggregation")
+        return (0.0, [])
+    
+    # If only one non-empty ranking, return it directly
+    if len(non_empty_rankings) == 1:
+        logger.warning(f"Only one non-empty ranking - returning it directly: {non_empty_rankings[0][:5]}")
+        return (0.0, non_empty_rankings[0])
+    
+    # Use only non-empty rankings for aggregation
+    transition_matrix = calculate_transition_matrix_with_dynamic_weighting(non_empty_rankings, base_smoothing, smoothing_factor)
 
     # Finding stationary distribution
     eigenvalues, eigenvectors = np.linalg.eig(transition_matrix.T)
-    stationary_distribution = np.abs(eigenvectors[:, np.argmax(np.isclose(eigenvalues, 1))]).real
+    
+    # Check if eigenvalues close to 1 exist
+    close_to_one = np.isclose(eigenvalues, 1)
+    if not np.any(close_to_one):
+        logger.warning("No eigenvalue close to 1 found - using first non-empty ranking as fallback")
+        return (0.0, non_empty_rankings[0])
+    
+    stationary_distribution = np.abs(eigenvectors[:, np.argmax(close_to_one)]).real
     stationary_distribution /= stationary_distribution.sum()
 
     # Objective can be the entropy of the stationary distribution
@@ -363,11 +385,16 @@ def enhanced_markov_chain_rank_aggregator_text(rankings: List[List[str]], base_s
     objective = -np.sum(stationary_distribution * np.log(stationary_distribution + epsilon))
 
     # Extract all unique algorithm names and map them to indices
-    unique_algorithms = sorted(set(algo for ranking in rankings for algo in ranking))
+    unique_algorithms = sorted(set(algo for ranking in non_empty_rankings for algo in ranking))
+    
+    # Handle edge case where unique_algorithms might be empty
+    if len(unique_algorithms) == 0:
+        logger.warning("No unique algorithms found - returning empty list")
+        return (0.0, [])
 
     # Convert the numeric rankings back to algorithm names for the output
     sorted_indices = np.argsort(stationary_distribution)[::-1]
-    sorted_algorithms = [unique_algorithms[idx] for idx in sorted_indices]
+    sorted_algorithms = [unique_algorithms[idx] for idx in sorted_indices if idx < len(unique_algorithms)]
 
     print("Stationary Distribution:")
     print(stationary_distribution)

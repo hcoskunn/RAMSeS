@@ -28,6 +28,12 @@ def intersperse_borderline_normal_points(data, labels, factor, min_scale=0.95, m
         tuple: Dataset including the new borderline normal points interspersed, and their corresponding labels.
     """
     n_features, n_samples = data.shape
+    
+    # Safety check: ensure we have enough samples
+    if n_samples < 2:
+        logger.warning(f"intersperse_borderline_normal_points skipped: n_samples={n_samples} < 2")
+        return data, labels, [], []
+    
     augmented_data = []
     augmented_labels = []
     injected_normal_indices = []

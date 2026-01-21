@@ -3,6 +3,7 @@ import concurrent.futures
 import copy
 import logging
 import os
+import psutil
 import time
 import traceback
 from datetime import datetime
@@ -34,7 +35,7 @@ from Model_Selection.inject_anomalies import Inject
 from Model_Selection.rank_aggregation import enhanced_markov_chain_rank_aggregator_text
 from Model_Training.train import TrainModels
 from Utils.utils import get_args_from_cmdline
-from comprehensive_results_writer import write_comprehensive_results
+# from comprehensive_results_writer import write_comprehensive_results
 
 # ------------------------------------------------------------------------------
 # Configuration
@@ -60,7 +61,26 @@ logger = logging.getLogger(__name__)
 # Utilities
 # ------------------------------------------------------------------------------
 
-def write_comprehensive_results(output_file, dataset, entity, iteration, results_dict, timing_dict):
+def get_memory_usage_mb():
+    """Get current memory usage in MB."""
+    process = psutil.Process()
+    return process.memory_info().rss / (1024 * 1024)  # Convert bytes to MB
+
+def get_peak_memory_mb():
+    """Get peak memory usage in MB (platform-dependent)."""
+    try:
+        import resource
+        rusage = resource.getrusage(resource.RUSAGE_SELF)
+        # macOS: ru_maxrss is in bytes, Linux: in kilobytes
+        if os.uname().sysname == 'Darwin':
+            return rusage.ru_maxrss / (1024 * 1024)
+        else:
+            return rusage.ru_maxrss / 1024
+    except:
+        # Fallback to current usage if resource module unavailable
+        return get_memory_usage_mb()
+
+def write_comprehensive_results(output_file, dataset, entity, iteration, results_dict, timing_dict, memory_dict=None):
     """
     Write comprehensive results including timing, scores, and chosen models.
     
@@ -77,6 +97,9 @@ def write_comprehensive_results(output_file, dataset, entity, iteration, results
     results_dict : dict
         Dictionary containing all results
     timing_dict : dict
+        Dictionary containing timing information
+    memory_dict : dict, optional
+        Dictionary containing memory usage information
         Dictionary containing timing information
     """
     with open(output_file, 'w') as f:
@@ -102,6 +125,24 @@ def write_comprehensive_results(output_file, dataset, entity, iteration, results
         f.write(f"  {'Total Module Time':<30} : {total_module_time:>10.4f}s\n")
         f.write(f"  {'End-to-End Time':<30} : {timing_dict.get('total', 0):>10.4f}s\n")
         f.write(f"  {'Overhead (E2E - Modules)':<30} : {timing_dict.get('total', 0) - total_module_time:>10.4f}s\n\n")
+        
+        # ============ MEMORY FOOTPRINT ============
+        if memory_dict:
+            f.write("="*80 + "\n")
+            f.write("MEMORY FOOTPRINT (MB)\n")
+            f.write("="*80 + "\n\n")
+            
+            f.write("Per-Module Memory Usage:\n")
+            f.write("-" * 50 + "\n")
+            for module, mem_info in memory_dict.get('modules', {}).items():
+                f.write(f"  {module:<30} : {mem_info['after']:>10.2f} MB\n")
+                f.write(f"    Delta: +{mem_info['delta']:>10.2f} MB\n")
+            
+            f.write("-" * 50 + "\n")
+            f.write(f"  {'Initial Memory':<30} : {memory_dict.get('initial', 0):>10.2f} MB\n")
+            f.write(f"  {'Final Memory':<30} : {memory_dict.get('final', 0):>10.2f} MB\n")
+            f.write(f"  {'Peak Memory':<30} : {memory_dict.get('peak', 0):>10.2f} MB\n")
+            f.write(f"  {'Total Increase':<30} : {memory_dict.get('final', 0) - memory_dict.get('initial', 0):>10.2f} MB\n\n")
         
         # ============ GENETIC ALGORITHM (ENSEMBLE) ============
         f.write("="*80 + "\n")
@@ -304,12 +345,12 @@ def load_trained_models(model_names, models_dir):
 # Model-Selection Pipelines
 # ------------------------------------------------------------------------------
 
-def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, iteration, model_list=None):
+def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False):
     """
     One-pass model selection pipeline in the order:
       1) GA (stacking ensemble search)
       2) Thompson Sampling (LinTS)
-      3) GAN robustness test
+      3) GAN robustness test (optional, can be skipped for speed)
       4) Off-by-threshold (borderline sensitivity)
       5) Monte Carlo (noise stress test)
       6) Rank aggregations (robust-only, then merged with Thompson)
@@ -318,6 +359,11 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     ----------
     model_list : list[str], optional
         List of model names to use. If None, uses global algorithm_list_instances.
+    test_data_gan : Dataset, optional
+        Separate dataset for GAN test (should be full original data without injection).
+        GAN creates its own perturbations internally. If None, uses test_data.
+    skip_gan : bool, optional
+        If True, skips GAN test for faster re-optimization in online phase.
 
     Returns (exactly 11 items):
         thompson_model_names[0],
@@ -336,12 +382,19 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     models_to_use = model_list if model_list is not None else algorithm_list_instances
     
     timing_dict = {}
+    memory_dict = {'modules': {}}
+    
+    # Track initial memory
+    initial_memory = get_memory_usage_mb()
+    memory_dict['initial'] = initial_memory
+    logger.info(f"  💾 Initial memory usage: {initial_memory:.2f} MB")
     
     # -------------------------
     # 1) Genetic Algorithm (GA)
     # -------------------------
     logger.info("  📊 Sub-stage 6.1: Genetic Algorithm (GA) - Finding best ensemble...")
     logger.info("     This will evaluate individual models and run 20 generations")
+    mem_before = get_memory_usage_mb()
     start_time = time.time()
     best_ensemble, best_f1, best_pr_auc, best_fitness, \
     individual_predictions, base_model_predictions_train, base_model_predictions_test, \
@@ -352,6 +405,12 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         meta_model_type='rf', mutation_rate=0.1,
     )
     timing_dict['1_Genetic_Algorithm'] = time.time() - start_time
+    mem_after = get_memory_usage_mb()
+    memory_dict['modules']['1_Genetic_Algorithm'] = {
+        'before': mem_before,
+        'after': mem_after,
+        'delta': mem_after - mem_before
+    }
     logger.info(
         "  ✓ [GA] Best ensemble=%s | F1=%.4f | PR-AUC=%.4f | fitness=%.4f | Time=%.4fs",
         best_ensemble, best_f1, best_pr_auc, best_fitness, timing_dict['1_Genetic_Algorithm']
@@ -361,6 +420,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     # 2) Thompson Sampling (LinTS, online)
     # -----------------------------------
     logger.info("  📊 Sub-stage 6.2: Thompson Sampling - Online model selection...")
+    mem_before = get_memory_usage_mb()
     start_time = time.time()
     thompson_model_names = run_linear_thompson_sampling(
         test_data=test_data,
@@ -372,32 +432,56 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         iteration=iteration,
     )
     timing_dict['2_Thompson_Sampling'] = time.time() - start_time
+    mem_after = get_memory_usage_mb()
+    memory_dict['modules']['2_Thompson_Sampling'] = {
+        'before': mem_before,
+        'after': mem_after,
+        'delta': mem_after - mem_before
+    }
     logger.info("  ✓ [Thompson] Top-5: %s | Time=%.4fs", thompson_model_names[:5], 
                 timing_dict['2_Thompson_Sampling'])
 
     # -------------------------
     # 3) GAN Robustness Testing
     # -------------------------
-    logger.info("  📊 Sub-stage 6.3: GAN Robustness Testing...")
-    start_time = time.time()
-    test_data_for_gan = copy.deepcopy(test_data)
-    gan_results = run_Gan(
-        test_data_for_gan, trained_models, algorithm_list_instances, dataset, entity
-    )
-    timing_dict['3_GAN_Robustness'] = time.time() - start_time
-    Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
-    Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = (
-        gan_results[0], gan_results[1], gan_results[2], gan_results[3]
-    )
-    timing_dict['3_GAN_Robustness'] = time.time() - start_time
-    logger.info("  ✓ [GAN] F1 names top-5: %s | Time=%.4fs", Gan_ranked_by_f1_names[:5],
-                timing_dict['3_GAN_Robustness'])
-    logger.info("     [GAN] PR names top-5: %s", Gan_ranked_by_pr_auc_names[:5])
+    if not skip_gan:
+        logger.info("  📊 Sub-stage 6.3: GAN Robustness Testing...")
+        mem_before = get_memory_usage_mb()
+        start_time = time.time()
+        # GAN uses separate dataset (full original data) to avoid circularity
+        # GAN creates its own perturbations internally
+        test_data_for_gan = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
+        gan_results = run_Gan(
+            test_data_for_gan, trained_models, algorithm_list_instances, dataset, entity
+        )
+        timing_dict['3_GAN_Robustness'] = time.time() - start_time
+        mem_after = get_memory_usage_mb()
+        memory_dict['modules']['3_GAN_Robustness'] = {
+            'before': mem_before,
+            'after': mem_after,
+            'delta': mem_after - mem_before
+        }
+        Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
+        Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = (
+            gan_results[0], gan_results[1], gan_results[2], gan_results[3]
+        )
+        logger.info("  ✓ [GAN] F1 names top-5: %s | Time=%.4fs", Gan_ranked_by_f1_names[:5],
+                    timing_dict['3_GAN_Robustness'])
+        logger.info("     [GAN] PR names top-5: %s", Gan_ranked_by_pr_auc_names[:5])
+    else:
+        logger.info("  ⏩ Sub-stage 6.3: GAN Robustness Testing SKIPPED (skip_gan=True)")
+        # Use empty placeholders for skipped GAN
+        Gan_ranked_by_f1 = []
+        Gan_ranked_by_pr_auc = []
+        Gan_ranked_by_f1_names = []
+        Gan_ranked_by_pr_auc_names = []
+        timing_dict['3_GAN_Robustness'] = 0.0
 
     # --------------------------------------------
     # 4) Off-by-threshold (borderline sensitivity)
     # --------------------------------------------
     logger.info("  📊 Sub-stage 6.4: Off-by-Threshold Testing...")
+    mem_before = get_memory_usage_mb()
     start_time = time.time()
     test_data_for_borderline = copy.deepcopy(test_data)
     ranked_by_f1, ranked_by_pr_auc, \
@@ -405,6 +489,12 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         test_data_for_borderline, trained_models, algorithm_list_instances, dataset, entity
     )
     timing_dict['4_Borderline_Sensitivity'] = time.time() - start_time
+    mem_after = get_memory_usage_mb()
+    memory_dict['modules']['4_Borderline_Sensitivity'] = {
+        'before': mem_before,
+        'after': mem_after,
+        'delta': mem_after - mem_before
+    }
     logger.info("  ✓ [Borderline] F1 names top-5: %s | Time=%.4fs", ranked_by_f1_names_sensitivity[:5],
                 timing_dict['4_Borderline_Sensitivity'])
     logger.info("     [Borderline] PR names top-5: %s", ranked_by_pr_auc_names_sensitivity[:5])
@@ -413,6 +503,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     # 5) Monte Carlo (noise stress test)
     # ---------------------------------
     logger.info("  📊 Sub-stage 6.5: Monte Carlo Simulation...")
+    mem_before = get_memory_usage_mb()
     start_time = time.time()
     test_data_for_mc = copy.deepcopy(test_data)
     monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
@@ -420,6 +511,12 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         n_simulations=2, noise_level=0.1,
     )
     timing_dict['5_Monte_Carlo'] = time.time() - start_time
+    mem_after = get_memory_usage_mb()
+    memory_dict['modules']['5_Monte_Carlo'] = {
+        'before': mem_before,
+        'after': mem_after,
+        'delta': mem_after - mem_before
+    }
     logger.info("  ✓ [MonteCarlo] F1 names top-5: %s | Time=%.4fs", monte_carlo_ranked_models_F1[:5],
                 timing_dict['5_Monte_Carlo'])
     logger.info("     [MonteCarlo] PR names top-5: %s", monte_carlo_ranked_models_PR[:5])
@@ -428,6 +525,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     # 6) Rank Aggregations
     # -----------------------
     logger.info("  📊 Sub-stage 6.6: Rank Aggregation...")
+    mem_before = get_memory_usage_mb()
     start_time = time.time()
     # Robust-only aggregation in the requested order: GAN → Borderline → Monte Carlo
     test_for_rank = [
@@ -441,7 +539,18 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     full_ = [robust_agg[1], thompson_model_names]
     full_aggregated = enhanced_markov_chain_rank_aggregator_text(full_)
     timing_dict['6_Rank_Aggregation'] = time.time() - start_time
+    mem_after = get_memory_usage_mb()
+    memory_dict['modules']['6_Rank_Aggregation'] = {
+        'before': mem_before,
+        'after': mem_after,
+        'delta': mem_after - mem_before
+    }
     logger.info("  ✓ [Aggregation] Time=%.4fs", timing_dict['6_Rank_Aggregation'])
+    
+    # Track final memory and peak
+    memory_dict['final'] = get_memory_usage_mb()
+    memory_dict['peak'] = get_peak_memory_mb()
+    logger.info(f"  💾 Final memory usage: {memory_dict['final']:.2f} MB (Peak: {memory_dict['peak']:.2f} MB)")
 
     # -----------------------
     # Persist a concise report
@@ -485,41 +594,42 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                 'pr_auc_names': Gan_ranked_by_pr_auc_names,
                 'f1_scores': Gan_ranked_by_f1,
                 'pr_auc_scores': Gan_ranked_by_pr_auc,
-                'best_model': Gan_ranked_by_f1_names[0],
-                'best_f1': Gan_ranked_by_f1[0][1][0]['f1'] if len(Gan_ranked_by_f1) > 0 else 0.0,
-                'best_pr_auc': Gan_ranked_by_pr_auc[0][1][0]['pr_auc'] if len(Gan_ranked_by_pr_auc) > 0 else 0.0
+                'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
+                'best_f1': 0.0,  # Will be computed later in run_app
+                'best_pr_auc': 0.0  # Will be computed later in run_app
             },
             'borderline': {
                 'f1_names': ranked_by_f1_names_sensitivity, 
                 'pr_auc_names': ranked_by_pr_auc_names_sensitivity,
                 'f1_scores': ranked_by_f1,
                 'pr_auc_scores': ranked_by_pr_auc,
-                'best_model': ranked_by_f1_names_sensitivity[0],
-                'best_f1': ranked_by_f1[0][1][0]['f1'] if len(ranked_by_f1) > 0 else 0.0,
-                'best_pr_auc': ranked_by_pr_auc[0][1][0]['pr_auc'] if len(ranked_by_pr_auc) > 0 else 0.0
+                'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
+                'best_f1': 0.0,  # Will be computed later in run_app
+                'best_pr_auc': 0.0  # Will be computed later in run_app
             },
             'monte_carlo': {
                 'f1_names': monte_carlo_ranked_models_F1, 
                 'pr_auc_names': monte_carlo_ranked_models_PR,
                 # Note: Monte Carlo returns names only, not scores
-                'best_model_f1': monte_carlo_ranked_models_F1[0],
-                'best_model_pr_auc': monte_carlo_ranked_models_PR[0]
+                'best_model_f1': monte_carlo_ranked_models_F1[0] if len(monte_carlo_ranked_models_F1) > 0 else 'N/A',
+                'best_model_pr_auc': monte_carlo_ranked_models_PR[0] if len(monte_carlo_ranked_models_PR) > 0 else 'N/A'
             },
             'robust_agg': robust_agg,
             'full_aggregated': full_aggregated,
-            'timing': timing_dict
+            'timing': timing_dict,
+            'memory': memory_dict
         }
     )
 
 
-def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration, trained_models, model_list=None):
+def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False):
     """
     PARALLEL VERSION: Runs model selection algorithms concurrently using ThreadPoolExecutor.
     
-    Executes 5 algorithms in parallel:
+    Executes algorithms in parallel:
       1) GA (genetic algorithm for stacking ensemble)
       2) Thompson Sampling (online LinTS)
-      3) GAN robustness test
+      3) GAN robustness test (optional, can be skipped)
       4) Off-by-threshold (borderline sensitivity)
       5) Monte Carlo (noise stress test)
     
@@ -529,6 +639,11 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         Dictionary of trained model instances
     model_list : list[str], optional
         List of model names to use. If None, uses global algorithm_list_instances.
+    test_data_gan : Dataset, optional
+        Separate dataset for GAN test (should be full original data without injection).
+        GAN creates its own perturbations internally. If None, uses test_data.
+    skip_gan : bool, optional
+        If True, skips GAN test for faster re-optimization in online phase.
         
     Returns
     -------
@@ -540,22 +655,31 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
     logger.info("  🚀 Starting PARALLEL model selection (5 algorithms concurrently)...")
     logger.info("  ✨ VERSION CHECK: Using run_model_selection_algorithms_2 with deepcopy fix")
     timing_dict = {}
+    memory_dict = {'modules': {}}
     overall_start = time.time()
+    
+    # Track initial memory
+    initial_memory = get_memory_usage_mb()
+    memory_dict['initial'] = initial_memory
+    logger.info(f"  💾 Initial memory usage: {initial_memory:.2f} MB")
     
     # CRITICAL: Create independent copies of test_data for each algorithm
     # This prevents race conditions when algorithms modify data during processing
     logger.info("     📋 Creating independent data copies...")
     test_data_ga = copy.deepcopy(test_data)
     test_data_thompson = copy.deepcopy(test_data)
-    test_data_gan = copy.deepcopy(test_data)
+    # GAN uses separate dataset (full original) to avoid circularity
+    test_data_gan_copy = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data) if not skip_gan else None
     test_data_borderline = copy.deepcopy(test_data)
     test_data_montecarlo = copy.deepcopy(test_data)
-    logger.info("     ✓ Created 5 independent data copies for thread safety")
+    num_tasks = 4 if skip_gan else 5
+    logger.info(f"     ✓ Created {num_tasks} independent data copies for thread safety")
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        logger.info("     Launching: GA | Thompson | GAN | Borderline | Monte Carlo")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_tasks) as executor:
+        task_names = "GA | Thompson | Borderline | Monte Carlo" if skip_gan else "GA | Thompson | GAN | Borderline | Monte Carlo"
+        logger.info(f"     Launching: {task_names}")
         
-        # Submit all 5 algorithms with their own data copies
+        # Submit all algorithms with their own data copies
         ga_future = executor.submit(
             genetic_algorithm,
             dataset, entity, train_data, test_data_ga,
@@ -572,11 +696,14 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             iterations=50,
             iteration=iteration,
         )
-        gan_future = executor.submit(
-            run_Gan,
-            test_data_gan, trained_models, models_to_use,
-            dataset, entity
-        )
+        
+        if not skip_gan:
+            gan_future = executor.submit(
+                run_Gan,
+                test_data_gan_copy, trained_models, models_to_use,
+                dataset, entity
+            )
+        
         borderline_future = executor.submit(
             run_off_by_threshold,
             test_data_borderline, trained_models, models_to_use,
@@ -595,24 +722,62 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         individual_predictions, base_model_predictions_train, base_model_predictions_test, \
         y_true_train, y_true_test, meta_model_type = ga_future.result()
         timing_dict['1_GA'] = time.time() - overall_start
+        mem_ga = get_memory_usage_mb()
+        memory_dict['modules']['1_GA'] = {
+            'before': initial_memory,
+            'after': mem_ga,
+            'delta': mem_ga - initial_memory
+        }
         logger.info("     ✓ GA: ensemble=%s | F1=%.4f | PR-AUC=%.4f", best_ensemble, best_f1, best_pr_auc)
         
         thompson_model_names = thompson_future.result()
         timing_dict['2_Thompson'] = time.time() - overall_start
+        mem_thompson = get_memory_usage_mb()
+        memory_dict['modules']['2_Thompson'] = {
+            'before': initial_memory,
+            'after': mem_thompson,
+            'delta': mem_thompson - initial_memory
+        }
         logger.info("     ✓ Thompson: top-5=%s", thompson_model_names[:5])
         
-        Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
-        Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = gan_future.result()
-        timing_dict['3_GAN'] = time.time() - overall_start
-        logger.info("     ✓ GAN: F1 top-5=%s", Gan_ranked_by_f1_names[:5])
+        if not skip_gan:
+            Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
+            Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = gan_future.result()
+            timing_dict['3_GAN'] = time.time() - overall_start
+            mem_gan = get_memory_usage_mb()
+            memory_dict['modules']['3_GAN'] = {
+                'before': initial_memory,
+                'after': mem_gan,
+                'delta': mem_gan - initial_memory
+            }
+            logger.info("     ✓ GAN: F1 top-5=%s", Gan_ranked_by_f1_names[:5])
+        else:
+            logger.info("     ⏩ GAN: SKIPPED (skip_gan=True)")
+            Gan_ranked_by_f1 = []
+            Gan_ranked_by_pr_auc = []
+            Gan_ranked_by_f1_names = []
+            Gan_ranked_by_pr_auc_names = []
+            timing_dict['3_GAN'] = 0.0
         
         ranked_by_f1, ranked_by_pr_auc, \
         ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = borderline_future.result()
         timing_dict['4_Borderline'] = time.time() - overall_start
+        mem_borderline = get_memory_usage_mb()
+        memory_dict['modules']['4_Borderline'] = {
+            'before': initial_memory,
+            'after': mem_borderline,
+            'delta': mem_borderline - initial_memory
+        }
         logger.info("     ✓ Borderline: F1 top-5=%s", ranked_by_f1_names_sensitivity[:5])
         
         monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = monte_carlo_future.result()
         timing_dict['5_MonteCarlo'] = time.time() - overall_start
+        mem_mc = get_memory_usage_mb()
+        memory_dict['modules']['5_MonteCarlo'] = {
+            'before': initial_memory,
+            'after': mem_mc,
+            'delta': mem_mc - initial_memory
+        }
         logger.info("     ✓ MonteCarlo: F1 top-5=%s", monte_carlo_ranked_models_F1[:5])
 
     timing_dict['0_Parallel_Total'] = time.time() - overall_start
@@ -620,6 +785,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
 
     # Rank Aggregation
     logger.info("  📊 Sub-stage 6.6: Rank Aggregation...")
+    mem_before_agg = get_memory_usage_mb()
     agg_start = time.time()
     test_for_rank = [
         Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names,
@@ -630,7 +796,18 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
     full_ = [robust_agg[1], thompson_model_names]
     full_aggregated = enhanced_markov_chain_rank_aggregator_text(full_)
     timing_dict['6_Aggregation'] = time.time() - agg_start
+    mem_after_agg = get_memory_usage_mb()
+    memory_dict['modules']['6_Aggregation'] = {
+        'before': mem_before_agg,
+        'after': mem_after_agg,
+        'delta': mem_after_agg - mem_before_agg
+    }
     logger.info("  ✓ Aggregation: %.2fs", timing_dict['6_Aggregation'])
+    
+    # Track final memory and peak
+    memory_dict['final'] = get_memory_usage_mb()
+    memory_dict['peak'] = get_peak_memory_mb()
+    logger.info(f"  💾 Final memory usage: {memory_dict['final']:.2f} MB (Peak: {memory_dict['peak']:.2f} MB)")
 
     # Persist results
     directory = f"myresults/robust_aggregated/{dataset}/{entity}/"
@@ -671,34 +848,107 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
                 'pr_auc_names': Gan_ranked_by_pr_auc_names,
                 'f1_scores': Gan_ranked_by_f1,
                 'pr_auc_scores': Gan_ranked_by_pr_auc,
-                'best_model': Gan_ranked_by_f1_names[0],
-                'best_f1': Gan_ranked_by_f1[0][1][0]['f1'] if len(Gan_ranked_by_f1) > 0 else 0.0,
-                'best_pr_auc': Gan_ranked_by_pr_auc[0][1][0]['pr_auc'] if len(Gan_ranked_by_pr_auc) > 0 else 0.0
+                'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
+                'best_f1': 0.0,  # Will be computed later in run_app
+                'best_pr_auc': 0.0  # Will be computed later in run_app
             },
             'borderline': {
                 'f1_names': ranked_by_f1_names_sensitivity, 
                 'pr_auc_names': ranked_by_pr_auc_names_sensitivity,
                 'f1_scores': ranked_by_f1,
                 'pr_auc_scores': ranked_by_pr_auc,
-                'best_model': ranked_by_f1_names_sensitivity[0],
-                'best_f1': ranked_by_f1[0][1][0]['f1'] if len(ranked_by_f1) > 0 else 0.0,
-                'best_pr_auc': ranked_by_pr_auc[0][1][0]['pr_auc'] if len(ranked_by_pr_auc) > 0 else 0.0
+                'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
+                'best_f1': 0.0,  # Will be computed later in run_app
+                'best_pr_auc': 0.0  # Will be computed later in run_app
             },
             'monte_carlo': {
                 'f1_names': monte_carlo_ranked_models_F1, 
                 'pr_auc_names': monte_carlo_ranked_models_PR,
-                'best_model_f1': monte_carlo_ranked_models_F1[0],
-                'best_model_pr_auc': monte_carlo_ranked_models_PR[0]
+                'best_model_f1': monte_carlo_ranked_models_F1[0] if len(monte_carlo_ranked_models_F1) > 0 else 'N/A',
+                'best_model_pr_auc': monte_carlo_ranked_models_PR[0] if len(monte_carlo_ranked_models_PR) > 0 else 'N/A'
             },
             'robust_agg': robust_agg,
             'full_aggregated': full_aggregated,
-            'timing': timing_dict
+            'timing': timing_dict,
+            'memory': memory_dict
         }
     )
 
 # ------------------------------------------------------------------------------
 # Diagnostics
 # ------------------------------------------------------------------------------
+
+def save_current_selection(dataset, entity, window_idx, best_ensemble, best_single_model, 
+                          meta_model_type, trained_models, individual_predictions,
+                          base_model_predictions_train, base_model_predictions_test,
+                          y_true_train, y_true_test):
+    """
+    Save the current model selection state to CSV for tracking online adaptations.
+    
+    Parameters
+    ----------
+    dataset : str
+        Dataset name
+    entity : str
+        Entity ID
+    window_idx : int
+        Current window index (0 for offline phase, N for online window N)
+    best_ensemble : list
+        List of model names in the best ensemble
+    best_single_model : str
+        Name of the best single model
+    meta_model_type : str
+        Type of meta-model used ('rf', 'lr', etc.)
+    trained_models : dict
+        Dictionary of trained model instances
+    individual_predictions : dict
+        Individual model predictions
+    base_model_predictions_train/test : array
+        Base model predictions on train/test sets
+    y_true_train/test : array
+        True labels for train/test sets
+    """
+    import csv
+    import pickle
+    from pathlib import Path
+    
+    # Create output directory
+    output_dir = Path(f"results/{dataset}/{entity}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # CSV file for tracking selections over time
+    csv_file = output_dir / f"online_selections_window_{window_idx}.csv"
+    
+    # Save metadata to CSV
+    with open(csv_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Field', 'Value'])
+        writer.writerow(['Window_Index', window_idx])
+        writer.writerow(['Best_Single_Model', best_single_model])
+        writer.writerow(['Best_Ensemble_Size', len(best_ensemble)])
+        writer.writerow(['Best_Ensemble_Models', ';'.join(best_ensemble)])
+        writer.writerow(['Meta_Model_Type', meta_model_type])
+        writer.writerow(['Timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S')])
+    
+    logger.info(f"  💾 Saved current selection state to {csv_file}")
+    
+    # Optionally save complete state as pickle for later restoration
+    # (Commented out by default to save space - uncomment if needed)
+    # state_file = output_dir / f"selection_state_window_{window_idx}.pkl"
+    # state = {
+    #     'window_idx': window_idx,
+    #     'best_ensemble': best_ensemble,
+    #     'best_single_model': best_single_model,
+    #     'meta_model_type': meta_model_type,
+    #     'individual_predictions': individual_predictions,
+    #     'base_model_predictions_train': base_model_predictions_train,
+    #     'base_model_predictions_test': base_model_predictions_test,
+    #     'y_true_train': y_true_train,
+    #     'y_true_test': y_true_test,
+    # }
+    # with open(state_file, 'wb') as f:
+    #     pickle.dump(state, f)
+    # logger.info(f"  💾 Saved complete state to {state_file}")
 
 def find_num_falses(adjusted_y_pred_ind_current, test_data_copy, dataset, entity, values,
                     full_aggregated, best_ensemble, iteration):
@@ -743,11 +993,16 @@ def run_app(algorithm_list, algorithm_list_instances):
     dataset = args.get('dataset', 'skab')
     entity = str(args.get('entity', '3'))
     use_parallel = args.get('parallel', False)
+    enable_online_phase = args.get('enable_online', False)  # Online phase OFF by default
+    iteration = args.get('iteration', 5)  # Default to 5 iterations for window sizing
+    strategy = args.get('strategy', 'adaptive')  # adaptive, fixed-best, or fixed-random
+    inject_online_regime = args.get('inject_online_regime', False)  # Regime shifts on online data only
+    max_online_windows = args.get('max_online_windows', None)  # Limit online windows (None = no limit)
     
     data_dir = args['dataset_path']
     
     logger.info("="*80)
-    logger.info(f"🚀 STARTING RAMSeS EXECUTION: dataset={dataset}, entity={entity}, parallel={use_parallel}")
+    logger.info(f"🚀 STARTING RAMSeS EXECUTION: dataset={dataset}, entity={entity}, parallel={use_parallel}, online_phase={enable_online_phase}, iteration={iteration}, strategy={strategy}, online_regime={inject_online_regime}, max_windows={max_online_windows}")
     logger.info("="*80)
     
     logger.info("📂 STAGE 1/7: Loading Training Data...")
@@ -840,27 +1095,76 @@ def run_app(algorithm_list, algorithm_list_instances):
 
         logger.info("🔍 STAGE 6/7: Running Model Selection Algorithms...")
         logger.info("  This includes: GA, Thompson Sampling, GAN, Monte Carlo, Off-by-Threshold")
-        # Sliding windows setup
+        
+        # Data splitting: 80% for offline phase, 20% for online phase (as per paper)
         data = test_data_before.entities[0].Y
         targets = test_data_before.entities[0].labels
         mask = test_data_before.entities[0].mask
-        iterations = 1  # Real-time loop count
-
+        total_samples = int(np.size(targets.flatten()))
+        
+        # Split: 80% offline (for model selection), 20% online (for streaming evaluation)
+        offline_size = int(total_samples * 0.8)
+        online_size = total_samples - offline_size
+        
+        # For offline phase: use first 80% of data
+        offline_data = data[:, :offline_size]
+        offline_targets = targets.flatten()[:offline_size].reshape(1, -1) if targets.ndim > 1 else targets[:offline_size]
+        offline_mask = mask[:, :offline_size]
+        
+        # For online phase: sliding windows over remaining 20%
+        online_data = data[:, offline_size:]
+        online_targets = targets.flatten()[offline_size:].reshape(1, -1) if targets.ndim > 1 else targets[offline_size:]
+        online_mask = mask[:, offline_size:]
+        
+        # Inject regime shifts into ONLINE data only (if requested)
+        if inject_online_regime:
+            logger.info(f"  ⚠️  INJECTING REGIME SHIFTS into online data (scale + wander)...")
+            from Datasets.dataset import Entity, Dataset
+            # Create temporary dataset for injection
+            online_entity = Entity(Y=online_data, name=f"{entity}_online", labels=online_targets, verbose=False)
+            online_dataset = Dataset(entities=[online_entity], name=f"{dataset}_online", verbose=False)
+            # Inject regime shifts (scale + wander) 
+            online_dataset, regime_sizes = Inject(online_dataset, ['scale', 'wander'])
+            # Extract modified data
+            online_data = online_dataset.entities[0].Y
+            online_targets = online_dataset.entities[0].labels
+            logger.info(f"  ✓ Regime shifts injected: scale + wander (sizes: {regime_sizes})")
+        
+        # Online phase: create sliding windows
+        # Window size is determined by number of iterations from the 20% online data
+        # iteration parameter determines how many windows we want: window_size = online_size / iteration
+        # step_size = 5% of window size for 95% overlap between consecutive windows
+        window_size = max(int(online_size / iteration), 100) if iteration > 0 else max(int(online_size * 0.2), 100)
+        step_size = max(int(window_size * 0.05), 5)  # 5% of window size, at least 5
+        
+        logger.info(f"  📊 Data split: Total={total_samples}, Offline={offline_size} (80%), Online={online_size} (20%)")
+        logger.info(f"  📊 Online windows: window_size={window_size} (online_size/{iteration}), step_size={step_size} (5% of window)")
+        
         data_windows, targets_windows, new_mask, num_windows = initialize_sliding_windows(
-            data, targets, mask,
-            int(np.size(targets.flatten()) / iterations),
-            int(np.size(targets.flatten()) / iterations) - 5,
+            online_data, online_targets, online_mask,
+            window_size, step_size
         )
-
-        # First window
-        test_data.entities[0].Y = data_windows[0]
-        test_data.entities[0].labels = targets_windows[0]
-        test_data.entities[0].mask = new_mask[0]
-        test_data.entities[0].n_time = int(np.size(targets_windows[0].flatten()))
-        test_data.total_time = int(np.size(targets_windows[0].flatten()))
+        
+        logger.info(f"  📊 Created {num_windows} sliding windows for online phase")
+        
+        # ==================== OFFLINE PHASE ====================
+        logger.info("  🔧 OFFLINE PHASE: Running full model selection on 80% of data...")
+        
+        # Use offline data for initial model selection
+        test_data.entities[0].Y = offline_data
+        test_data.entities[0].labels = offline_targets
+        test_data.entities[0].mask = offline_mask
+        test_data.entities[0].n_time = offline_size
+        test_data.total_time = offline_size
 
         test_data_new = copy.deepcopy(test_data)
+        logger.info(f"  📏 Before Inject: test_data size = {test_data.entities[0].labels.shape[1] if test_data.entities[0].labels.ndim > 1 else test_data.entities[0].labels.shape[0]}")
         test_data_new, _ = Inject(test_data_new, anomaly_list)
+        
+        # Log data sizes for architecture verification
+        test_data_before_size = test_data_before.entities[0].labels.shape[1] if test_data_before.entities[0].labels.ndim > 1 else test_data_before.entities[0].labels.shape[0]
+        test_data_new_size = test_data_new.entities[0].labels.shape[1] if test_data_new.entities[0].labels.ndim > 1 else test_data_new.entities[0].labels.shape[0]
+        logger.info(f"  📏 After Inject: test_data_before (full, for GAN) = {test_data_before_size}, test_data_new (injected, for others) = {test_data_new_size}")
 
         # Start end-to-end timing
         e2e_start_time = time.time()
@@ -870,14 +1174,14 @@ def run_app(algorithm_list, algorithm_list_instances):
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_2(
                 train_data, test_data_new, dataset, entity, iteration=0, 
-                trained_models=trained_models, model_list=loaded_model_names
+                trained_models=trained_models, model_list=loaded_model_names, test_data_gan=test_data_before
             )
         else:
             logger.info("  ⏱ Starting model selection pipeline (SEQUENTIAL mode)...")
             (best_thompson, robust_agg, full_aggregated, best_ensemble,
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
-                train_data, test_data_new, dataset, entity, iteration=0, model_list=loaded_model_names
+                train_data, test_data_new, dataset, entity, iteration=0, model_list=loaded_model_names, test_data_gan=test_data_before
             )
         
         # Calculate end-to-end time
@@ -1004,90 +1308,387 @@ def run_app(algorithm_list, algorithm_list_instances):
             'total': e2e_time
         }
         
+        # Get memory dict from extra_results
+        memory_dict = extra_results.get('memory', None)
+        
         logger.info("📝 STAGE 7/7: Writing Comprehensive Results...")
         # Write comprehensive results
         comp_results_dir = f"myresults/comprehensive/{dataset}/{entity}/"
         os.makedirs(comp_results_dir, exist_ok=True)
         comp_results_file = os.path.join(
-            comp_results_dir, f"comprehensive_results_{dataset}_{entity}_iter{0}.txt"
+            comp_results_dir, f"comprehensive_results_{dataset}_{entity}_iter{iteration}.txt"
         )
-        write_comprehensive_results(comp_results_file, dataset, entity, 0, results_dict, timing_dict)
+        write_comprehensive_results(comp_results_file, dataset, entity, iteration, results_dict, timing_dict, memory_dict)
         logger.info(f"✓ Results written to: {comp_results_file}")
         logger.info("="*80)
         logger.info(f"🎉 EXECUTION COMPLETE! Total Time: {e2e_time:.4f}s ({e2e_time/60:.2f} min)")
         logger.info("="*80)
 
-        # Real-time evaluation loop (iterations=1 means it won't run)
+        # ==================== ONLINE PHASE ====================
+        # Real-time evaluation loop on remaining 20% of data using sliding windows
         # update_interval controls how often we re-run the expensive model selection pipeline
+        enable_online_phase = args.get('enable_online', False)  # Off by default
         update_interval = args.get('update_interval', 5)  # Re-optimize every N windows (default: 5)
-        logger.info(f"📊 Online mode: iterations={iterations}, update_interval={update_interval}")
         
-        i = 1
-        while i < iterations:
-            logger.info(f"🔄 Processing window {i}/{iterations-1}")
-            test_data.entities[0].Y = data_windows[i]
-            test_data.entities[0].labels = targets_windows[i]
-            test_data.entities[0].mask = new_mask[i]
-            test_data.entities[0].n_time = int(np.size(targets_windows[i].flatten()))
-            test_data.total_time = int(np.size(targets_windows[i].flatten()))
-
-            # Restrict to best ensemble's models
-            trained_models_new = {}
-            algorithm_list_new = []
-            for model in best_ensemble:
-                trained_models_new[model] = trained_models[model]
-                algorithm_list_new.append(model)
-
-            test_data_new = copy.deepcopy(test_data)
-            test_data_new, _ = Inject(test_data_new, anomaly_list)
-
-            # LIGHTWEIGHT: Evaluate current best single model on this window
-            test_data_new_copy = copy.deepcopy(test_data_new)
-            _, adjusted_y_pred_ind_current, _, _ = evaluate_individual_models(
-                [full_aggregated[0]], test_data_new_copy, trained_models
-            )
-
-            # LIGHTWEIGHT: Evaluate ensemble fitness on current window
-            test_data_new_copy = copy.deepcopy(test_data_new)
-            values = fitness_function(
-                best_ensemble, train_data, test_data_new_copy, trained_models_new,
-                individual_predictions, base_model_predictions_train, algorithm_list_instances,
-                base_model_predictions_test, y_true_train, y_true_test,
-                meta_model_type=meta_model_type
-            )
-
-            # Persist falses (TP/FP/FN tracking)
-            test_data_new_copy = copy.deepcopy(test_data_new)
-            find_num_falses(
-                adjusted_y_pred_ind_current, test_data_new_copy, dataset, entity, values,
-                full_aggregated[0], best_ensemble, iteration=i
-            )
-
-            # EXPENSIVE: Re-run full model selection pipeline only every N windows
-            if i % update_interval == 0:
-                logger.info(f"  🔄 Triggering background re-optimization at window {i} (every {update_interval} windows)...")
-                reopt_start = time.time()
-                test_data_new_copy = copy.deepcopy(test_data_new)
-                if use_parallel:
-                    (best_thompson, robust_agg, full_aggregated, best_ensemble,
-                     individual_predictions, base_model_predictions_train, base_model_predictions_test,
-                     y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_2(
-                        train_data, test_data_new_copy, dataset, entity, iteration=i, 
-                        trained_models=trained_models, model_list=loaded_model_names
-                    )
-                else:
-                    (best_thompson, robust_agg, full_aggregated, best_ensemble,
-                     individual_predictions, base_model_predictions_train, base_model_predictions_test,
-                     y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_1(
-                        train_data, test_data_new_copy, dataset, entity, iteration=i, model_list=loaded_model_names
-                    )
-                logger.info(f"  ✓ Re-optimization completed in {time.time() - reopt_start:.2f}s")
-                logger.info(f"  → Updated best_ensemble: {best_ensemble}")
-                logger.info(f"  → Updated best_single_model: {full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated}")
-            else:
-                logger.info(f"  ⏩ Skipping re-optimization (next at window {((i // update_interval) + 1) * update_interval})")
+        # Save initial offline phase selection (window 0)
+        save_current_selection(
+            dataset, entity, window_idx=0, best_ensemble=best_ensemble,
+            best_single_model=full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated,
+            meta_model_type=meta_model_type, trained_models=trained_models,
+            individual_predictions=individual_predictions,
+            base_model_predictions_train=base_model_predictions_train,
+            base_model_predictions_test=base_model_predictions_test,
+            y_true_train=y_true_train, y_true_test=y_true_test
+        )
+        
+        # ========== STRATEGY SETUP ==========
+        # For fixed strategies, lock in the models now (no re-optimization during online phase)
+        if strategy == 'fixed-best':
+            logger.info(f"  🔒 STRATEGY: FIXED-BEST - Using best offline models throughout (no re-optimization)")
+            fixed_ensemble = best_ensemble.copy()
+            fixed_single_model = full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated
+        elif strategy == 'fixed-random':
+            logger.info(f"  🎲 STRATEGY: FIXED-RANDOM - Randomly selecting fixed model (no re-optimization)")
+            import random
+            available_models = list(trained_models.keys())
+            fixed_single_model = random.choice(available_models)
+            # Random ensemble: pick 3-6 random models
+            ensemble_size = random.randint(3, min(6, len(available_models)))
+            fixed_ensemble = random.sample(available_models, ensemble_size)
+            logger.info(f"  🎲 Fixed random model: {fixed_single_model}")
+            logger.info(f"  🎲 Fixed random ensemble: {fixed_ensemble}")
+        else:  # adaptive
+            logger.info(f"  🔄 STRATEGY: ADAPTIVE - Will re-optimize every {update_interval} windows")
+        
+        if enable_online_phase:
+            logger.info(f"📊 ONLINE PHASE ENABLED: {num_windows} windows, update_interval={update_interval}")
+            from tqdm import tqdm
+        else:
+            logger.info(f"  ℹ️  Online phase disabled (20% of data reserved but not processed)")
+            logger.info(f"  ℹ️  To enable online phase, add --enable_online flag")
+        
+        if enable_online_phase and num_windows > 1:
+            online_start_time = time.time()
+            i = 1
+            # Track cumulative online windows for sliding window re-training
+            cumulative_online_windows = []
             
-            i += 1
+            # Apply max_online_windows limit if specified
+            effective_num_windows = num_windows if max_online_windows is None else min(num_windows, max_online_windows + 1)
+            if max_online_windows is not None:
+                logger.info(f"⚠️  LIMITING online phase to {max_online_windows} windows (out of {num_windows-1} available)")
+            
+            # Create progress bar for online windows
+            pbar = tqdm(total=effective_num_windows-1, desc="Online Windows", unit="window", 
+                       bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]')
+            
+            while i < effective_num_windows:
+                pbar.set_description(f"Window {i}/{effective_num_windows-1}")
+                logger.info(f"🔄 Processing online window {i}/{effective_num_windows-1}")
+                current_window_data = data_windows[i]
+                current_window_labels = targets_windows[i]
+                current_window_mask = new_mask[i]
+                
+                # Accumulate this window for potential re-training
+                cumulative_online_windows.append({
+                    'data': current_window_data,
+                    'labels': current_window_labels,
+                    'mask': current_window_mask
+                })
+                
+                # Set up test data for current window evaluation
+                test_data.entities[0].Y = current_window_data
+                test_data.entities[0].labels = current_window_labels
+                test_data.entities[0].mask = current_window_mask
+                test_data.entities[0].n_time = int(np.size(current_window_labels.flatten()))
+                test_data.total_time = int(np.size(current_window_labels.flatten()))
+
+                # CRITICAL FIX: Check for re-optimization BEFORE evaluation
+                # This ensures updated models are used for evaluation at reoptimization windows
+                # EXPENSIVE: Re-run full model selection pipeline only every N windows
+                # Strategy check: only re-optimize if strategy is 'adaptive'
+                if strategy == 'adaptive' and i % update_interval == 0:
+                    logger.info(f"  🔄 Triggering re-optimization at window {i} (every {update_interval} windows)...")
+                    
+                    # ========== STEP 1: EVALUATE CURRENT MODELS (BEFORE RE-OPTIMIZATION) ==========
+                    logger.info(f"  📊 Step 1: Evaluating CURRENT models on window {i} (before re-optimization)...")
+                    
+                    # Save current models for comparison
+                    current_best_ensemble = best_ensemble.copy()
+                    current_best_single = full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated
+                    
+                    # Evaluate current single model and get F1 score
+                    test_data_current_eval = copy.deepcopy(test_data)
+                    test_data_current_eval, _ = Inject(test_data_current_eval, anomaly_list)
+                    _, current_single_pred, current_single_f1_list, current_single_pr_list = evaluate_individual_models(
+                        [current_best_single], test_data_current_eval, trained_models
+                    )
+                    current_single_f1 = to_scalar(current_single_f1_list[0]) if len(current_single_f1_list) > 0 else 0.0
+                    
+                    # Evaluate current ensemble
+                    trained_models_current = {m: trained_models[m] for m in current_best_ensemble}
+                    test_data_current_ensemble = copy.deepcopy(test_data)
+                    test_data_current_ensemble, _ = Inject(test_data_current_ensemble, anomaly_list)
+                    current_ensemble_fitness = fitness_function(
+                        current_best_ensemble, train_data, test_data_current_ensemble, trained_models_current,
+                        individual_predictions, base_model_predictions_train, algorithm_list_instances,
+                        base_model_predictions_test, y_true_train, y_true_test,
+                        meta_model_type=meta_model_type
+                    )
+                    
+                    logger.info(f"  → Current single model: {current_best_single}, F1: {current_single_f1:.4f}")
+                    logger.info(f"  → Current ensemble: {current_best_ensemble}, fitness: {current_ensemble_fitness:.4f}")
+                    
+                    # ========== STEP 2: RE-OPTIMIZE TO GET CANDIDATE MODELS ==========
+                    logger.info(f"  📊 Step 2: Re-optimizing to find CANDIDATE models...")
+                    logger.info(f"  📊 Using SLIDING WINDOW re-training: drop {i} oldest windows, add {i} newest windows")
+                    reopt_start = time.time()
+                    
+                    # ========== SLIDING WINDOW RE-TRAINING LOGIC ==========
+                    # 1. Concatenate the i accumulated online windows
+                    online_concat_data = np.concatenate([w['data'] for w in cumulative_online_windows], axis=1)
+                    online_concat_labels = np.concatenate([w['labels'] for w in cumulative_online_windows], axis=1) \
+                        if cumulative_online_windows[0]['labels'].ndim > 1 else \
+                        np.concatenate([w['labels'].flatten() for w in cumulative_online_windows])
+                    online_concat_mask = np.concatenate([w['mask'] for w in cumulative_online_windows], axis=1)
+                    online_samples_count = online_concat_data.shape[1]
+                    
+                    # 2. Drop same number of samples from BEGINNING of offline data (sliding window)
+                    adjusted_offline_data = offline_data[:, online_samples_count:]
+                    adjusted_offline_labels = offline_targets[:, online_samples_count:] if offline_targets.ndim > 1 else offline_targets[online_samples_count:]
+                    adjusted_offline_mask = offline_mask[:, online_samples_count:]
+                    
+                    # 3. Create new training/test data by combining adjusted offline + new online
+                    sliding_test_data = np.concatenate([adjusted_offline_data, online_concat_data], axis=1)
+                    sliding_test_labels = np.concatenate([adjusted_offline_labels.flatten(), online_concat_labels.flatten()]).reshape(1, -1) \
+                        if adjusted_offline_labels.ndim > 1 or online_concat_labels.ndim > 1 else \
+                        np.concatenate([adjusted_offline_labels, online_concat_labels])
+                    sliding_test_mask = np.concatenate([adjusted_offline_mask, online_concat_mask], axis=1)
+                    
+                    logger.info(f"  📏 Sliding window: dropped {online_samples_count} old samples, added {online_samples_count} new samples")
+                    logger.info(f"  📏 New test data size: {sliding_test_data.shape[1]} samples (constant 80% equivalent)")
+                    
+                    # 4. Update test_data with sliding window
+                    test_data_sliding = copy.deepcopy(test_data)
+                    test_data_sliding.entities[0].Y = sliding_test_data
+                    test_data_sliding.entities[0].labels = sliding_test_labels
+                    test_data_sliding.entities[0].mask = sliding_test_mask
+                    test_data_sliding.entities[0].n_time = sliding_test_data.shape[1]
+                    test_data_sliding.total_time = sliding_test_data.shape[1]
+                    
+                    # 5. IMPORTANT: For online phase, use REAL DATA without injection
+                    #    - Injection is for offline robustness testing only
+                    #    - Online phase should adapt to actual streaming data
+                    #    - This also prevents data size from becoming too small
+                    logger.info(f"  ⚠️  Online re-optimization: Using REAL data (no injection) for adaptation to streaming patterns")
+                    test_data_new_sliding = copy.deepcopy(test_data_sliding)
+                    # test_data_new_sliding, _ = Inject(test_data_new_sliding, anomaly_list)  # DISABLED for online phase
+                    
+                    # 6. Re-run model selection with sliding window data (SKIP GAN for speed)
+                    if use_parallel:
+                        (best_thompson, robust_agg, full_aggregated, best_ensemble,
+                         individual_predictions, base_model_predictions_train, base_model_predictions_test,
+                         y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_2(
+                            train_data, test_data_new_sliding, dataset, entity, iteration=i, 
+                            trained_models=trained_models, model_list=loaded_model_names, 
+                            test_data_gan=test_data_before, skip_gan=True  # Skip GAN for speed
+                        )
+                    else:
+                        (best_thompson, robust_agg, full_aggregated, best_ensemble,
+                         individual_predictions, base_model_predictions_train, base_model_predictions_test,
+                         y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_1(
+                            train_data, test_data_new_sliding, dataset, entity, iteration=i, 
+                            model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True  # Skip GAN for speed
+                        )
+                    
+                    logger.info(f"  ✓ Re-optimization completed in {time.time() - reopt_start:.2f}s")
+                    
+                    # ========== STEP 3: EVALUATE CANDIDATE MODELS ==========
+                    logger.info(f"  📊 Step 3: Evaluating CANDIDATE models on window {i} (after re-optimization)...")
+                    
+                    candidate_best_ensemble = best_ensemble.copy()
+                    candidate_best_single = full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated
+                    
+                    # Evaluate candidate single model and get F1 score
+                    test_data_candidate_eval = copy.deepcopy(test_data)
+                    test_data_candidate_eval, _ = Inject(test_data_candidate_eval, anomaly_list)
+                    _, candidate_single_pred, candidate_single_f1_list, candidate_single_pr_list = evaluate_individual_models(
+                        [candidate_best_single], test_data_candidate_eval, trained_models
+                    )
+                    candidate_single_f1 = to_scalar(candidate_single_f1_list[0]) if len(candidate_single_f1_list) > 0 else 0.0
+                    
+                    # Evaluate candidate ensemble
+                    trained_models_candidate = {m: trained_models[m] for m in candidate_best_ensemble}
+                    test_data_candidate_ensemble = copy.deepcopy(test_data)
+                    test_data_candidate_ensemble, _ = Inject(test_data_candidate_ensemble, anomaly_list)
+                    candidate_ensemble_fitness = fitness_function(
+                        candidate_best_ensemble, train_data, test_data_candidate_ensemble, trained_models_candidate,
+                        individual_predictions, base_model_predictions_train, algorithm_list_instances,
+                        base_model_predictions_test, y_true_train, y_true_test,
+                        meta_model_type=meta_model_type
+                    )
+                    
+                    logger.info(f"  → Candidate single model: {candidate_best_single}, F1: {candidate_single_f1:.4f}")
+                    logger.info(f"  → Candidate ensemble: {candidate_best_ensemble}, fitness: {candidate_ensemble_fitness:.4f}")
+                    
+                    # ========== STEP 4: COMPARE AND CHOOSE BETTER MODELS ==========
+                    logger.info(f"  🔍 Step 4: Comparing current vs candidate models...")
+                    
+                    # ========== 4.1: Compare Ensembles ==========
+                    logger.info(f"  📊 4.1: Ensemble comparison:")
+                    logger.info(f"      Current: fitness={current_ensemble_fitness:.4f}")
+                    logger.info(f"      Candidate: fitness={candidate_ensemble_fitness:.4f}")
+                    
+                    if candidate_ensemble_fitness > current_ensemble_fitness:
+                        logger.info(f"  ✅ Candidate ensemble is BETTER (Δ={candidate_ensemble_fitness - current_ensemble_fitness:.4f})")
+                        chosen_ensemble = candidate_best_ensemble
+                        chosen_ensemble_fitness = candidate_ensemble_fitness
+                    else:
+                        logger.info(f"  ↩️  Current ensemble is BETTER or EQUAL (keeping current)")
+                        chosen_ensemble = current_best_ensemble
+                        chosen_ensemble_fitness = current_ensemble_fitness
+                    
+                    # ========== 4.2: Compare Single Models ==========
+                    logger.info(f"  📊 4.2: Single model comparison:")
+                    logger.info(f"      Current ({current_best_single}): F1={current_single_f1:.4f}")
+                    logger.info(f"      Candidate ({candidate_best_single}): F1={candidate_single_f1:.4f}")
+                    
+                    if candidate_single_f1 > current_single_f1:
+                        logger.info(f"  ✅ Candidate single model is BETTER (Δ={candidate_single_f1 - current_single_f1:.4f})")
+                        chosen_single_model = candidate_best_single
+                        chosen_single_f1 = candidate_single_f1
+                    else:
+                        logger.info(f"  ↩️  Current single model is BETTER or EQUAL (keeping current)")
+                        chosen_single_model = current_best_single
+                        chosen_single_f1 = current_single_f1
+                    
+                    # ========== 4.3: Final Decision - Ensemble vs Single Model ==========
+                    logger.info(f"  🎯 4.3: Final decision - Ensemble vs Single Model:")
+                    logger.info(f"      Best Ensemble: fitness={chosen_ensemble_fitness:.4f}")
+                    logger.info(f"      Best Single ({chosen_single_model}): F1={chosen_single_f1:.4f}")
+                    
+                    # Decision: Use ensemble if fitness >= single model F1 (using fitness as proxy for F1)
+                    # Note: fitness_function returns a composite score, we compare it with F1 as both indicate performance
+                    if chosen_ensemble_fitness >= chosen_single_f1:
+                        logger.info(f"  ✅ ENSEMBLE SELECTED (fitness {chosen_ensemble_fitness:.4f} >= F1 {chosen_single_f1:.4f})")
+                        best_ensemble = chosen_ensemble
+                        # Update single model too (for logging/tracking purposes)
+                        if isinstance(full_aggregated, (list, tuple)):
+                            full_aggregated = (chosen_single_model,) + tuple(full_aggregated[1:])
+                        else:
+                            full_aggregated = chosen_single_model
+                        final_choice = 'ensemble'
+                    else:
+                        logger.info(f"  ✅ SINGLE MODEL SELECTED (F1 {chosen_single_f1:.4f} > fitness {chosen_ensemble_fitness:.4f})")
+                        best_ensemble = chosen_ensemble  # Still update ensemble for next iteration
+                        if isinstance(full_aggregated, (list, tuple)):
+                            full_aggregated = (chosen_single_model,) + tuple(full_aggregated[1:])
+                        else:
+                            full_aggregated = chosen_single_model
+                        final_choice = 'single'
+                    
+                    logger.info(f"  → FINAL CHOICE: {final_choice.upper()}")
+                    logger.info(f"  → Final ensemble for window {i}: {best_ensemble}")
+                    logger.info(f"  → Final single model for window {i}: {full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated}")
+                    
+                    # Save final selection state
+                    save_current_selection(
+                        dataset, entity, window_idx=i, best_ensemble=best_ensemble,
+                        best_single_model=full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated,
+                        meta_model_type=meta_model_type, trained_models=trained_models,
+                        individual_predictions=individual_predictions,
+                        base_model_predictions_train=base_model_predictions_train,
+                        base_model_predictions_test=base_model_predictions_test,
+                        y_true_train=y_true_train, y_true_test=y_true_test
+                    )
+                    
+                    # IMPORTANT: Skip redundant evaluation - already done in Step 3
+                    # We already evaluated the chosen models above, no need to repeat
+                    logger.info(f"  ℹ️  Skipping redundant evaluation (already performed during re-optimization)")
+                    did_reoptimization = True
+                else:
+                    # No re-optimization: either because not at update_interval or strategy is fixed
+                    if strategy in ['fixed-best', 'fixed-random']:
+                        # Use the fixed models (set at beginning)
+                        best_ensemble = fixed_ensemble
+                        if isinstance(full_aggregated, (list, tuple)):
+                            full_aggregated = (fixed_single_model,) + tuple(full_aggregated[1:])
+                        else:
+                            full_aggregated = fixed_single_model
+                        logger.info(f"  🔒 Using fixed models (strategy={strategy})")
+                    else:
+                        # Adaptive but not at update interval yet
+                        logger.info(f"  ⏩ Skipping re-optimization (next at window {((i // update_interval) + 1) * update_interval})")
+                    did_reoptimization = False
+                
+                # Only evaluate if we didn't just do re-optimization
+                # (At reoptimization windows, evaluation already happened in Step 3)
+                if not did_reoptimization:
+                    logger.info(f"  📊 Evaluating models on window {i}...")
+                    # Restrict to best ensemble's models
+                    trained_models_new = {}
+                    algorithm_list_new = []
+                    for model in best_ensemble:
+                        trained_models_new[model] = trained_models[model]
+                        algorithm_list_new.append(model)
+
+                    test_data_new = copy.deepcopy(test_data)
+                    test_data_new, _ = Inject(test_data_new, anomaly_list)
+
+                    # LIGHTWEIGHT: Evaluate current best single model on this window
+                    test_data_new_copy = copy.deepcopy(test_data_new)
+                    _, adjusted_y_pred_ind_current, _, _ = evaluate_individual_models(
+                        [full_aggregated[0]], test_data_new_copy, trained_models
+                    )
+
+                    # LIGHTWEIGHT: Evaluate ensemble fitness on current window
+                    test_data_new_copy = copy.deepcopy(test_data_new)
+                    values = fitness_function(
+                        best_ensemble, train_data, test_data_new_copy, trained_models_new,
+                        individual_predictions, base_model_predictions_train, algorithm_list_instances,
+                        base_model_predictions_test, y_true_train, y_true_test,
+                        meta_model_type=meta_model_type
+                    )
+
+                    # Persist falses (TP/FP/FN tracking)
+                    test_data_new_copy = copy.deepcopy(test_data_new)
+                    find_num_falses(
+                        adjusted_y_pred_ind_current, test_data_new_copy, dataset, entity, values,
+                        full_aggregated[0], best_ensemble, iteration=i
+                    )
+                
+                i += 1
+                pbar.update(1)
+            
+            pbar.close()
+            online_end_time = time.time()
+            online_total_time = online_end_time - online_start_time
+            
+            logger.info("✓ Online phase completed")
+            logger.info(f"⏱️  Online Phase Total Time: {online_total_time:.2f}s ({online_total_time/60:.2f} min)")
+            
+            # Write online phase summary
+            online_summary_file = f"myresults/comprehensive/{dataset}/{entity}/online_phase_timing.txt"
+            with open(online_summary_file, 'w') as f:
+                f.write("="*80 + "\n")
+                f.write("RAMSeS Online Phase Timing Summary\n")
+                f.write("="*80 + "\n")
+                f.write(f"Dataset: {dataset}\n")
+                f.write(f"Entity: {entity}\n")
+                f.write(f"Iteration: {iteration}\n")
+                f.write(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write("="*80 + "\n\n")
+                f.write(f"Total Windows Processed: {num_windows-1}\n")
+                f.write(f"Update Interval: {update_interval}\n")
+                f.write(f"Total Online Time: {online_total_time:.2f}s ({online_total_time/60:.2f} min)\n")
+                f.write(f"Average Time per Window: {online_total_time/(num_windows-1):.2f}s\n")
+                f.write(f"Offline Phase Time: {e2e_time:.2f}s ({e2e_time/60:.2f} min)\n")
+                f.write(f"Grand Total Time: {online_total_time + e2e_time:.2f}s ({(online_total_time + e2e_time)/60:.2f} min)\n")
+                f.write("="*80 + "\n")
+            
+            logger.info(f"📝 Online timing saved to: {online_summary_file}")
+        else:
+            logger.info("  ℹ️  Online phase skipped (insufficient windows)")
 
     except Exception:
         logger.info('Traceback for Entity: %s Dataset: %s', entity, dataset)
