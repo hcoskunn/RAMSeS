@@ -1,205 +1,481 @@
-# RAMSeS — Robust & Adaptive Model Selection for Time-Series Anomaly Detection Algorithms
+# RAMSeS — Robust & Adaptive Model Selection for Time-Series Anomaly Detection
 
-**RAMSeS** is a research framework for **unsupervised time-series anomaly detection (TSAD)** that produces two deployable outputs:
-1) An optimized **stacking ensemble** discovered by a Genetic Algorithm (GA), and  
-2) A **top-ranked single model** selected via robust tests and **Linear Thompson Sampling** (LinTS).
+**RAMSeS** is a research framework for **unsupervised time-series anomaly detection (TSAD)** that automatically selects and deploys the best detection strategy from two complementary approaches:
 
-This repository contains the end-to-end pipeline—data loading, model training/loading, robustness testing, online selection, and result aggregation—targeted at standard TSAD benchmarks.
+1. **Optimized Ensemble** — A stacking ensemble discovered by a Genetic Algorithm (GA) with configurable meta-learners (RF/LR/GBM/SVM)
+2. **Robust Single Model** — Selected via Linear Thompson Sampling with comprehensive robustness testing
 
-> **Research group:** D2IP @ TU Berlin  
-> **Status:** Research code (actively evolving)
+The framework provides an end-to-end pipeline for data loading, model training, robustness evaluation, and adaptive online selection.
+
+> **Research Group:** D2IP @ TU Berlin  
+> **License:** Apache 2.0  
+> **Status:** Research code (actively maintained)
+
+---
+
+## ✨ Key Features
+
+### Dual Selection Strategy
+- **Ensemble Branch:** Genetic Algorithm optimizes detector combinations; meta-learner stacks anomaly scores
+- **Single-Model Branch:** Multi-criteria evaluation combining:
+  - Linear Thompson Sampling with ε-greedy exploration
+  - GAN-based robustness testing (borderline synthetic anomalies)
+  - Off-by-threshold sensitivity analysis
+  - Monte Carlo noise stress tests
+  - Markov-chain rank aggregation
+
+### Online Adaptation
+- Sliding window processing with configurable update intervals
+- Multiple strategies: adaptive re-optimization, fixed-best, or fixed-random
+- Optional regime shift injection for testing distribution changes
+- Real-time model selection updates
+
+### Comprehensive Evaluation
+- Automatic comparison of ensemble vs. single-model performance
+- Detailed performance tracking (F1, PR-AUC, fitness)
+- Memory and computational overhead monitoring
 
 
-## ✨ Key Ideas
+---
 
-- **Two Branches:**  
-  - **Ensemble branch:** GA searches subsets of base detectors; a fixed meta-learner (e.g., RF/LR/GBM/SVM) stacks their scores.  
-  - **Single-model branch:** Combines (i) **Linear Thompson Sampling** with ε-greedy exploration, (ii) **GAN-based robustness** (borderline synthetic anomalies), (iii) **off-by-threshold** sensitivity tests, and (iv) **Monte-Carlo** noise stress-tests. A **Markov-chain rank aggregator** fuses rankings.
-
-- **Online-ready:** Works with sliding windows and can update choices iteratively.
-
-- **Reproducible outputs:** Human-readable summaries and plots are saved under `myresults/…`.
-
-
-## 🧱 Repository Layout (relevant parts)
+## 📁 Repository Structure
 
 ```text
-RAMSeS_framework/
-├── app.py                              # main entrypoint (RAMSeS pipeline)
-├── Datasets/
-│   └── load.py                         # data loader wrapper
-├── Metrics/
-│   └── Ensemble_GA.py                  # GA, fitness, evaluation helpers
-├── Model_Selection/
-│   ├── Thompson_Sampling.py            # LinTS + sliding window utils
-│   ├── rank_aggregation.py             # Markov-chain rank aggregator
-│   ├── inject_anomalies.py             # anomaly injection utilities
+RAMSeS/
+├── app.py                              # Main pipeline entrypoint
+├── requirements.txt                    # Python dependencies
+├── environment.yml                     # Conda environment specification
+├── LICENSE                             # Apache 2.0 license
+│
+├── Algorithms/                         # Base anomaly detector implementations
+│   ├── abod.py                         # Angle-Based Outlier Detection
+│   ├── alad.py                         # Adversarial Learned Anomaly Detection
+│   ├── anomaly_transformer.py          # Transformer-based detector
+│   ├── cblof.py                        # Cluster-Based Local Outlier Factor
+│   ├── cof.py                          # Connectivity-Based Outlier Factor
+│   ├── dghl.py                         # Deep Generative Hierarchical Learning
+│   ├── kde.py                          # Kernel Density Estimation
+│   ├── lof.py                          # Local Outlier Factor
+│   ├── lstmvae.py                      # LSTM Variational Autoencoder
+│   ├── mean_deviation.py               # Mean Deviation
+│   ├── nearest_neighbors.py            # k-Nearest Neighbors
+│   ├── rnn.py                          # Recurrent Neural Network
+│   ├── running_mean.py                 # Running Mean
+│   └── sos.py                          # Stochastic Outlier Selection
+│
+├── Configs/                            # Configuration files
+│   ├── config.yml                      # Default configuration
+│   └── custom_config.yml               # Custom configuration template
+│
+├── Datasets/                           # Data loading utilities
+│   ├── dataset.py                      # Dataset class definitions
+│   └── load.py                         # Data loader implementations
+│
+├── Metrics/                            # Evaluation and GA components
+│   ├── Ensemble_GA.py                  # Genetic Algorithm for ensemble optimization
+│   ├── metrics.py                      # Performance metrics (F1, PR-AUC, etc.)
+│   └── ranking_metrics.py              # Ranking evaluation utilities
+│
+├── Model_Selection/                    # Model selection algorithms
+│   ├── Thompson_Sampling.py            # Linear Thompson Sampling + sliding windows
+│   ├── rank_aggregation.py             # Markov-chain rank aggregation
+│   ├── inject_anomalies.py             # Synthetic anomaly injection
 │   └── Sensitivity_robustness/
-│       ├── GAN_test.py                 # GAN-based robustness tests
-│       ├── Monte_Carlo_Simulation.py   # noise stress-test
-│       └── off_by_threshold_testing.py # borderline/off-by-threshold tests
-├── Model_Training/
-│   └── train.py                        # train base detectors, save .pth
-└── Utils/
-    └── utils.py                        # CLI arg parsing, misc
+│       ├── GAN_test.py                 # GAN-based robustness testing
+│       ├── Monte_Carlo_Simulation.py   # Monte Carlo noise stress tests
+│       └── off_by_threshold_testing.py # Borderline sensitivity analysis
+│
+├── Model_Training/                     # Model training and management
+│   ├── train.py                        # Training orchestration
+│   ├── trainer.py                      # Training logic
+│   └── hyperparameter_grids.py         # Hyperparameter configurations
+│
+├── Utils/                              # Utility functions
+│   ├── utils.py                        # CLI argument parsing, misc utilities
+│   ├── config.py                       # Configuration file parser
+│   ├── plotting.py                     # Visualization utilities
+│   └── results_formatter.py            # Results formatting and export
+│
+└── testbed/                            # Batch evaluation configurations
+    └── file_list/                      # CSV files listing datasets for batch runs
+        ├── test_single.csv             # Single dataset test
+        ├── test_m_skab.csv             # SKAB multivariate datasets
+        └── test_u_ucr_anomaly_archive.csv  # UCR univariate datasets
 ```
+
+---
 
 
 
 
 ## 📦 Datasets
 
-We use the **Mononito** time-series repository introduced in the paper (arXiv:2210.01078).  
-You can download the full dataset folder from Google Drive:
-https://drive.google.com/drive/folders/1BLcaGm4bNSBueh3Hy_-dP1MKNhzfulwC?usp=share_link
+RAMSeS uses the **Mononito** time-series repository ([arXiv:2210.01078](https://arxiv.org/abs/2210.01078)), which includes:
+
+- **SKAB** — Multivariate sensor data from industrial systems
+- **SMD** — Server Machine Dataset (multivariate)
+- **UCR Anomaly Archive** — Univariate time series
+
+### Download Instructions
+
+1. **Download the Mononito dataset** from Google Drive:  
+   [https://drive.google.com/drive/folders/1BLcaGm4bNSBueh3Hy_-dP1MKNhzfulwC?usp=share_link](https://drive.google.com/drive/folders/1BLcaGm4bNSBueh3Hy_-dP1MKNhzfulwC?usp=share_link)
+
+2. **Extract and organize:**
+   ```bash
+   # Example structure
+   ~/Mononito/
+   ├── datasets/
+   │   ├── SKAB/
+   │   ├── SMD/
+   │   └── UCR/
+   └── trained_models/  # Created during training
+   ```
+
+3. **Update configuration** in `Configs/config.yml`:
+   ```yaml
+   dataset_path: "/path/to/Mononito/datasets"
+   trained_model_path: "/path/to/Mononito/trained_models"
+   ```
+
+> **Licensing Note:** Please follow the original dataset licenses and cite the appropriate papers when using these datasets.
+
+---
 
 
-Place it somewhere on disk (e.g., `~/Mononito/`) and point the CLI flag `--dataset_path` to it.  
-If you use **SMD**, keep the structure consistent with `Datasets/load.py`.
+## ⚙️ Installation
 
-> **Note on licensing:** Please follow the original dataset licenses and citations.
+### Prerequisites
+- Python 3.9+ (tested with Python 3.11)
+- CUDA-capable GPU (optional, CPU mode supported)
+- 8GB+ RAM recommended
 
-
-## ⚙️ Requirements & Setup
-
-We recommend Python **3.9+** and a recent **PyTorch**. GPU is optional.
+### Option 1: Conda Environment (Recommended)
 
 ```bash
-# 1) Create and activate a virtual environment (conda shown; venv also fine)
-conda create -n ramses python=3.10 -y
-conda activate ramses
+# Clone the repository
+git clone https://github.com/Maxoud99/RAMSeS.git
+cd RAMSeS
 
-# 2) Install dependencies
+# Create and activate conda environment
+conda env create -f environment.yml
+conda activate ..
+
+# Verify installation
+python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+```
+
+### Option 2: Pip + Virtual Environment
+
+```bash
+# Clone the repository
+git clone https://github.com/Maxoud99/RAMSeS.git
+cd RAMSeS
+
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
-# (If you don't have a requirements file yet, install torch + numpy + matplotlib + loguru + others your modules need.)
 
-# 3) (Optional) Verify CUDA availability via torch.cuda.is_available()
-python -c "import torch; print('CUDA:', torch.cuda.is_available())"
+# Verify installation
+python -c "import torch; print('PyTorch version:', torch.__version__)"
 ```
 
-## 🚀 Quickstart
-#### 1) Train base models (or reuse existing)
-Model_Training/train.py saves detector checkpoints (.pth) under your chosen path.
-In time_series_framework/app.py, training is triggered by:
-model_trainer.train_models(model_architectures=args['model_architectures'])
-Trained models are loaded by load_trained_models(..) from save_dir (hard-coded for now, see below).
-If you already have trained models, you can skip training; just ensure save_dir and the .pth files align (see “Trained model path” below).
+### Key Dependencies
+- **PyTorch** 2.5+ (with optional CUDA support)
+- **TensorFlow** 2.18+ (CPU version)
+- **scikit-learn** 1.7+ (ML algorithms)
+- **PyOD** 2.0+ (outlier detection)
+- **NumPy**, **Pandas**, **Matplotlib** (data processing & visualization)
+- **loguru** (structured logging)
 
-#### 2) Run RAMSeS
-The current pipeline order is:
-Ensemble-GA → Thompson → GANs → Off-by-threshold → Monte Carlo → Rank Aggregations
-Run:
-cd RAMSes
+See `requirements.txt` for the complete dependency list.
 
+---
+
+## 🚀 Quick Start
+
+### 1. Configure Paths
+
+Edit `Configs/config.yml` to set your dataset and model paths:
+
+```yaml
+# Paths
+dataset_path: "/path/to/Mononito/datasets"
+trained_model_path: "/path/to/Mononito/trained_models"
+
+# Training parameters
+downsampling: 10
+min_length: 256
+training_size: 1.0
+model_architectures: 'all'  # or specify: 'LOF,CBLOF,NN'
+
+# Evaluation parameters
+normalize: True
+evaluation_metric: 'Best F-1'
 ```
+
+### 2. Train Base Models
+
+RAMSeS automatically trains missing models on first run:
+
+```bash
 python app.py \
-  --dataset_path /ABS/PATH/TO/Mononito \
-  --trained_model_path /ABS/PATH/TO/Mononito/trained_models \
-  --downsampling 10 \
-  --min_length 256 \
-  --training_size 1.0 \
-  --overwrite false \
-  --verbose true \
-  --model_architectures "CBLOF,LOF,LSTMVAE,MD,RM,DGHL, ..."
+  --config Configs/config.yml \
+  --dataset SKAB \
+  --entity 5
 ```
 
-To run a whole list of time series:
-```
-./run_testbed.sh testbed/file_list/test_list.csv
+This will:
+- Load training data from the specified dataset/entity
+- Train any missing base detectors (LOF, CBLOF, NN, etc.)
+- Save trained models to `trained_model_path/SKAB/5/`
+
+### 3. Run Model Selection
+
+Execute the complete RAMSeS pipeline:
+
+```bash
+python app.py \
+  --config Configs/config.yml \
+  --dataset SKAB \
+  --entity 5 \
+  --parallel false
 ```
 
+**Pipeline stages:**
+1. Load training and test data
+2. Train/load base detector models
+3. Inject synthetic anomalies
+4. Run Genetic Algorithm for ensemble optimization
+5. Execute Thompson Sampling for single model selection
+6. Perform robustness tests (GAN, Monte Carlo, Off-by-Threshold)
+7. Aggregate rankings and select final model
 
-## Arguments:
+### 4. View Results
+
+Results are saved in human-readable format with comprehensive metrics and visualizations.
+
+**Example output:**
 ```
---dataset_path (required): root folder where datasets reside (e.g., Mononito).
---trained_model_path (required): base directory where training code writes/reads .pth.
---downsampling (int): downsample factor for series.
---min_length (int): minimum sequence length.
---training_size (float): portion of training split to use.
---overwrite (bool): whether to overwrite existing artifacts.
---verbose (bool): verbose logging.
---model_architectures (str): comma-separated list of base detectors to train.
-Trained model path:
-app.py currently loads model instances from a hard-coded save_dir at the top of the file:
-save_dir = "/home/maxoud/local-storage/projects/RAMSeS/Mononito/trained_models/smd/machine-3-10/"
-Either (a) change this to your path, or (b) symlink that path to your actual trained models folder. Make sure it contains *.pth files named like the entries in algorithm_list_instances (e.g., CBLOF_1.pth, LOF_3.pth, …).
-```
-## 🧪 What gets produced
-```
-Rank summaries & aggregations:
-myresults/robust_aggregated/{dataset}/{entity}/
-  robust_aggregated_results_{dataset}_{entity}_{iteration}.txt
-  new_robust_aggregated_results_{dataset}_{entity}_{iteration}.txt
-Contains:
-GAN, Borderline, Monte Carlo rankings
-Robust rank aggregate (Markov-chain aggregation)
-Final aggregation vs. Thompson sampling
-Misclassification summaries (per-window), if the real-time loop runs
-Diagnostics & plots:
-myresults/GA_Ens/{dataset}/{entity}/
-  ensemble_scores_{dataset}_{entity}_Data_vs_anomalies_[...].png
-Shows injected anomaly segments and scores for quick visual checks.
+FRAMEWORK FINAL DECISION
+================================================================================
+
+Single Model Option:
+--------------------------------------------------
+  Model       : LOF_2
+  F1 Score    : 0.8542
+  PR-AUC      : 0.7891
+
+Ensemble Option:
+--------------------------------------------------
+  Models      : ['LOF_1', 'CBLOF_3', 'NN_2']
+  Size        : 3
+  Meta-Model  : rf
+  F1 Score    : 0.8721
+  PR-AUC      : 0.8103
+  Fitness     : 0.8412
+
+Final Choice:
+--------------------------------------------------
+  ✓ ENSEMBLE SELECTED
+    Reason: Ensemble F1 (0.8721) >= Single Model F1 (0.8542)
+    Improvement: +0.0179 (2.10%)
 ```
 
- ## 🧩 Base Detectors & Instances
- ```
-Defined in app.py:
-algorithm_list = ['DGHL', 'LSTMVAE', 'MD', 'RM', 'LOF', 'CBLOFd', ...]
-algorithm_list_instances = [
-  'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4',
-  'DGHL_1', 'DGHL_2', 'DGHL_3', 'DGHL_4',
-  'LOF_1', 'LOF_2', 'LOF_3', 'LOF_4',
-  'LSTMVAE_1', 'LSTMVAE_2', 'LSTMVAE_3', 'LSTMVAE_4',
-  'MD_1',
-  'RM_1', 'RM_2', 'RM_3', ...
-]
-```
-Your training should produce checkpoints named exactly like the entries in algorithm_list_instances. The GA operates on these instances; the meta-learner type is configured inside app.py (currently 'rf' in run_model_selection_algorithms_1).
+---
 
+## 🎯 Configuration Options
 
-## 🔁 Sliding Windows & Online Mode
+### Command-Line Arguments
+
+```bash
+python app.py \
+  --config <path>           # Path to config file (default: Configs/config.yml)
+  --dataset <name>          # Dataset name (e.g., SKAB, SMD, UCR)
+  --entity <id>             # Entity ID within dataset
+  --parallel <true|false>   # Enable parallel model selection
 ```
-We use:
-initialize_sliding_windows(data, targets, mask, window_size, stride)
-In app.py, iterations = 1 by default (single pass).
+
+### Online Mode (Adaptive Selection)
+
+Enable online learning and adaptive model selection:
+
+```bash
+python app.py \
+  --config Configs/config.yml \
+  --dataset SKAB \
+  --entity 5 \
+  --enable_online \
+  --update_interval 5 \
+  --iteration 5 \
+  --strategy adaptive \
+  --inject_online_regime \
+  --max_online_windows 100
 ```
- Increase it for real-time evaluation; the loop will:
-evaluate current best single model on the new window,
-evaluate the GA-selected ensemble fitness,
-write misclassification summaries, and
-update the selections via a fresh pass through the pipeline.
+
+**Online mode parameters:**
+- `--enable_online` — Enable online phase processing
+- `--update_interval <n>` — Re-optimize every n windows (default: 5)
+- `--iteration <n>` — Number of iterations for window sizing (default: 5)
+- `--strategy <mode>` — Selection strategy:
+  - `adaptive` — Re-optimize model selection periodically
+  - `fixed-best` — Use best offline model throughout
+  - `fixed-random` — Use random model (baseline)
+- `--inject_online_regime` — Inject regime shifts in online data for testing
+- `--max_online_windows <n>` — Limit number of online windows processed
+
+---
+
+## 🧩 Available Algorithms
+
+RAMSeS includes the following base detectors:
+
+**Statistical Methods:**
+- `LOF` — Local Outlier Factor
+- `CBLOF` — Cluster-Based Local Outlier Factor
+- `COF` — Connectivity-Based Outlier Factor
+- `KDE` — Kernel Density Estimation
+- `NN` — k-Nearest Neighbors (Nearest Neighbors)
+- `SOS` — Stochastic Outlier Selection
+
+**Classical Methods:**
+- `MD` — Mean Deviation
+- `RM` — Running Mean
+- `ABOD` — Angle-Based Outlier Detection
+
+**Deep Learning Methods:**
+- `LSTMVAE` — LSTM Variational Autoencoder
+- `RNN` — Recurrent Neural Network
+- `DGHL` — Deep Generative Hierarchical Learning
+- `ALAD` — Adversarial Learned Anomaly Detection
+- `AnomalyTransformer` — Transformer-based detector
+
+**Configuration in `Configs/config.yml`:**
+```yaml
+model_architectures: 'all'  # Train all available algorithms
+# OR specify subset:
+model_architectures: 'LOF,CBLOF,NN,LSTMVAE'
+```
+
+Each algorithm can have multiple instances with different hyperparameters (e.g., `LOF_1`, `LOF_2`, `LOF_3`) for diversity in ensemble construction.
+
+---
 
 ## 🧪 Reproducibility Tips
-```
-Fix random seeds (GA, Monte-Carlo, GAN sampling, Thompson).
-Log/save all hyper-params along with results (consider dumping the parsed CLI args).
-Keep dataset_path, trained_model_path, and save_dir consistent and absolute.
-```
+
+- **Fix random seeds** for all stochastic components (GA, Monte Carlo, GAN, Thompson Sampling)
+- **Log hyperparameters** along with results
+- **Use absolute paths** for `dataset_path` and `trained_model_path`
+- **Version control** your configuration files
+- **Document** dataset versions and preprocessing steps
+
+---
 
 ## ❓ Troubleshooting
 
-```
-“Model X not found in save_dir”
-Ensure save_dir points to the directory containing .pth named like algorithm_list_instances.
-If you trained to a different layout, adjust save_dir or rename/copy files.
-Empty entities in train/test
-Verify --dataset_path points to the Mononito root and matches the layout expected by Datasets/load.py.
-Matplotlib/Display issues on servers
-Set a non-interactive backend: export MPLBACKEND=Agg or add before plotting:
-import matplotlib
-matplotlib.use("Agg")
-```
-## 📚 Citation
-```
-If you use RAMSeS  in your work, please cite our paper:
+### Model Loading Issues
 
-If you use the Mononito datasets, please also cite the original authors (see their paper: arXiv:2210.01078).
+**Problem:** `Model X not found in save_dir`
+
+**Solution:** 
+- Ensure trained models exist at `trained_model_path/DATASET/ENTITY/`
+- Check that model files are named correctly (e.g., `LOF_1.pth`, `CBLOF_2.pth`)
+- Set `overwrite: True` in config to retrain models
+
+### Dataset Loading Issues
+
+**Problem:** Empty entities in train/test data
+
+**Solution:**
+- Verify `dataset_path` points to the correct Mononito root directory
+- Check that dataset follows the expected structure in `Datasets/load.py`
+- Ensure dataset name matches exactly (case-sensitive)
+
+### Visualization Issues
+
+**Problem:** Matplotlib display errors on remote servers
+
+**Solution:**
+```bash
+# Set non-interactive backend before running
+export MPLBACKEND=Agg
+python app.py --config Configs/config.yml --dataset SKAB --entity 5
 ```
+
+Or add to your Python script:
+```python
+import matplotlib
+matplotlib.use('Agg')
+```
+
+---
+
+## 📚 Citation
+
+If you use RAMSeS in your research, please cite our paper:
+
+```bibtex
+
+```
+
+If you use the **Mononito datasets**, please also cite:
+
+```bibtex
+@article{mononito2022,
+  title={Mononito: A Time Series Anomaly Detection Benchmark},
+  journal={arXiv preprint arXiv:2210.01078},
+  year={2022}
+}
+```
+
+---
+
+## 👥 Contributing
+
+We welcome contributions! Please:
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+**Contribution areas:**
+- New anomaly detection algorithms
+- Additional robustness tests
+- Performance optimizations
+- Documentation improvements
+- Bug fixes
+
+---
+
 ## 👤 Contact
 
-Maintainer: Mohamed Abdelmaksoud (mohamed@tu-berlin.de)
+**Maintainer:** Mohamed Abdelmaksoud  
+**Email:** mohamed@tu-berlin.de  
+**Research Group:** D2IP @ TU Berlin
 
-For questions/bug reports: please open a GitHub issue.
+For questions, bug reports, or feature requests, please [open a GitHub issue](https://github.com/Maxoud99/RAMSeS/issues).
+
+---
 
 ## 📝 License
-This repository is released for research purposes. Check dataset licenses for any additional restrictions. See LICENSE for details (or choose a suitable OSI license and update this section).
+
+This project is licensed under the **Apache License 2.0** - see the [LICENSE](LICENSE) file for details.
+
+**Important:** Individual datasets may have their own licenses. Please respect the original dataset licenses when using RAMSeS.
+
+---
+
+## 🙏 Acknowledgments
+
+- The **Mononito** benchmark dataset team
+- Contributors to the open-source anomaly detection libraries (PyOD, etc.)
+- The D2IP research group at TU Berlin
+
+---
+
+**Happy Anomaly Detection! 🎯**
