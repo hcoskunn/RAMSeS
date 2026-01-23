@@ -14,7 +14,7 @@ from typing import Optional
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 path = os.path.join(BASE_DIR, '')
-config_path = os.path.join(path, 'configs/config.yml')
+config_path = os.path.join(path, 'Configs/config.yml')
 logger.info(f'{__file__}\ncurrent base dir is path is {path}\nconfig_path path is {config_path}')
 
 
@@ -78,7 +78,8 @@ def get_args_from_cmdline():
     if cmd_args.config_file_path and os.path.exists(cmd_args.config_file_path):
         config_file = cmd_args.config_file_path
     else:
-        config_file = "/home/maxoud/local-storage/projects/RAMSeS/Configs/config.yml"
+        # Fallback to default config path (dynamically determined from BASE_DIR)
+        config_file = config_path
     
     args = Config(config_file_path=config_file).parse()
     
