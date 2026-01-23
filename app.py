@@ -983,6 +983,90 @@ def find_num_falses(adjusted_y_pred_ind_current, test_data_copy, dataset, entity
         f.write(f"misclassified_ensemble: {misclassified_ensemble}\n")
 
 # ------------------------------------------------------------------------------
+# Background Re-optimization
+# ------------------------------------------------------------------------------
+
+def perform_reoptimization_task(
+    window_idx, cumulative_online_windows, offline_data, offline_targets, offline_mask,
+    test_data, train_data, dataset, entity, trained_models, loaded_model_names,
+    anomaly_list, individual_predictions, base_model_predictions_train, 
+    base_model_predictions_test, y_true_train, y_true_test, meta_model_type,
+    use_parallel, test_data_before, logger, current_best_ensemble, current_best_single,
+    algorithm_list_instances
+):
+    """
+    Background task for re-optimization.
+    Returns: (candidate_best_ensemble, candidate_best_single, individual_predictions,
+              base_model_predictions_train, base_model_predictions_test, 
+              y_true_train, y_true_test, meta_model_type, reopt_time)
+    """
+    reopt_start = time.time()
+    logger.info(f"  🔄 [BACKGROUND] Starting re-optimization for window {window_idx}...")
+    
+    # ========== SLIDING WINDOW RE-TRAINING LOGIC ==========
+    # 1. Concatenate the accumulated online windows
+    online_concat_data = np.concatenate([w['data'] for w in cumulative_online_windows], axis=1)
+    online_concat_labels = np.concatenate([w['labels'] for w in cumulative_online_windows], axis=1) \
+        if cumulative_online_windows[0]['labels'].ndim > 1 else \
+        np.concatenate([w['labels'].flatten() for w in cumulative_online_windows])
+    online_concat_mask = np.concatenate([w['mask'] for w in cumulative_online_windows], axis=1)
+    online_samples_count = online_concat_data.shape[1]
+    
+    # 2. Drop same number of samples from BEGINNING of offline data (sliding window)
+    adjusted_offline_data = offline_data[:, online_samples_count:]
+    adjusted_offline_labels = offline_targets[:, online_samples_count:] if offline_targets.ndim > 1 else offline_targets[online_samples_count:]
+    adjusted_offline_mask = offline_mask[:, online_samples_count:]
+    
+    # 3. Create new training/test data by combining adjusted offline + new online
+    sliding_test_data = np.concatenate([adjusted_offline_data, online_concat_data], axis=1)
+    sliding_test_labels = np.concatenate([adjusted_offline_labels.flatten(), online_concat_labels.flatten()]).reshape(1, -1) \
+        if adjusted_offline_labels.ndim > 1 or online_concat_labels.ndim > 1 else \
+        np.concatenate([adjusted_offline_labels, online_concat_labels])
+    sliding_test_mask = np.concatenate([adjusted_offline_mask, online_concat_mask], axis=1)
+    
+    logger.info(f"  📏 [BACKGROUND] Sliding window: dropped {online_samples_count} old, added {online_samples_count} new samples")
+    logger.info(f"  📏 [BACKGROUND] New test data size: {sliding_test_data.shape[1]} samples")
+    
+    # 4. Update test_data with sliding window
+    test_data_sliding = copy.deepcopy(test_data)
+    test_data_sliding.entities[0].Y = sliding_test_data
+    test_data_sliding.entities[0].labels = sliding_test_labels
+    test_data_sliding.entities[0].mask = sliding_test_mask
+    test_data_sliding.entities[0].n_time = sliding_test_data.shape[1]
+    test_data_sliding.total_time = sliding_test_data.shape[1]
+    
+    # 5. Use REAL DATA without injection for online phase
+    logger.info(f"  ⚠️  [BACKGROUND] Using REAL data (no injection) for adaptation")
+    test_data_new_sliding = copy.deepcopy(test_data_sliding)
+    
+    # 6. Re-run model selection with sliding window data (SKIP GAN for speed)
+    if use_parallel:
+        (best_thompson, robust_agg, full_aggregated, best_ensemble,
+         individual_predictions_new, base_model_predictions_train_new, base_model_predictions_test_new,
+         y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_2(
+            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx, 
+            trained_models=trained_models, model_list=loaded_model_names, 
+            test_data_gan=test_data_before, skip_gan=True
+        )
+    else:
+        (best_thompson, robust_agg, full_aggregated, best_ensemble,
+         individual_predictions_new, base_model_predictions_train_new, base_model_predictions_test_new,
+         y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_1(
+            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx, 
+            model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True
+        )
+    
+    candidate_best_ensemble = best_ensemble.copy()
+    candidate_best_single = full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated
+    
+    reopt_time = time.time() - reopt_start
+    logger.info(f"  ✓ [BACKGROUND] Re-optimization completed in {reopt_time:.2f}s")
+    
+    return (candidate_best_ensemble, candidate_best_single, individual_predictions_new,
+            base_model_predictions_train_new, base_model_predictions_test_new,
+            y_true_train_new, y_true_test_new, meta_model_type_new, reopt_time)
+
+# ------------------------------------------------------------------------------
 # Main Runner
 # ------------------------------------------------------------------------------
 
@@ -1382,6 +1466,11 @@ def run_app(algorithm_list, algorithm_list_instances):
             pbar = tqdm(total=effective_num_windows-1, desc="Online Windows", unit="window", 
                        bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]')
             
+            # Initialize background re-optimization executor and tracking
+            reopt_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            pending_reopt_future = None  # Track the running background task
+            pending_reopt_window = None  # Track which window triggered the reopt
+            
             while i < effective_num_windows:
                 pbar.set_description(f"Window {i}/{effective_num_windows-1}")
                 logger.info(f"🔄 Processing online window {i}/{effective_num_windows-1}")
@@ -1403,209 +1492,87 @@ def run_app(algorithm_list, algorithm_list_instances):
                 test_data.entities[0].n_time = int(np.size(current_window_labels.flatten()))
                 test_data.total_time = int(np.size(current_window_labels.flatten()))
 
-                # CRITICAL FIX: Check for re-optimization BEFORE evaluation
-                # This ensures updated models are used for evaluation at reoptimization windows
+                # ========== CHECK FOR COMPLETED BACKGROUND RE-OPTIMIZATION ==========
+                # If we have a pending re-optimization task, check if it's done
+                if pending_reopt_future is not None and pending_reopt_future.done():
+                    try:
+                        # Get results from completed background task
+                        (candidate_best_ensemble, candidate_best_single, individual_predictions_new,
+                         base_model_predictions_train_new, base_model_predictions_test_new,
+                         y_true_train_new, y_true_test_new, meta_model_type_new, reopt_time) = pending_reopt_future.result()
+                        
+                        logger.info(f"  ✅ [BACKGROUND] Re-optimization completed for window {pending_reopt_window} in {reopt_time:.2f}s")
+                        logger.info(f"  📊 Applying results from background re-optimization...")
+                        
+                        # Apply the new models (they've already been selected as best)
+                        best_ensemble = candidate_best_ensemble
+                        if isinstance(full_aggregated, (list, tuple)):
+                            full_aggregated = (candidate_best_single,) + tuple(full_aggregated[1:])
+                        else:
+                            full_aggregated = candidate_best_single
+                        
+                        # Update predictions and meta-model
+                        individual_predictions = individual_predictions_new
+                        base_model_predictions_train = base_model_predictions_train_new
+                        base_model_predictions_test = base_model_predictions_test_new
+                        y_true_train = y_true_train_new
+                        y_true_test = y_true_test_new
+                        meta_model_type = meta_model_type_new
+                        
+                        logger.info(f"  → Updated ensemble: {best_ensemble}")
+                        logger.info(f"  → Updated single model: {candidate_best_single}")
+                        
+                        # Save the updated selection
+                        save_current_selection(
+                            dataset, entity, window_idx=pending_reopt_window, best_ensemble=best_ensemble,
+                            best_single_model=candidate_best_single,
+                            meta_model_type=meta_model_type, trained_models=trained_models,
+                            individual_predictions=individual_predictions,
+                            base_model_predictions_train=base_model_predictions_train,
+                            base_model_predictions_test=base_model_predictions_test,
+                            y_true_train=y_true_train, y_true_test=y_true_test
+                        )
+                        
+                    except Exception as e:
+                        logger.error(f"  ❌ Background re-optimization failed: {e}")
+                        logger.error(f"  ↩️  Keeping current models")
+                    finally:
+                        # Clear the pending task
+                        pending_reopt_future = None
+                        pending_reopt_window = None
+                
+                # ========== TRIGGER NEW BACKGROUND RE-OPTIMIZATION IF NEEDED ==========
                 # EXPENSIVE: Re-run full model selection pipeline only every N windows
                 # Strategy check: only re-optimize if strategy is 'adaptive'
-                if strategy == 'adaptive' and i % update_interval == 0:
-                    logger.info(f"  🔄 Triggering re-optimization at window {i} (every {update_interval} windows)...")
+                if strategy == 'adaptive' and i % update_interval == 0 and pending_reopt_future is None:
+                    logger.info(f"  🔄 Triggering BACKGROUND re-optimization at window {i} (every {update_interval} windows)...")
                     
-                    # ========== STEP 1: EVALUATE CURRENT MODELS (BEFORE RE-OPTIMIZATION) ==========
-                    logger.info(f"  📊 Step 1: Evaluating CURRENT models on window {i} (before re-optimization)...")
+                    # ========== EVALUATE CURRENT MODELS (FOR LOGGING) ==========
+                    logger.info(f"  📊 Evaluating CURRENT models on window {i}...")
                     
-                    # Save current models for comparison
+                    # Save current models
                     current_best_ensemble = best_ensemble.copy()
                     current_best_single = full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated
                     
-                    # Evaluate current single model and get F1 score
-                    test_data_current_eval = copy.deepcopy(test_data)
-                    test_data_current_eval, _ = Inject(test_data_current_eval, anomaly_list)
-                    _, current_single_pred, current_single_f1_list, current_single_pr_list = evaluate_individual_models(
-                        [current_best_single], test_data_current_eval, trained_models
+                    logger.info(f"  → Current single model: {current_best_single}")
+                    logger.info(f"  → Current ensemble: {current_best_ensemble}")
+                    logger.info(f"  → Starting re-optimization in background (will apply when ready)...")
+                    
+                    # ========== SUBMIT BACKGROUND RE-OPTIMIZATION TASK ==========
+                    pending_reopt_future = reopt_executor.submit(
+                        perform_reoptimization_task,
+                        i, cumulative_online_windows, offline_data, offline_targets, offline_mask,
+                        test_data, train_data, dataset, entity, trained_models, loaded_model_names,
+                        anomaly_list, individual_predictions, base_model_predictions_train,
+                        base_model_predictions_test, y_true_train, y_true_test, meta_model_type,
+                        use_parallel, test_data_before, logger, current_best_ensemble, current_best_single,
+                        algorithm_list_instances
                     )
-                    current_single_f1 = to_scalar(current_single_f1_list[0]) if len(current_single_f1_list) > 0 else 0.0
+                    pending_reopt_window = i
+                    logger.info(f"  🚀 Background re-optimization task submitted for window {i}")
                     
-                    # Evaluate current ensemble
-                    trained_models_current = {m: trained_models[m] for m in current_best_ensemble}
-                    test_data_current_ensemble = copy.deepcopy(test_data)
-                    test_data_current_ensemble, _ = Inject(test_data_current_ensemble, anomaly_list)
-                    current_ensemble_fitness = fitness_function(
-                        current_best_ensemble, train_data, test_data_current_ensemble, trained_models_current,
-                        individual_predictions, base_model_predictions_train, algorithm_list_instances,
-                        base_model_predictions_test, y_true_train, y_true_test,
-                        meta_model_type=meta_model_type
-                    )
-                    
-                    logger.info(f"  → Current single model: {current_best_single}, F1: {current_single_f1:.4f}")
-                    logger.info(f"  → Current ensemble: {current_best_ensemble}, fitness: {current_ensemble_fitness:.4f}")
-                    
-                    # ========== STEP 2: RE-OPTIMIZE TO GET CANDIDATE MODELS ==========
-                    logger.info(f"  📊 Step 2: Re-optimizing to find CANDIDATE models...")
-                    logger.info(f"  📊 Using SLIDING WINDOW re-training: drop {i} oldest windows, add {i} newest windows")
-                    reopt_start = time.time()
-                    
-                    # ========== SLIDING WINDOW RE-TRAINING LOGIC ==========
-                    # 1. Concatenate the i accumulated online windows
-                    online_concat_data = np.concatenate([w['data'] for w in cumulative_online_windows], axis=1)
-                    online_concat_labels = np.concatenate([w['labels'] for w in cumulative_online_windows], axis=1) \
-                        if cumulative_online_windows[0]['labels'].ndim > 1 else \
-                        np.concatenate([w['labels'].flatten() for w in cumulative_online_windows])
-                    online_concat_mask = np.concatenate([w['mask'] for w in cumulative_online_windows], axis=1)
-                    online_samples_count = online_concat_data.shape[1]
-                    
-                    # 2. Drop same number of samples from BEGINNING of offline data (sliding window)
-                    adjusted_offline_data = offline_data[:, online_samples_count:]
-                    adjusted_offline_labels = offline_targets[:, online_samples_count:] if offline_targets.ndim > 1 else offline_targets[online_samples_count:]
-                    adjusted_offline_mask = offline_mask[:, online_samples_count:]
-                    
-                    # 3. Create new training/test data by combining adjusted offline + new online
-                    sliding_test_data = np.concatenate([adjusted_offline_data, online_concat_data], axis=1)
-                    sliding_test_labels = np.concatenate([adjusted_offline_labels.flatten(), online_concat_labels.flatten()]).reshape(1, -1) \
-                        if adjusted_offline_labels.ndim > 1 or online_concat_labels.ndim > 1 else \
-                        np.concatenate([adjusted_offline_labels, online_concat_labels])
-                    sliding_test_mask = np.concatenate([adjusted_offline_mask, online_concat_mask], axis=1)
-                    
-                    logger.info(f"  📏 Sliding window: dropped {online_samples_count} old samples, added {online_samples_count} new samples")
-                    logger.info(f"  📏 New test data size: {sliding_test_data.shape[1]} samples (constant 80% equivalent)")
-                    
-                    # 4. Update test_data with sliding window
-                    test_data_sliding = copy.deepcopy(test_data)
-                    test_data_sliding.entities[0].Y = sliding_test_data
-                    test_data_sliding.entities[0].labels = sliding_test_labels
-                    test_data_sliding.entities[0].mask = sliding_test_mask
-                    test_data_sliding.entities[0].n_time = sliding_test_data.shape[1]
-                    test_data_sliding.total_time = sliding_test_data.shape[1]
-                    
-                    # 5. IMPORTANT: For online phase, use REAL DATA without injection
-                    #    - Injection is for offline robustness testing only
-                    #    - Online phase should adapt to actual streaming data
-                    #    - This also prevents data size from becoming too small
-                    logger.info(f"  ⚠️  Online re-optimization: Using REAL data (no injection) for adaptation to streaming patterns")
-                    test_data_new_sliding = copy.deepcopy(test_data_sliding)
-                    # test_data_new_sliding, _ = Inject(test_data_new_sliding, anomaly_list)  # DISABLED for online phase
-                    
-                    # 6. Re-run model selection with sliding window data (SKIP GAN for speed)
-                    if use_parallel:
-                        (best_thompson, robust_agg, full_aggregated, best_ensemble,
-                         individual_predictions, base_model_predictions_train, base_model_predictions_test,
-                         y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_2(
-                            train_data, test_data_new_sliding, dataset, entity, iteration=i, 
-                            trained_models=trained_models, model_list=loaded_model_names, 
-                            test_data_gan=test_data_before, skip_gan=True  # Skip GAN for speed
-                        )
-                    else:
-                        (best_thompson, robust_agg, full_aggregated, best_ensemble,
-                         individual_predictions, base_model_predictions_train, base_model_predictions_test,
-                         y_true_train, y_true_test, meta_model_type, _) = run_model_selection_algorithms_1(
-                            train_data, test_data_new_sliding, dataset, entity, iteration=i, 
-                            model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True  # Skip GAN for speed
-                        )
-                    
-                    logger.info(f"  ✓ Re-optimization completed in {time.time() - reopt_start:.2f}s")
-                    
-                    # ========== STEP 3: EVALUATE CANDIDATE MODELS ==========
-                    logger.info(f"  📊 Step 3: Evaluating CANDIDATE models on window {i} (after re-optimization)...")
-                    
-                    candidate_best_ensemble = best_ensemble.copy()
-                    candidate_best_single = full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated
-                    
-                    # Evaluate candidate single model and get F1 score
-                    test_data_candidate_eval = copy.deepcopy(test_data)
-                    test_data_candidate_eval, _ = Inject(test_data_candidate_eval, anomaly_list)
-                    _, candidate_single_pred, candidate_single_f1_list, candidate_single_pr_list = evaluate_individual_models(
-                        [candidate_best_single], test_data_candidate_eval, trained_models
-                    )
-                    candidate_single_f1 = to_scalar(candidate_single_f1_list[0]) if len(candidate_single_f1_list) > 0 else 0.0
-                    
-                    # Evaluate candidate ensemble
-                    trained_models_candidate = {m: trained_models[m] for m in candidate_best_ensemble}
-                    test_data_candidate_ensemble = copy.deepcopy(test_data)
-                    test_data_candidate_ensemble, _ = Inject(test_data_candidate_ensemble, anomaly_list)
-                    candidate_ensemble_fitness = fitness_function(
-                        candidate_best_ensemble, train_data, test_data_candidate_ensemble, trained_models_candidate,
-                        individual_predictions, base_model_predictions_train, algorithm_list_instances,
-                        base_model_predictions_test, y_true_train, y_true_test,
-                        meta_model_type=meta_model_type
-                    )
-                    
-                    logger.info(f"  → Candidate single model: {candidate_best_single}, F1: {candidate_single_f1:.4f}")
-                    logger.info(f"  → Candidate ensemble: {candidate_best_ensemble}, fitness: {candidate_ensemble_fitness:.4f}")
-                    
-                    # ========== STEP 4: COMPARE AND CHOOSE BETTER MODELS ==========
-                    logger.info(f"  🔍 Step 4: Comparing current vs candidate models...")
-                    
-                    # ========== 4.1: Compare Ensembles ==========
-                    logger.info(f"  📊 4.1: Ensemble comparison:")
-                    logger.info(f"      Current: fitness={current_ensemble_fitness:.4f}")
-                    logger.info(f"      Candidate: fitness={candidate_ensemble_fitness:.4f}")
-                    
-                    if candidate_ensemble_fitness > current_ensemble_fitness:
-                        logger.info(f"  ✅ Candidate ensemble is BETTER (Δ={candidate_ensemble_fitness - current_ensemble_fitness:.4f})")
-                        chosen_ensemble = candidate_best_ensemble
-                        chosen_ensemble_fitness = candidate_ensemble_fitness
-                    else:
-                        logger.info(f"  ↩️  Current ensemble is BETTER or EQUAL (keeping current)")
-                        chosen_ensemble = current_best_ensemble
-                        chosen_ensemble_fitness = current_ensemble_fitness
-                    
-                    # ========== 4.2: Compare Single Models ==========
-                    logger.info(f"  📊 4.2: Single model comparison:")
-                    logger.info(f"      Current ({current_best_single}): F1={current_single_f1:.4f}")
-                    logger.info(f"      Candidate ({candidate_best_single}): F1={candidate_single_f1:.4f}")
-                    
-                    if candidate_single_f1 > current_single_f1:
-                        logger.info(f"  ✅ Candidate single model is BETTER (Δ={candidate_single_f1 - current_single_f1:.4f})")
-                        chosen_single_model = candidate_best_single
-                        chosen_single_f1 = candidate_single_f1
-                    else:
-                        logger.info(f"  ↩️  Current single model is BETTER or EQUAL (keeping current)")
-                        chosen_single_model = current_best_single
-                        chosen_single_f1 = current_single_f1
-                    
-                    # ========== 4.3: Final Decision - Ensemble vs Single Model ==========
-                    logger.info(f"  🎯 4.3: Final decision - Ensemble vs Single Model:")
-                    logger.info(f"      Best Ensemble: fitness={chosen_ensemble_fitness:.4f}")
-                    logger.info(f"      Best Single ({chosen_single_model}): F1={chosen_single_f1:.4f}")
-                    
-                    # Decision: Use ensemble if fitness >= single model F1 (using fitness as proxy for F1)
-                    # Note: fitness_function returns a composite score, we compare it with F1 as both indicate performance
-                    if chosen_ensemble_fitness >= chosen_single_f1:
-                        logger.info(f"  ✅ ENSEMBLE SELECTED (fitness {chosen_ensemble_fitness:.4f} >= F1 {chosen_single_f1:.4f})")
-                        best_ensemble = chosen_ensemble
-                        # Update single model too (for logging/tracking purposes)
-                        if isinstance(full_aggregated, (list, tuple)):
-                            full_aggregated = (chosen_single_model,) + tuple(full_aggregated[1:])
-                        else:
-                            full_aggregated = chosen_single_model
-                        final_choice = 'ensemble'
-                    else:
-                        logger.info(f"  ✅ SINGLE MODEL SELECTED (F1 {chosen_single_f1:.4f} > fitness {chosen_ensemble_fitness:.4f})")
-                        best_ensemble = chosen_ensemble  # Still update ensemble for next iteration
-                        if isinstance(full_aggregated, (list, tuple)):
-                            full_aggregated = (chosen_single_model,) + tuple(full_aggregated[1:])
-                        else:
-                            full_aggregated = chosen_single_model
-                        final_choice = 'single'
-                    
-                    logger.info(f"  → FINAL CHOICE: {final_choice.upper()}")
-                    logger.info(f"  → Final ensemble for window {i}: {best_ensemble}")
-                    logger.info(f"  → Final single model for window {i}: {full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated}")
-                    
-                    # Save final selection state
-                    save_current_selection(
-                        dataset, entity, window_idx=i, best_ensemble=best_ensemble,
-                        best_single_model=full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) else full_aggregated,
-                        meta_model_type=meta_model_type, trained_models=trained_models,
-                        individual_predictions=individual_predictions,
-                        base_model_predictions_train=base_model_predictions_train,
-                        base_model_predictions_test=base_model_predictions_test,
-                        y_true_train=y_true_train, y_true_test=y_true_test
-                    )
-                    
-                    # IMPORTANT: Skip redundant evaluation - already done in Step 3
-                    # We already evaluated the chosen models above, no need to repeat
-                    logger.info(f"  ℹ️  Skipping redundant evaluation (already performed during re-optimization)")
-                    did_reoptimization = True
+                    # Continue immediately with evaluation using current models (don't wait)
+                    did_reoptimization = False  # We'll evaluate normally since reopt is async
                 else:
                     # No re-optimization: either because not at update_interval or strategy is fixed
                     if strategy in ['fixed-best', 'fixed-random']:
@@ -1661,6 +1628,38 @@ def run_app(algorithm_list, algorithm_list_instances):
                 pbar.update(1)
             
             pbar.close()
+            
+            # ========== WAIT FOR ANY PENDING BACKGROUND RE-OPTIMIZATION ==========
+            if pending_reopt_future is not None:
+                logger.info(f"  ⏳ Waiting for pending background re-optimization to complete...")
+                try:
+                    (candidate_best_ensemble, candidate_best_single, individual_predictions_new,
+                     base_model_predictions_train_new, base_model_predictions_test_new,
+                     y_true_train_new, y_true_test_new, meta_model_type_new, reopt_time) = pending_reopt_future.result()
+                    
+                    logger.info(f"  ✅ Final background re-optimization completed in {reopt_time:.2f}s")
+                    # Apply the results
+                    best_ensemble = candidate_best_ensemble
+                    if isinstance(full_aggregated, (list, tuple)):
+                        full_aggregated = (candidate_best_single,) + tuple(full_aggregated[1:])
+                    else:
+                        full_aggregated = candidate_best_single
+                    individual_predictions = individual_predictions_new
+                    base_model_predictions_train = base_model_predictions_train_new
+                    base_model_predictions_test = base_model_predictions_test_new
+                    y_true_train = y_true_train_new
+                    y_true_test = y_true_test_new
+                    meta_model_type = meta_model_type_new
+                    
+                    logger.info(f"  → Final ensemble: {best_ensemble}")
+                    logger.info(f"  → Final single model: {candidate_best_single}")
+                except Exception as e:
+                    logger.error(f"  ❌ Final background re-optimization failed: {e}")
+            
+            # Shutdown the executor
+            reopt_executor.shutdown(wait=True)
+            logger.info("  ✓ Background re-optimization executor shut down")
+            
             online_end_time = time.time()
             online_total_time = online_end_time - online_start_time
             
