@@ -418,7 +418,15 @@ matplotlib.use('Agg')
 If you use RAMSeS in your research, please cite our paper:
 
 ```bibtex
-
+@misc{abdelmaksoud2026ramsesrobustadaptivemodel,
+      title={RAMSeS: Robust and Adaptive Model Selection for Time-Series Anomaly Detection Algorithms}, 
+      author={Mohamed Abdelmaksoud and Sheng Ding and Andrey Morozov and Ziawasch Abedjan},
+      year={2026},
+      eprint={2602.21766},
+      archivePrefix={arXiv},
+      primaryClass={cs.DB},
+      url={https://arxiv.org/abs/2602.21766}, 
+}
 ```
 
 ---
