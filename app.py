@@ -483,7 +483,8 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     logger.info("  📊 Sub-stage 6.4: Off-by-Threshold Testing...")
     mem_before = get_memory_usage_mb()
     start_time = time.time()
-    test_data_for_borderline = copy.deepcopy(test_data)
+    # Use original un-injected data so synthetic spike labels don't cause single-class skips
+    test_data_for_borderline = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
     ranked_by_f1, ranked_by_pr_auc, \
     ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = run_off_by_threshold(
         test_data_for_borderline, trained_models, algorithm_list_instances, dataset, entity
@@ -505,7 +506,8 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     logger.info("  📊 Sub-stage 6.5: Monte Carlo Simulation...")
     mem_before = get_memory_usage_mb()
     start_time = time.time()
-    test_data_for_mc = copy.deepcopy(test_data)
+    # Use original un-injected data for the same reason
+    test_data_for_mc = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
     monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
         test_data_for_mc, trained_models, algorithm_list_instances, dataset, entity,
         n_simulations=2, noise_level=0.1,
@@ -595,8 +597,8 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                 'f1_scores': Gan_ranked_by_f1,
                 'pr_auc_scores': Gan_ranked_by_pr_auc,
                 'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
-                'best_f1': 0.0,  # Will be computed later in run_app
-                'best_pr_auc': 0.0  # Will be computed later in run_app
+                'best_f1': Gan_ranked_by_f1[0][1][0]['f1'] if len(Gan_ranked_by_f1) > 0 else 0.0,
+                'best_pr_auc': Gan_ranked_by_pr_auc[0][1][0]['pr_auc'] if len(Gan_ranked_by_pr_auc) > 0 else 0.0,
             },
             'borderline': {
                 'f1_names': ranked_by_f1_names_sensitivity, 
@@ -604,8 +606,8 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                 'f1_scores': ranked_by_f1,
                 'pr_auc_scores': ranked_by_pr_auc,
                 'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
-                'best_f1': 0.0,  # Will be computed later in run_app
-                'best_pr_auc': 0.0  # Will be computed later in run_app
+                'best_f1': ranked_by_f1[0][1][0]['f1'] if len(ranked_by_f1) > 0 else 0.0,
+                'best_pr_auc': ranked_by_pr_auc[0][1][0]['pr_auc'] if len(ranked_by_pr_auc) > 0 else 0.0,
             },
             'monte_carlo': {
                 'f1_names': monte_carlo_ranked_models_F1, 
@@ -670,8 +672,8 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
     test_data_thompson = copy.deepcopy(test_data)
     # GAN uses separate dataset (full original) to avoid circularity
     test_data_gan_copy = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data) if not skip_gan else None
-    test_data_borderline = copy.deepcopy(test_data)
-    test_data_montecarlo = copy.deepcopy(test_data)
+    test_data_borderline = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
+    test_data_montecarlo = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
     num_tasks = 4 if skip_gan else 5
     logger.info(f"     ✓ Created {num_tasks} independent data copies for thread safety")
     
@@ -849,8 +851,8 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
                 'f1_scores': Gan_ranked_by_f1,
                 'pr_auc_scores': Gan_ranked_by_pr_auc,
                 'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
-                'best_f1': 0.0,  # Will be computed later in run_app
-                'best_pr_auc': 0.0  # Will be computed later in run_app
+                'best_f1': Gan_ranked_by_f1[0][1][0]['f1'] if len(Gan_ranked_by_f1) > 0 else 0.0,
+                'best_pr_auc': Gan_ranked_by_pr_auc[0][1][0]['pr_auc'] if len(Gan_ranked_by_pr_auc) > 0 else 0.0,
             },
             'borderline': {
                 'f1_names': ranked_by_f1_names_sensitivity, 
@@ -858,8 +860,8 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
                 'f1_scores': ranked_by_f1,
                 'pr_auc_scores': ranked_by_pr_auc,
                 'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
-                'best_f1': 0.0,  # Will be computed later in run_app
-                'best_pr_auc': 0.0  # Will be computed later in run_app
+                'best_f1': ranked_by_f1[0][1][0]['f1'] if len(ranked_by_f1) > 0 else 0.0,
+                'best_pr_auc': ranked_by_pr_auc[0][1][0]['pr_auc'] if len(ranked_by_pr_auc) > 0 else 0.0,
             },
             'monte_carlo': {
                 'f1_names': monte_carlo_ranked_models_F1, 
@@ -1295,36 +1297,59 @@ def run_app(algorithm_list, algorithm_list_instances):
         # Get best single model from final aggregation
         best_single_model = full_aggregated[1] if isinstance(full_aggregated, (list, tuple)) and len(full_aggregated) > 1 else full_aggregated
         
-        # Evaluate Thompson Sampling best model
+        # Evaluate Thompson Sampling best model on ORIGINAL data (not synthetic-injected)
+        # Using test_data_before (original labels) avoids F1=0 caused by evaluating against
+        # synthetic spike labels that the models were not trained to detect.
         best_thompson_model = best_thompson if isinstance(best_thompson, str) else (best_thompson[0] if best_thompson else 'N/A')
-        test_data_for_thompson = copy.deepcopy(test_data_new)
+        test_data_for_thompson = copy.deepcopy(test_data_before)
+        # Restrict to the offline 80% slice that model selection operated on
+        test_data_for_thompson.entities[0].Y = offline_data
+        test_data_for_thompson.entities[0].labels = offline_targets
+        test_data_for_thompson.entities[0].mask = offline_mask
+        test_data_for_thompson.entities[0].n_time = offline_size
+        test_data_for_thompson.total_time = offline_size
         _, thompson_scores, thompson_f1_list, thompson_pr_list = evaluate_individual_models(
             [best_thompson_model], test_data_for_thompson, trained_models
         )
         thompson_f1 = to_scalar(thompson_f1_list[0]) if len(thompson_f1_list) > 0 else 0.0
         thompson_pr_auc = to_scalar(thompson_pr_list[0]) if len(thompson_pr_list) > 0 else 0.0
         
-        # Evaluate the best single model from final aggregation to get its F1 score
-        test_data_for_eval = copy.deepcopy(test_data_new)
+        # Evaluate the best single model from final aggregation on ORIGINAL data
+        test_data_for_eval = copy.deepcopy(test_data_before)
+        test_data_for_eval.entities[0].Y = offline_data
+        test_data_for_eval.entities[0].labels = offline_targets
+        test_data_for_eval.entities[0].mask = offline_mask
+        test_data_for_eval.entities[0].n_time = offline_size
+        test_data_for_eval.total_time = offline_size
         _, single_model_scores, single_f1_list, single_pr_list = evaluate_individual_models(
             [best_single_model], test_data_for_eval, trained_models
         )
         single_model_f1 = to_scalar(single_f1_list[0]) if len(single_f1_list) > 0 else 0.0
         single_model_pr_auc = to_scalar(single_pr_list[0]) if len(single_pr_list) > 0 else 0.0
         
-        # Evaluate Monte Carlo best models
+        # Evaluate Monte Carlo best models on ORIGINAL data (same reason as Thompson)
         best_mc_f1_model = extra_results['monte_carlo'].get('best_model_f1', 'N/A')
         best_mc_pr_model = extra_results['monte_carlo'].get('best_model_pr_auc', 'N/A')
-        test_data_for_mc = copy.deepcopy(test_data_new)
         
         mc_f1_score = 0.0
         mc_pr_auc_score = 0.0
         if best_mc_f1_model != 'N/A':
+            test_data_for_mc = copy.deepcopy(test_data_before)
+            test_data_for_mc.entities[0].Y = offline_data
+            test_data_for_mc.entities[0].labels = offline_targets
+            test_data_for_mc.entities[0].mask = offline_mask
+            test_data_for_mc.entities[0].n_time = offline_size
+            test_data_for_mc.total_time = offline_size
             _, _, mc_f1_list, _ = evaluate_individual_models([best_mc_f1_model], test_data_for_mc, trained_models)
             mc_f1_score = to_scalar(mc_f1_list[0]) if len(mc_f1_list) > 0 else 0.0
         
         if best_mc_pr_model != 'N/A':
-            test_data_for_mc2 = copy.deepcopy(test_data_new)
+            test_data_for_mc2 = copy.deepcopy(test_data_before)
+            test_data_for_mc2.entities[0].Y = offline_data
+            test_data_for_mc2.entities[0].labels = offline_targets
+            test_data_for_mc2.entities[0].mask = offline_mask
+            test_data_for_mc2.entities[0].n_time = offline_size
+            test_data_for_mc2.total_time = offline_size
             _, _, _, mc_pr_list = evaluate_individual_models([best_mc_pr_model], test_data_for_mc2, trained_models)
             mc_pr_auc_score = to_scalar(mc_pr_list[0]) if len(mc_pr_list) > 0 else 0.0
         

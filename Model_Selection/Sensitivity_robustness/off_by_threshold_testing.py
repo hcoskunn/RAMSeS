@@ -114,8 +114,11 @@ def run_off_by_threshold(test_data, trained_models, model_names, dataset, entity
     
     dataSet_before = copy.deepcopy(test_data)
     factor = .1
+    # intersperse_borderline_normal_points expects 1D labels (indexes as labels[i])
+    # but labels may have been reshaped to (1, N) above for the uniqueness check — flatten it back
+    labels_1d = labels.flatten()
     augmented_data, augmented_labels, injected_normal_indices, injected_anomaly_indices = intersperse_borderline_normal_points(
-        data, labels, factor)
+        data, labels_1d, factor)
     test_data.entities[0].Y = augmented_data
     test_data.entities[0].labels = augmented_labels
     n_times = test_data.entities[0].n_time
