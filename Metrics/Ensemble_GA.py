@@ -241,13 +241,15 @@ def evaluate_individual_models(algorithm_list, test_data, trained_models):
             logger.info(f"y_true shape: {np.array(y_true).shape}, unique values: {np.unique(y_true)}, sum: {np.sum(y_true)}")
             logger.info(f"y_scores shape: {np.array(y_scores).shape}, min: {np.min(y_scores)}, max: {np.max(y_scores)}, mean: {np.mean(y_scores)}")
             
-            # Use best_f1_linspace to find optimal threshold and get proper F1 score
-            from Metrics.metrics import best_f1_linspace
-            best_f1, precision, recall, y_pred_binary, _, best_threshold = best_f1_linspace(
-                y_scores, y_true, n_splits=100, segment_adjust=True, f1_type='standard'
+            # Use range-based metric (segment-aware F1 + PR-AUC) — same as GAN/Borderline/MC
+            # robustness tests, which previously produced non-zero F1 on injected data.
+            # Strict standard F1 collapses to 0 on synthetic spikes for unsupervised base models,
+            # making the single-model branch incomparable to the supervised GA ensemble.
+            from Metrics.metrics import range_based_precision_recall_f1_auc
+            _, _, best_f1, pr_auc, y_pred_binary = range_based_precision_recall_f1_auc(
+                np.asarray(y_true).flatten(), np.asarray(y_scores).flatten()
             )
             
-            pr_auc = prauc(y_true, y_scores)
             logger.info(f"Model {model_name}: F1 score = {best_f1}, PR AUC = {pr_auc}")
             predictions[model_name] = (y_true, y_scores)
             adjusted_y_pred_list.append(y_pred_binary)  # Use binary predictions instead of scores

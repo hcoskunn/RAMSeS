@@ -1252,6 +1252,10 @@ def run_app(algorithm_list, algorithm_list_instances):
         test_data_new_size = test_data_new.entities[0].labels.shape[1] if test_data_new.entities[0].labels.ndim > 1 else test_data_new.entities[0].labels.shape[0]
         logger.info(f"  📏 After Inject: test_data_before (full, for GAN) = {test_data_before_size}, test_data_new (injected, for others) = {test_data_new_size}")
 
+        # Save a clean copy of injected test data BEFORE model selection mutates it
+        # (Thompson Sampling processes it window-by-window, leaving only the last window)
+        test_data_new_for_eval = copy.deepcopy(test_data_new)
+
         # Start end-to-end timing
         e2e_start_time = time.time()
         if use_parallel:
@@ -1297,59 +1301,37 @@ def run_app(algorithm_list, algorithm_list_instances):
         # Get best single model from final aggregation
         best_single_model = full_aggregated[1] if isinstance(full_aggregated, (list, tuple)) and len(full_aggregated) > 1 else full_aggregated
         
-        # Evaluate Thompson Sampling best model on ORIGINAL data (not synthetic-injected)
-        # Using test_data_before (original labels) avoids F1=0 caused by evaluating against
-        # synthetic spike labels that the models were not trained to detect.
+        # Evaluate Thompson Sampling best model on the SAME injected data the ensemble sees
+        # (test_data_new). This keeps single-model and ensemble F1 directly comparable.
         best_thompson_model = best_thompson if isinstance(best_thompson, str) else (best_thompson[0] if best_thompson else 'N/A')
-        test_data_for_thompson = copy.deepcopy(test_data_before)
-        # Restrict to the offline 80% slice that model selection operated on
-        test_data_for_thompson.entities[0].Y = offline_data
-        test_data_for_thompson.entities[0].labels = offline_targets
-        test_data_for_thompson.entities[0].mask = offline_mask
-        test_data_for_thompson.entities[0].n_time = offline_size
-        test_data_for_thompson.total_time = offline_size
+        test_data_for_thompson = copy.deepcopy(test_data_new_for_eval)
         _, thompson_scores, thompson_f1_list, thompson_pr_list = evaluate_individual_models(
             [best_thompson_model], test_data_for_thompson, trained_models
         )
         thompson_f1 = to_scalar(thompson_f1_list[0]) if len(thompson_f1_list) > 0 else 0.0
         thompson_pr_auc = to_scalar(thompson_pr_list[0]) if len(thompson_pr_list) > 0 else 0.0
         
-        # Evaluate the best single model from final aggregation on ORIGINAL data
-        test_data_for_eval = copy.deepcopy(test_data_before)
-        test_data_for_eval.entities[0].Y = offline_data
-        test_data_for_eval.entities[0].labels = offline_targets
-        test_data_for_eval.entities[0].mask = offline_mask
-        test_data_for_eval.entities[0].n_time = offline_size
-        test_data_for_eval.total_time = offline_size
+        # Evaluate the best single model from final aggregation on the SAME injected data
+        test_data_for_eval = copy.deepcopy(test_data_new_for_eval)
         _, single_model_scores, single_f1_list, single_pr_list = evaluate_individual_models(
             [best_single_model], test_data_for_eval, trained_models
         )
         single_model_f1 = to_scalar(single_f1_list[0]) if len(single_f1_list) > 0 else 0.0
         single_model_pr_auc = to_scalar(single_pr_list[0]) if len(single_pr_list) > 0 else 0.0
         
-        # Evaluate Monte Carlo best models on ORIGINAL data (same reason as Thompson)
+        # Evaluate Monte Carlo best models on the SAME injected data (Option B: symmetric eval)
         best_mc_f1_model = extra_results['monte_carlo'].get('best_model_f1', 'N/A')
         best_mc_pr_model = extra_results['monte_carlo'].get('best_model_pr_auc', 'N/A')
         
         mc_f1_score = 0.0
         mc_pr_auc_score = 0.0
         if best_mc_f1_model != 'N/A':
-            test_data_for_mc = copy.deepcopy(test_data_before)
-            test_data_for_mc.entities[0].Y = offline_data
-            test_data_for_mc.entities[0].labels = offline_targets
-            test_data_for_mc.entities[0].mask = offline_mask
-            test_data_for_mc.entities[0].n_time = offline_size
-            test_data_for_mc.total_time = offline_size
+            test_data_for_mc = copy.deepcopy(test_data_new_for_eval)
             _, _, mc_f1_list, _ = evaluate_individual_models([best_mc_f1_model], test_data_for_mc, trained_models)
             mc_f1_score = to_scalar(mc_f1_list[0]) if len(mc_f1_list) > 0 else 0.0
         
         if best_mc_pr_model != 'N/A':
-            test_data_for_mc2 = copy.deepcopy(test_data_before)
-            test_data_for_mc2.entities[0].Y = offline_data
-            test_data_for_mc2.entities[0].labels = offline_targets
-            test_data_for_mc2.entities[0].mask = offline_mask
-            test_data_for_mc2.entities[0].n_time = offline_size
-            test_data_for_mc2.total_time = offline_size
+            test_data_for_mc2 = copy.deepcopy(test_data_new_for_eval)
             _, _, _, mc_pr_list = evaluate_individual_models([best_mc_pr_model], test_data_for_mc2, trained_models)
             mc_pr_auc_score = to_scalar(mc_pr_list[0]) if len(mc_pr_list) > 0 else 0.0
         
