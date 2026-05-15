@@ -63,7 +63,7 @@ def initialize_sliding_windows(data: np.ndarray, targets: np.ndarray, mask: np.n
 
 
 def sample_model(models: Dict[str, Any], means: Dict[str, np.ndarray], covariances: Dict[str, np.ndarray],
-                 epsilon: float) -> str:
+                 epsilon: float, context: np.ndarray) -> str:
     """
     Sample a model using Epsilon-Greedy or Linear Thompson Sampling strategy.
 
@@ -72,6 +72,9 @@ def sample_model(models: Dict[str, Any], means: Dict[str, np.ndarray], covarianc
     - means (Dict[str, np.ndarray]): Dictionary of means for each model.
     - covariances (Dict[str, np.ndarray]): Dictionary of covariances for each model.
     - epsilon (float): Epsilon value for the Epsilon-Greedy strategy.
+    - context (np.ndarray): The current context vector x (flattened data window). Used to
+      compute the expected reward estimate theta_tilde^T * x for each model, which is the
+      correct Linear Thompson Sampling selection criterion.
 
     Returns:
     - str: The chosen model name.
@@ -80,16 +83,19 @@ def sample_model(models: Dict[str, Any], means: Dict[str, np.ndarray], covarianc
         chosen_model = random.choice(list(models.keys()))
         logger.info(f"Epsilon-Greedy: Randomly chosen model {chosen_model}")
     else:
+        x = context.flatten()  # shape: (d,)
         samples = {}
         for model_name, mean in means.items():
             try:
-                sample_value = multivariate_normal.rvs(mean=mean.flatten(), cov=covariances[model_name])
-                samples[model_name] = sample_value[0] if sample_value.ndim > 0 else sample_value
+                # Draw a full sample theta_tilde ~ N(mu, Sigma)
+                theta_tilde = multivariate_normal.rvs(mean=mean.flatten(), cov=covariances[model_name])
+                # Compute expected reward: theta_tilde^T * x  (the "Linear" in LinTS)
+                samples[model_name] = float(np.dot(theta_tilde, x))
             except ValueError as e:
                 logger.error(f"Error sampling model {model_name}: {e}")
                 raise
         chosen_model = max(samples, key=samples.get)
-        logger.info(f"Linear Thompson Sampling: Chosen model {chosen_model} with sample value {samples[chosen_model]}")
+        logger.info(f"Linear Thompson Sampling: Chosen model {chosen_model} with expected reward {samples[chosen_model]:.4f}")
     return chosen_model
 
 
@@ -198,7 +204,9 @@ def fit_linear_thompson_sampling(dataset,
     for iteration in range(num_windows):
         logger.info(f"Iteration {iteration + 1}")
         try:
-            chosen_model_name = sample_model(models, means, covariances, epsilon)
+            # Pass the current window as context so selection uses theta_tilde^T * x
+            context = data_windows[iteration].flatten()
+            chosen_model_name = sample_model(models, means, covariances, epsilon, context)
         except ValueError as e:
             logger.error(f"Error sampling model: {e}")
             continue  # Skip to the next iteration on error
