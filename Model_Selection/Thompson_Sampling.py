@@ -194,7 +194,9 @@ def fit_linear_thompson_sampling(dataset,
     data_windows, targets_windows, New_mask, num_windows = initialize_sliding_windows(data, targets, mask, int(np.size(
         targets.flatten()) / iterations), int(np.size(targets.flatten()) / (2 * iterations)))
 
-    n_features = data_windows[0].shape[1]  # assuming data has shape (1, n_features)
+    # n_features should be the flattened window length (n_channels * window_size)
+    # data_windows elements have shape (n_channels, window_size), so flatten to get full feature length
+    n_features = data_windows[0].flatten().shape[0]
     means = {model_name: np.zeros((n_features, 1)) for model_name in models}
     covariances = {model_name: np.eye(n_features) for model_name in models}
     epsilon = initial_epsilon
