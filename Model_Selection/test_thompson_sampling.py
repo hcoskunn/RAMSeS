@@ -40,6 +40,11 @@ from Thompson_Sampling import (
     calculate_reward,
     rank_models,
     calculate_score,
+    compute_expected_rewards,
+    detect_regime_shifts,
+    classify_selection,
+    compute_shap_values,
+    aggregate_shap_per_channel,
 )
 
 
@@ -99,20 +104,24 @@ class TestSampleModel(unittest.TestCase):
     # --- core correctness: returns a valid model name --------------------
     def test_returns_valid_model(self):
         for _ in range(20):
-            chosen = sample_model(self.models, self.means, self.covs,
-                                  epsilon=0.0, context=self.context)
+            chosen, _ = sample_model(self.models, self.means, self.covs,
+                                     epsilon=0.0, context=self.context)
             self.assertIn(chosen, self.models)
 
     # --- epsilon=1 → always random pick ---------------------------------
     def test_epsilon_one_always_random(self):
         random.seed(0)
-        chosen_set = {
-            sample_model(self.models, self.means, self.covs,
-                         epsilon=1.0, context=self.context)
-            for _ in range(60)
-        }
+        chosen_set = set()
+        random_flags = []
+        for _ in range(60):
+            chosen, was_random = sample_model(self.models, self.means, self.covs,
+                                              epsilon=1.0, context=self.context)
+            chosen_set.add(chosen)
+            random_flags.append(was_random)
         # with 60 draws and 3 models, all should appear
         self.assertEqual(chosen_set, set(self.models.keys()))
+        # epsilon=1.0 means every pick must be flagged as random
+        self.assertTrue(all(random_flags))
 
     # --- epsilon=0 → uses context (θ̃ᵀx), not just θ̃[0] ----------------
     def test_uses_full_context_not_first_element(self):
@@ -144,8 +153,9 @@ class TestSampleModel(unittest.TestCase):
         wins = {"LOF": 0, "RNN": 0, "DGHL": 0}
         N = 200
         for _ in range(N):
-            c = sample_model(models, means, covs, epsilon=0.0, context=context)
+            c, was_random = sample_model(models, means, covs, epsilon=0.0, context=context)
             wins[c] += 1
+            self.assertFalse(was_random, "epsilon=0.0 must never flag random pick")
 
         # RNN should win nearly every time
         self.assertGreater(wins["RNN"], 180,
@@ -208,6 +218,57 @@ class TestUpdatePosteriors(unittest.TestCase):
     def test_unknown_model_raises(self):
         with self.assertRaises(ValueError):
             update_posteriors(self.means, self.covs, "UNKNOWN", 0.5, np.ones(self.d))
+
+    def test_no_svd_failure_on_high_dimensional_data(self):
+        """
+        Simulate SMD-scale data (38 channels × 20 time steps = d=760) for 100
+        iterations. The old double-inv code crashed with 'SVD did not converge'
+        around iteration 40. Sherman-Morrison must complete all rounds without error.
+        """
+        d = 760
+        means = {"SMD_model": np.zeros(d)}
+        covs  = {"SMD_model": np.eye(d)}
+        np.random.seed(0)
+        for _ in range(100):
+            x = np.random.randn(d) * 50       # large-magnitude SMD-like values
+            x = x / (np.linalg.norm(x) + 1e-10)
+            update_posteriors(means, covs, "SMD_model", reward=0.7, features=x)
+        self.assertTrue(True, "Should complete 100 high-d iterations without SVD error")
+
+    def test_old_precision_alias_bug_is_fixed(self):
+        """
+        In the old code `old_precision = precision` was a Python alias, not a copy.
+        After `precision += outer(x, x)` both names pointed to the updated matrix,
+        so the mean used the wrong (already updated) precision.
+
+        With Sherman-Morrison and x=[1,0], reward=1, mu=0, Sigma=I:
+            u = [1, 0], alpha = 1 + 1 = 2
+            mu_new = [0,0] + [1,0] * (1 - 0) / 2 = [0.5, 0]
+        The old buggy code would have produced [1.0, 0] or similar.
+        """
+        means = {"m": np.zeros(2)}
+        covs  = {"m": np.eye(2)}
+        update_posteriors(means, covs, "m", reward=1.0, features=np.array([1.0, 0.0]))
+        np.testing.assert_array_almost_equal(
+            means["m"], [0.5, 0.0],
+            err_msg="Alias bug still present: mean update used wrong precision")
+
+    def test_mean_stays_reasonable_after_many_updates(self):
+        """
+        Mean vector entries must not collapse to e-03 magnitude after many rounds
+        (the symptom reported on SMD before the Sherman-Morrison fix).
+        """
+        d = 27
+        means = {"m": np.zeros(d)}
+        covs  = {"m": np.eye(d)}
+        np.random.seed(1)
+        for _ in range(80):
+            x = np.random.randn(d)
+            x = x / (np.linalg.norm(x) + 1e-10)
+            update_posteriors(means, covs, "m", reward=0.8, features=x)
+        max_abs = np.max(np.abs(means["m"]))
+        self.assertGreater(max_abs, 1e-2,
+            f"Mean collapsed to tiny values ({max_abs:.2e}) — numerical instability")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -282,8 +343,8 @@ class TestIntegration(unittest.TestCase):
 
         for _ in range(n_rounds):
             context = np.random.randn(d)
-            chosen  = sample_model(models, means, covs, epsilon, context)
-            r       = fake_reward(chosen)
+            chosen, _ = sample_model(models, means, covs, epsilon, context)
+            r         = fake_reward(chosen)
             update_posteriors(means, covs, chosen, r, context)
             epsilon *= epsilon_decay
 
@@ -291,6 +352,190 @@ class TestIntegration(unittest.TestCase):
         best   = ranked[0][0]
         self.assertEqual(best, "DGHL",
             f"Expected DGHL to be ranked first, got {ranked}")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7.  compute_expected_rewards
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestComputeExpectedRewards(unittest.TestCase):
+
+    def test_dot_product_correctness(self):
+        means = {"LOF": np.array([1.0, 2.0, 3.0]), "RNN": np.array([0.0, 0.0, 1.0])}
+        context = np.array([1.0, 1.0, 1.0])
+        rewards = compute_expected_rewards(means, context)
+        self.assertAlmostEqual(rewards["LOF"], 6.0)
+        self.assertAlmostEqual(rewards["RNN"], 1.0)
+
+    def test_negative_reward_possible(self):
+        means = {"M": np.array([-1.0, -1.0])}
+        context = np.array([1.0, 1.0])
+        self.assertLess(compute_expected_rewards(means, context)["M"], 0.0)
+
+    def test_all_models_returned(self):
+        model_names = ["LOF_1", "LOF_2", "CBLOF_1", "NN_1"]
+        means = {m: np.zeros(4) for m in model_names}
+        context = np.ones(4)
+        self.assertEqual(set(compute_expected_rewards(means, context).keys()), set(model_names))
+
+    def test_column_vector_mean_handled(self):
+        """2-D column mean (d, 1) must give the same result as 1-D (d,)."""
+        ctx = np.array([3.0, 4.0])
+        flat = compute_expected_rewards({"M": np.array([1.0, 2.0])}, ctx)["M"]
+        col  = compute_expected_rewards({"M": np.array([[1.0], [2.0]])}, ctx)["M"]
+        self.assertAlmostEqual(flat, col)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8.  detect_regime_shifts
+# ════════════════════════════════════════════════════════════════════════════
+
+def _make_reward_history(dominant_sequence, n_models=3):
+    """Build expected_rewards_history where dominant_sequence[t] is the model
+    index (0-based) that gets reward 1.0; all others get 0.0."""
+    model_names = [f"M{i}" for i in range(n_models)]
+    history = {m: [] for m in model_names}
+    for dom in dominant_sequence:
+        for i, m in enumerate(model_names):
+            history[m].append(1.0 if i == dom else 0.0)
+    return history, model_names
+
+
+class TestDetectRegimeShifts(unittest.TestCase):
+
+    def test_no_shift_returns_empty(self):
+        history, _ = _make_reward_history([0] * 20)
+        shifts, blips = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
+        self.assertEqual(shifts, [])
+        self.assertEqual(blips, [])
+
+    def test_single_sustained_shift_detected(self):
+        history, _ = _make_reward_history([0] * 10 + [1] * 10)
+        shifts, blips = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
+        self.assertEqual(len(shifts), 1)
+        self.assertEqual(shifts[0]["from_model"], "M0")
+        self.assertEqual(shifts[0]["to_model"], "M1")
+        self.assertEqual(shifts[0]["window"], 10)
+        self.assertEqual(blips, [])
+
+    def test_blip_not_counted_as_shift(self):
+        """M0 for 10, then M1 for 2 windows (< min_regime_length=3), then M0 again."""
+        history, _ = _make_reward_history([0] * 10 + [1] * 2 + [0] * 10)
+        shifts, blips = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
+        self.assertEqual(shifts, [], "Transient should not be a regime shift")
+        self.assertGreater(len(blips), 0, "Transient should be recorded as blip")
+
+    def test_reward_delta_is_positive(self):
+        """The winning model should have higher smoothed reward at the shift window."""
+        history, _ = _make_reward_history([0] * 8 + [1] * 8)
+        shifts, _ = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
+        self.assertGreater(shifts[0]["reward_delta"], 0.0)
+
+    def test_regime_length_in_shift_event(self):
+        """regime_length should equal the old regime's window count."""
+        history, _ = _make_reward_history([0] * 12 + [1] * 10)
+        shifts, _ = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
+        self.assertEqual(shifts[0]["regime_length"], 12)
+
+    def test_smoothing_suppresses_single_window_noise(self):
+        """With smoothing_window=5, a single-window blip should be absorbed."""
+        seq = [0] * 10 + [1] + [0] * 10
+        history, _ = _make_reward_history(seq)
+        shifts, _ = detect_regime_shifts(history, smoothing_window=5, min_regime_length=3)
+        self.assertEqual(shifts, [], "Single-window blip must be smoothed away")
+
+    def test_empty_history_returns_empty(self):
+        shifts, blips = detect_regime_shifts({}, smoothing_window=1, min_regime_length=3)
+        self.assertEqual(shifts, [])
+        self.assertEqual(blips, [])
+
+    def test_multiple_shifts(self):
+        """Three distinct regimes should produce two shift events."""
+        history, _ = _make_reward_history([0] * 8 + [1] * 8 + [2] * 8)
+        shifts, _ = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
+        self.assertEqual(len(shifts), 2)
+        self.assertEqual(shifts[0]["to_model"], "M1")
+        self.assertEqual(shifts[1]["to_model"], "M2")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 9.  classify_selection
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestClassifySelection(unittest.TestCase):
+
+    def test_random_overrides_argmax_match(self):
+        """was_random=True must yield "random" even when chosen equals argmax."""
+        expected = {"LOF": 0.9, "RNN": 0.5}
+        # LOF is the argmax, but ε-greedy fired, so the state is still "random"
+        self.assertEqual(classify_selection("LOF", True, expected), "random")
+
+    def test_exploitation_when_chosen_matches_argmax(self):
+        expected = {"LOF": 0.9, "RNN": 0.5, "DGHL": 0.1}
+        self.assertEqual(classify_selection("LOF", False, expected), "exploitation")
+
+    def test_informed_exploration_when_chosen_differs(self):
+        expected = {"LOF": 0.9, "RNN": 0.5, "DGHL": 0.1}
+        # RNN was sampled via TS even though LOF has the highest mean reward
+        self.assertEqual(classify_selection("RNN", False, expected), "informed_exploration")
+
+    def test_epsilon_one_yields_only_random_states(self):
+        """Loop sample_model + classify_selection with ε=1.0; every state must be "random"."""
+        random.seed(123)
+        models = {"LOF": object(), "RNN": object(), "DGHL": object()}
+        d = 4
+        means, covs = _make_prior(list(models), d)
+        states = []
+        for _ in range(40):
+            ctx = np.random.randn(d)
+            chosen, was_random = sample_model(models, means, covs, epsilon=1.0, context=ctx)
+            expected = compute_expected_rewards(means, ctx)
+            states.append(classify_selection(chosen, was_random, expected))
+        self.assertTrue(all(s == "random" for s in states))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 10.  SHAP feature attribution
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestSHAP(unittest.TestCase):
+
+    def test_shap_additivity(self):
+        """phi_0 + sum(phi_i) == mean^T context (SHAP additivity property)."""
+        mean     = np.array([0.4, -0.7, 1.1, 0.2])
+        context  = np.array([1.0, 2.0, -0.5, 3.0])
+        baseline = np.array([0.5, 0.5, 0.5, 0.5])
+        phi      = compute_shap_values(mean, context, baseline)
+        phi_0    = float(np.dot(mean, baseline))
+        self.assertAlmostEqual(phi_0 + float(phi.sum()), float(np.dot(mean, context)))
+
+    def test_shap_zero_at_baseline(self):
+        """When context == baseline, every per-feature SHAP must be exactly zero."""
+        mean     = np.array([1.0, 2.0, 3.0])
+        baseline = np.array([0.7, -0.3, 0.1])
+        phi      = compute_shap_values(mean, baseline, baseline)
+        np.testing.assert_array_almost_equal(phi, np.zeros(3))
+
+    def test_shap_signs_track_feature_deltas(self):
+        """With mean=ones, SHAP sign equals sign(context - baseline) element-wise."""
+        mean     = np.array([1.0, 1.0, 1.0])
+        context  = np.array([2.0, 0.0, 1.0])
+        baseline = np.array([1.0, 1.0, 1.0])
+        phi      = compute_shap_values(mean, context, baseline)
+        np.testing.assert_array_almost_equal(phi, [+1.0, -1.0, 0.0])
+
+    def test_per_channel_aggregation_correctness(self):
+        """shap = [1, 2, 3, 4], n_channels = 2 → per_channel = [1+2, 3+4] = [3, 7]."""
+        shap = np.array([1.0, 2.0, 3.0, 4.0])
+        per_channel = aggregate_shap_per_channel(shap, n_channels=2)
+        np.testing.assert_array_almost_equal(per_channel, [3.0, 7.0])
+
+    def test_per_channel_aggregation_handles_uneven_division(self):
+        """If shap.size is not divisible by n_channels, trailing entries are dropped."""
+        shap = np.array([1.0, 2.0, 3.0, 4.0, 5.0])  # 5 elements, n_channels=2
+        per_channel = aggregate_shap_per_channel(shap, n_channels=2)
+        # window_size = 5 // 2 = 2; uses shap[:4] = [1, 2, 3, 4] → [3, 7]
+        np.testing.assert_array_almost_equal(per_channel, [3.0, 7.0])
 
 
 # ════════════════════════════════════════════════════════════════════════════

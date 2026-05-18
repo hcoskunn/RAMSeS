@@ -32,7 +32,10 @@ from Model_Selection.Thompson_Sampling import (
     initialize_sliding_windows,
 )
 from Model_Selection.inject_anomalies import Inject
-from Model_Selection.rank_aggregation import enhanced_markov_chain_rank_aggregator_text
+from Model_Selection.rank_aggregation import (
+    enhanced_markov_chain_rank_aggregator_text,
+    explain_rank_aggregation,
+)
 from Model_Training.train import TrainModels
 from Utils.utils import get_args_from_cmdline
 # from comprehensive_results_writer import write_comprehensive_results
@@ -236,18 +239,18 @@ def write_comprehensive_results(output_file, dataset, entity, iteration, results
         f.write("Robust Aggregation (GAN → Borderline → Monte Carlo):\n")
         f.write("-" * 50 + "\n")
         robust_agg = aggregation_results.get('robust_agg', [])
-        if isinstance(robust_agg, (list, tuple)) and len(robust_agg) > 1:
-            f.write(f"  Best Model: {robust_agg[1] if len(robust_agg) > 1 else 'N/A'}\n")
+        if isinstance(robust_agg, (list, tuple)) and len(robust_agg) > 0:
+            f.write(f"  Best Model: {robust_agg[0]}\n")
             f.write(f"  Full Ranking: {robust_agg}\n")
         else:
             f.write(f"  Result: {robust_agg}\n")
         f.write("\n")
-        
+
         f.write("Final Aggregation (Robust + Thompson Sampling):\n")
         f.write("-" * 50 + "\n")
         final_agg = aggregation_results.get('final_agg', [])
-        if isinstance(final_agg, (list, tuple)) and len(final_agg) > 1:
-            f.write(f"  Best Model: {final_agg[1] if len(final_agg) > 1 else 'N/A'}\n")
+        if isinstance(final_agg, (list, tuple)) and len(final_agg) > 0:
+            f.write(f"  Best Model: {final_agg[0]}\n")
             f.write(f"  Full Ranking: {final_agg}\n")
         else:
             f.write(f"  Result: {final_agg}\n")
@@ -430,6 +433,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         entity=entity,
         iterations=50,
         iteration=iteration,
+        explain=True,
     )
     timing_dict['2_Thompson_Sampling'] = time.time() - start_time
     mem_after = get_memory_usage_mb()
@@ -536,10 +540,26 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR,
     ]
     robust_agg = enhanced_markov_chain_rank_aggregator_text(test_for_rank)
+    explain_rank_aggregation(
+        rankings=test_for_rank,
+        source_names=["GAN_F1", "GAN_PR_AUC",
+                      "Borderline_F1", "Borderline_PR_AUC",
+                      "MonteCarlo_F1", "MonteCarlo_PR_AUC"],
+        full_ranking=robust_agg[1],
+        stage_name="robust",
+        dataset=dataset, entity=entity, iteration=iteration,
+    )
 
     # Final merge of robust aggregation vs Thompson Sampling
     full_ = [robust_agg[1], thompson_model_names]
     full_aggregated = enhanced_markov_chain_rank_aggregator_text(full_)
+    explain_rank_aggregation(
+        rankings=full_,
+        source_names=["Robust_Aggregated", "Thompson_Sampling"],
+        full_ranking=full_aggregated[1],
+        stage_name="final",
+        dataset=dataset, entity=entity, iteration=iteration,
+    )
     timing_dict['6_Rank_Aggregation'] = time.time() - start_time
     mem_after = get_memory_usage_mb()
     memory_dict['modules']['6_Rank_Aggregation'] = {
@@ -795,8 +815,24 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR,
     ]
     robust_agg = enhanced_markov_chain_rank_aggregator_text(test_for_rank)
+    explain_rank_aggregation(
+        rankings=test_for_rank,
+        source_names=["GAN_F1", "GAN_PR_AUC",
+                      "Borderline_F1", "Borderline_PR_AUC",
+                      "MonteCarlo_F1", "MonteCarlo_PR_AUC"],
+        full_ranking=robust_agg[1],
+        stage_name="robust",
+        dataset=dataset, entity=entity, iteration=iteration,
+    )
     full_ = [robust_agg[1], thompson_model_names]
     full_aggregated = enhanced_markov_chain_rank_aggregator_text(full_)
+    explain_rank_aggregation(
+        rankings=full_,
+        source_names=["Robust_Aggregated", "Thompson_Sampling"],
+        full_ranking=full_aggregated[1],
+        stage_name="final",
+        dataset=dataset, entity=entity, iteration=iteration,
+    )
     timing_dict['6_Aggregation'] = time.time() - agg_start
     mem_after_agg = get_memory_usage_mb()
     memory_dict['modules']['6_Aggregation'] = {
@@ -1298,8 +1334,8 @@ def run_app(algorithm_list, algorithm_list_instances):
         ensemble_f1 = to_scalar(extra_results['ga']['f1'])
         ensemble_pr_auc = to_scalar(extra_results['ga']['pr_auc'])
         
-        # Get best single model from final aggregation
-        best_single_model = full_aggregated[1] if isinstance(full_aggregated, (list, tuple)) and len(full_aggregated) > 1 else full_aggregated
+        # Get best single model from final aggregation (top of the flat ranking list)
+        best_single_model = full_aggregated[0] if isinstance(full_aggregated, (list, tuple)) and len(full_aggregated) > 0 else full_aggregated
         
         # Evaluate Thompson Sampling best model on the SAME injected data the ensemble sees
         # (test_data_new). This keeps single-model and ensemble F1 directly comparable.
