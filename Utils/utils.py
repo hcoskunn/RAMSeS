@@ -71,7 +71,10 @@ def get_args_from_cmdline():
     parser.add_argument('--skip_gan',
                         action='store_true',
                         help='Skip GAN robustness testing for faster execution (testing/debugging)')
-    
+    parser.add_argument('--no_explain',
+                        action='store_true',
+                        help='Disable all explainability outputs (reports/plots). Explainability is ON by default.')
+
     cmd_args = parser.parse_args()
     
     # Load config from file
@@ -113,7 +116,10 @@ def get_args_from_cmdline():
     
     # Skip GAN flag
     args['skip_gan'] = cmd_args.skip_gan
-    
+
+    # Explainability is ON by default; --no_explain disables it everywhere.
+    args['explain'] = not cmd_args.no_explain
+
     return args
 
 def de_unfold(windows, window_step):

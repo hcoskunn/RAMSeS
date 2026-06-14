@@ -402,6 +402,39 @@ def detect_regime_shifts(
     return regime_shifts, blip_windows
 
 
+def reconstruct_regime_segments(
+    regime_shifts: List[Dict],
+    T: int,
+    fallback_model: str = 'N/A',
+) -> List[Tuple[int, int, str, int]]:
+    """
+    Rebuild contiguous regime segments from the list of regime-shift events.
+
+    Parameters
+    ----------
+    regime_shifts : List[Dict]
+        Output of detect_regime_shifts(); each dict has 'window', 'from_model',
+        'to_model'.
+    T : int
+        Total number of windows.
+    fallback_model : str
+        Model name to use for the single segment when there are no shifts.
+
+    Returns
+    -------
+    List[Tuple[int, int, str, int]]
+        One tuple per regime: (start, end_inclusive, dominant_model, duration).
+    """
+    if T <= 0:
+        return []
+    if regime_shifts:
+        starts = [0] + [s['window'] for s in regime_shifts]
+        ends = [s['window'] for s in regime_shifts] + [T]
+        models_seq = [regime_shifts[0]['from_model']] + [s['to_model'] for s in regime_shifts]
+        return [(rs, re - 1, rm, re - rs) for rm, rs, re in zip(models_seq, starts, ends)]
+    return [(0, T - 1, fallback_model, T)]
+
+
 def fit_linear_thompson_sampling(dataset,
                                  models: Dict[str, Any], data: np.ndarray, targets: np.ndarray,
                                  initial_epsilon: float = 0.2,
@@ -448,8 +481,10 @@ def fit_linear_thompson_sampling(dataset,
     history = []
     list_of_chosen_models = []
     _exp_rewards_hist: Dict[str, List[float]] = {m: [] for m in models}
+    _pre_exp_rewards_hist: Dict[str, List[float]] = {m: [] for m in models}
     _l2_norm_hist: Dict[str, List[float]] = {m: [] for m in models}
     _selection_states: List[str] = []
+    _window_contexts: List[np.ndarray] = []
 
     for iteration in range(num_windows):
         logger.info(f"Iteration {iteration + 1}")
@@ -467,9 +502,15 @@ def fit_linear_thompson_sampling(dataset,
         list_of_chosen_models.append(chosen_model_name)
 
         if explain:
-            # Classify the selection using PRE-update means (the beliefs that informed it)
+            # Expected rewards from the PRE-update means — the beliefs at the time
+            # of sampling. Used for classification and for the report's Dominant /
+            # Top E[Reward] columns (which describe the decision, not its aftermath).
             pre_update_rewards = compute_expected_rewards(means, context)
             _selection_states.append(classify_selection(chosen_model_name, was_random, pre_update_rewards))
+            for _m in models:
+                _pre_exp_rewards_hist[_m].append(pre_update_rewards[_m])
+            # Store the (L2-normalised) context so SHAP can be computed per window later.
+            _window_contexts.append(context)
 
         X_test_window = data_windows[iteration]
         y_test_window = targets_windows[iteration]
@@ -537,28 +578,26 @@ def fit_linear_thompson_sampling(dataset,
         logger.info(f"Finished iteration {iteration + 1}")
 
     if explain:
-        # Build SHAP payload from the local data_windows. Each window is L2-normalised
-        # to match the per-window context normalisation applied during training, so the
-        # baseline (mean) and explanation context live in the same space as the contexts
-        # the bandit actually saw.
+        # Build the SHAP payload from the per-window contexts the bandit actually
+        # processed (_window_contexts), which stays index-aligned with the regime
+        # detection and the explainability histories. Each context is already
+        # L2-normalised. all_contexts enables per-window / per-regime SHAP plots.
         n_channels = data_windows[0].shape[0] if data_windows else 0
-        if data_windows:
-            normalised = [
-                w.flatten() / (np.linalg.norm(w.flatten()) + 1e-10)
-                for w in data_windows
-            ]
-            baseline_context = np.mean(normalised, axis=0)
-            explanation_context = normalised[-1]
+        if _window_contexts:
+            baseline_context = np.mean(_window_contexts, axis=0)
+            explanation_context = _window_contexts[-1]
         else:
             baseline_context = np.zeros(n_features)
             explanation_context = np.zeros(n_features)
         shap_payload = {
             "explanation_context": explanation_context,
             "baseline_context": baseline_context,
+            "all_contexts": _window_contexts,
             "n_channels": n_channels,
         }
         return (means, covariances, history, list_of_chosen_models,
-                _exp_rewards_hist, _l2_norm_hist, _selection_states, shap_payload)
+                _exp_rewards_hist, _l2_norm_hist, _selection_states,
+                _pre_exp_rewards_hist, shap_payload)
     return means, covariances, history, list_of_chosen_models
 
 
@@ -642,15 +681,21 @@ def plot_expected_rewards(
     dataset: str,
     entity: str,
     iterations: int,
+    smooth: bool = False,
 ) -> None:
     """
-    Plot expected reward evolution for all models with regime shifts annotated.
+    Plot expected reward evolution for all models with regimes annotated.
 
-    Each model's smoothed expected reward trajectory (mu_k^T * x_t) is drawn as a
-    line. Regime regions are shaded by dominant model and shift points are marked
-    with dashed vertical lines.
+    Regime regions are shaded by dominant model, regime boundaries are marked
+    with dashed vertical lines, and every regime is labelled at its centre
+    (vertically) with the model that dominates it.
 
-    Saves to myresults/Thompson/{dataset}/{entity}/expected_rewards_{iterations}.png.
+    smooth : bool
+        When False (default) each trajectory is the raw per-window value, saved
+        as expected_rewards_{iterations}.png. When True each trajectory is
+        Gaussian-smoothed (sigma=2) and saved as
+        expected_rewards_smoothed_{iterations}.png. Both variants are produced
+        per run so the raw and smoothed views can be compared side by side.
     """
     plt.rcParams.update({
         "font.family": "serif",
@@ -672,32 +717,27 @@ def plot_expected_rewards(
             continue
         nan_mean = float(np.nanmean(raw)) if not np.all(np.isnan(raw)) else 0.0
         nan_free = np.where(np.isnan(raw), nan_mean, raw)
-        smoothed = gaussian_filter1d(nan_free, sigma=2)
-        ax.plot(range(T), smoothed, label=model_name, linewidth=1.4, color=colour_map[model_name])
+        series = gaussian_filter1d(nan_free, sigma=2) if smooth else nan_free
+        ax.plot(range(T), series, label=model_name, linewidth=1.4, color=colour_map[model_name])
 
-    # Shade regime regions between shift boundaries
+    # Shade each regime, mark every boundary, and label every regime with the
+    # model that dominates it — written vertically, centred in the regime span.
     if T > 0 and model_names:
-        regime_starts = [0] + [s['window'] for s in regime_shifts]
-        regime_ends = [s['window'] for s in regime_shifts] + [T]
-        first_model = regime_shifts[0]['from_model'] if regime_shifts else model_names[0]
-        regime_models = [first_model] + [s['to_model'] for s in regime_shifts]
-        for rm, rs, re in zip(regime_models, regime_starts, regime_ends):
+        segments = reconstruct_regime_segments(regime_shifts, T, fallback_model=model_names[0])
+        y_top = ax.get_ylim()[1]
+        for (start, end, rm, _duration) in segments:
             if rm in colour_map:
-                ax.axvspan(rs, re, alpha=0.08, color=colour_map[rm], lw=0)
+                ax.axvspan(start, end + 1, alpha=0.08, color=colour_map[rm], lw=0)
+            center = (start + end + 1) / 2.0
+            ax.text(center, y_top * 0.97, rm, fontsize=8, ha='center', va='top',
+                    rotation=90, fontweight='bold', alpha=0.85)
+        for shift in regime_shifts:
+            ax.axvline(x=shift['window'], color='black', linestyle='--', linewidth=0.9, alpha=0.7)
 
-    # Mark shift points (cap at 10 to avoid annotation clutter)
-    ylim = ax.get_ylim()
-    for shift in regime_shifts[:10]:
-        ax.axvline(x=shift['window'], color='black', linestyle='--', linewidth=0.9, alpha=0.7)
-        ax.text(
-            shift['window'] + 0.3, ylim[1] * 0.97,
-            f"{shift['from_model']}->{shift['to_model']}",
-            fontsize=7, va='top', rotation=90, alpha=0.8,
-        )
-
+    title_suffix = ' (smoothed)' if smooth else ''
     ax.set_xlabel('Window')
     ax.set_ylabel('Expected Reward (mu_k^T * x_t)')
-    ax.set_title('Expected Reward Trajectories Over Windows')
+    ax.set_title('Expected Reward Trajectories Over Windows' + title_suffix)
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
     ax.legend(loc='upper left', ncol=2, frameon=False,
               bbox_to_anchor=(1.01, 1), borderaxespad=0)
@@ -705,7 +745,9 @@ def plot_expected_rewards(
 
     directory = f'myresults/Thomposon/{dataset}/{entity}/'
     os.makedirs(directory, exist_ok=True)
-    plt.savefig(f'{directory}/expected_rewards_{iterations}.png', format='png', dpi=300, bbox_inches='tight')
+    fname = (f'expected_rewards_smoothed_{iterations}.png' if smooth
+             else f'expected_rewards_{iterations}.png')
+    plt.savefig(f'{directory}/{fname}', format='png', dpi=300, bbox_inches='tight')
     plt.close()
 
 
@@ -804,6 +846,127 @@ def _top_k_models_by_norm(means: Dict[str, np.ndarray], k: int) -> List[str]:
     return [name for name, _ in ranked[:k]]
 
 
+def _top_k_models_by_expected_reward(
+    means: Dict[str, np.ndarray],
+    contexts: List[np.ndarray],
+    k: int,
+) -> List[str]:
+    """
+    Return the top-k models by expected reward mu·x averaged over the given
+    contexts. Uses the final mean vectors, so the ranking is consistent with the
+    SHAP decomposition plotted alongside (whose per-channel values sum to
+    mu·x - mu·baseline).
+    """
+    if not contexts or not means:
+        return list(means.keys())[:k]
+    totals: Dict[str, float] = {m: 0.0 for m in means}
+    for ctx in contexts:
+        for m, v in compute_expected_rewards(means, ctx).items():
+            totals[m] += v
+    ranked = sorted(totals.items(), key=lambda x: x[1], reverse=True)
+    return [name for name, _ in ranked[:k]]
+
+
+def _per_channel_shap_map(
+    means: Dict[str, np.ndarray],
+    top_models: List[str],
+    context: np.ndarray,
+    baseline: np.ndarray,
+    n_channels: int,
+) -> Dict[str, np.ndarray]:
+    """Per-channel SHAP for each model at a single context (raw, signed)."""
+    return {
+        m: aggregate_shap_per_channel(
+            compute_shap_values(means[m].flatten(), context, baseline), n_channels)
+        for m in top_models
+    }
+
+
+def _avg_per_channel_shap_map(
+    means: Dict[str, np.ndarray],
+    top_models: List[str],
+    contexts: List[np.ndarray],
+    baseline: np.ndarray,
+    n_channels: int,
+    absolute: bool = False,
+) -> Dict[str, np.ndarray]:
+    """
+    Per-channel SHAP for each model, averaged over a list of contexts.
+
+    absolute=False : raw signed average (meaningful for a regime, whose mean
+                     context differs from the global baseline).
+    absolute=True  : mean of |per-channel SHAP| — the standard SHAP global-
+                     importance measure. Required for the whole-data average,
+                     where the raw signed average is identically zero because
+                     the baseline IS the mean of all contexts.
+    """
+    out: Dict[str, np.ndarray] = {}
+    n = max(len(contexts), 1)
+    for m in top_models:
+        mu = means[m].flatten()
+        acc = np.zeros(n_channels)
+        for ctx in contexts:
+            pc = aggregate_shap_per_channel(compute_shap_values(mu, ctx, baseline), n_channels)
+            acc += np.abs(pc) if absolute else pc
+        out[m] = acc / n
+    return out
+
+
+def _render_shap_comparison(
+    per_channel_by_model: Dict[str, np.ndarray],
+    top_models: List[str],
+    top_n_channels: int,
+    title: str,
+    save_path: str,
+) -> None:
+    """
+    Shared grouped-bar renderer for SHAP comparison plots. Channels shown are the
+    union of each model's top_n_channels by |per-channel SHAP|. One bar per model
+    per channel; legend placed outside the plot area.
+    """
+    plt.rcParams.update({
+        "font.family": "serif",
+        "axes.labelsize": 12,
+        "axes.titlesize": 13,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+    })
+
+    candidate_channels: set = set()
+    for m in top_models:
+        per_channel = per_channel_by_model[m]
+        order = np.argsort(np.abs(per_channel))[::-1][:top_n_channels]
+        candidate_channels.update(int(c) for c in order)
+    channels = sorted(candidate_channels)
+    if not channels:
+        return
+
+    n_models = len(top_models)
+    bar_width = 0.8 / max(n_models, 1)
+    x_base = np.arange(len(channels))
+    colour_map = {name: plt.cm.tab20(i / max(n_models, 1)) for i, name in enumerate(top_models)}
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.6 * len(channels) + 4), 5))
+    for i, m in enumerate(top_models):
+        vals = per_channel_by_model[m][channels]
+        ax.bar(x_base + i * bar_width, vals, bar_width, label=m, color=colour_map[m])
+
+    ax.axhline(0, color='black', linewidth=0.6)
+    ax.set_xticks(x_base + bar_width * (n_models - 1) / 2)
+    ax.set_xticklabels([f"ch{c}" for c in channels], rotation=45, ha='right')
+    ax.set_xlabel('Channel')
+    ax.set_ylabel('Per-channel SHAP contribution')
+    ax.set_title(title)
+    ax.grid(True, axis='y', linestyle='--', linewidth=0.5, alpha=0.6)
+    ax.legend(loc='upper left', frameon=False, bbox_to_anchor=(1.01, 1), borderaxespad=0)
+
+    plt.tight_layout(pad=1.2)
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    plt.savefig(save_path, format='png', dpi=300, bbox_inches='tight')
+    plt.close()
+
+
 def plot_shap_per_model(
     means: Dict[str, np.ndarray],
     shap_payload: Dict,
@@ -881,83 +1044,210 @@ def plot_shap_comparison(
     iterations: int,
     top_k_models: int = 3,
     top_n_channels: int = 8,
+    all_models: bool = False,
 ) -> None:
     """
-    Grouped bar chart comparing the top_k_models on the channels most relevant
-    to their disagreement. Channels selected are the union of each model's
-    top_n_channels by |per-channel SHAP|. Reveals which sensors drive the
-    preference between detectors.
+    Grouped bar chart comparing models on the channels most relevant to their
+    disagreement at the last window. Channels shown are the union of each model's
+    top_n_channels by |per-channel SHAP|.
 
-    Legend placed outside the plot area for readability.
-
-    Saves to myresults/Thomposon/{dataset}/{entity}/shap_comparison_{iterations}.png.
+    all_models : bool
+        When False (default) the top_k_models by ||mu||^2 are shown, saved as
+        shap_comparison_{iterations}.png. When True every model is shown, saved
+        as shap_comparison_all_{iterations}.png.
     """
     if not shap_payload or shap_payload.get("n_channels", 0) <= 0:
         return
-
-    plt.rcParams.update({
-        "font.family": "serif",
-        "axes.labelsize": 12,
-        "axes.titlesize": 13,
-        "legend.fontsize": 10,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-    })
 
     context = shap_payload["explanation_context"]
     baseline = shap_payload["baseline_context"]
     n_channels = shap_payload["n_channels"]
 
-    top_models = _top_k_models_by_norm(means, top_k_models)
-    if not top_models:
+    if all_models:
+        sel_models = _top_k_models_by_norm(means, len(means))
+        suffix, title = '_all', 'SHAP Comparison Across All Models (at last window)'
+    else:
+        sel_models = _top_k_models_by_norm(means, top_k_models)
+        suffix, title = '', 'SHAP Comparison Across Top Models (at last window)'
+    if not sel_models:
         return
 
-    per_channel_by_model: Dict[str, np.ndarray] = {}
-    candidate_channels: set = set()
-    for model_name in top_models:
-        mu = means[model_name].flatten()
-        shap_vals = compute_shap_values(mu, context, baseline)
-        per_channel = aggregate_shap_per_channel(shap_vals, n_channels)
-        per_channel_by_model[model_name] = per_channel
-        order = np.argsort(np.abs(per_channel))[::-1][:top_n_channels]
-        candidate_channels.update(int(c) for c in order)
+    per_channel = _per_channel_shap_map(means, sel_models, context, baseline, n_channels)
+    _render_shap_comparison(
+        per_channel, sel_models, top_n_channels,
+        title=title,
+        save_path=f'myresults/Thomposon/{dataset}/{entity}/shap_comparison{suffix}_{iterations}.png',
+    )
 
-    channels = sorted(candidate_channels)
-    if not channels:
+
+def plot_shap_per_window(
+    means: Dict[str, np.ndarray],
+    shap_payload: Dict,
+    dataset: str,
+    entity: str,
+    iterations: int,
+    top_k_models: int = 3,
+    top_n_channels: int = 8,
+    all_models: bool = False,
+    sample_stride: Optional[int] = None,
+) -> None:
+    """
+    One SHAP comparison plot per window (raw signed per-channel SHAP), in the
+    same style as shap_comparison.
+
+    all_models : bool
+        When False (default) each window's plot shows the top_k_models by
+        expected reward (mu·x) at that window's context; saved under
+        shap_per_window_{iterations}/. When True every model is shown; saved
+        under shap_per_window_all_{iterations}/.
+    sample_stride : Optional[int]
+        When set (e.g. 10) only every `sample_stride`-th window is plotted
+        (window 0, 10, 20, …), saved under shap_per_window_every{stride}_{iterations}/.
+        Useful for a quick overview without one plot per window.
+    """
+    if not shap_payload or shap_payload.get("n_channels", 0) <= 0:
         return
+    contexts = shap_payload.get("all_contexts", [])
+    if not contexts or not means:
+        return
+    baseline = shap_payload["baseline_context"]
+    n_channels = shap_payload["n_channels"]
 
-    n_models = len(top_models)
-    bar_width = 0.8 / max(n_models, 1)
-    x_base = np.arange(len(channels))
-    colour_map = {name: plt.cm.tab20(i / max(n_models, 1)) for i, name in enumerate(top_models)}
-
-    fig, ax = plt.subplots(figsize=(max(8, 0.6 * len(channels) + 4), 5))
-    for i, model_name in enumerate(top_models):
-        vals = per_channel_by_model[model_name][channels]
-        ax.bar(x_base + i * bar_width, vals, bar_width,
-               label=model_name, color=colour_map[model_name])
-
-    ax.axhline(0, color='black', linewidth=0.6)
-    ax.set_xticks(x_base + bar_width * (n_models - 1) / 2)
-    ax.set_xticklabels([f"ch{c}" for c in channels], rotation=45, ha='right')
-    ax.set_xlabel('Channel')
-    ax.set_ylabel('Per-channel SHAP contribution')
-    ax.set_title('SHAP Comparison Across Top Models (at last window)')
-    ax.grid(True, axis='y', linestyle='--', linewidth=0.5, alpha=0.6)
-    ax.legend(loc='upper left', frameon=False,
-              bbox_to_anchor=(1.01, 1), borderaxespad=0)
-
-    plt.tight_layout(pad=1.2)
-    directory = f'myresults/Thomposon/{dataset}/{entity}/'
+    every_model = _top_k_models_by_norm(means, len(means)) if all_models else None
+    base = "shap_per_window_all" if all_models else "shap_per_window"
+    if sample_stride and sample_stride > 1:
+        base = f"{base}_every{sample_stride}"
+    directory = f'myresults/Thomposon/{dataset}/{entity}/{base}_{iterations}/'
     os.makedirs(directory, exist_ok=True)
-    plt.savefig(f'{directory}/shap_comparison_{iterations}.png', format='png', dpi=300, bbox_inches='tight')
-    plt.close()
+    for t, ctx in enumerate(contexts):
+        if sample_stride and sample_stride > 1 and t % sample_stride != 0:
+            continue
+        if all_models:
+            sel_models = every_model
+            title = f'SHAP — window {t} (all models)'
+        else:
+            sel_models = _top_k_models_by_expected_reward(means, [ctx], top_k_models)
+            title = f'SHAP — window {t} (top {top_k_models} by E[R] in window)'
+        per_channel = _per_channel_shap_map(means, sel_models, ctx, baseline, n_channels)
+        _render_shap_comparison(
+            per_channel, sel_models, top_n_channels,
+            title=title,
+            save_path=os.path.join(directory, f'window_{t:03d}.png'),
+        )
+
+
+def plot_shap_per_regime(
+    means: Dict[str, np.ndarray],
+    shap_payload: Dict,
+    regime_shifts: List[Dict],
+    dataset: str,
+    entity: str,
+    iterations: int,
+    top_k_models: int = 3,
+    top_n_channels: int = 8,
+    all_models: bool = False,
+) -> None:
+    """
+    One SHAP comparison plot per regime, showing the raw signed per-channel SHAP
+    averaged over that regime's windows. A regime's mean context differs from the
+    global baseline, so the signed average is meaningful (and direction-bearing).
+
+    all_models : bool
+        When False (default) each regime's plot shows the top_k_models by
+        expected reward (mu·x) averaged over that regime's windows; saved under
+        shap_per_regime_{iterations}/. When True every model is shown; saved
+        under shap_per_regime_all_{iterations}/.
+    """
+    if not shap_payload or shap_payload.get("n_channels", 0) <= 0:
+        return
+    contexts = shap_payload.get("all_contexts", [])
+    if not contexts or not means:
+        return
+    baseline = shap_payload["baseline_context"]
+    n_channels = shap_payload["n_channels"]
+
+    fallback = _top_k_models_by_norm(means, 1)[0]
+    segments = reconstruct_regime_segments(regime_shifts, len(contexts),
+                                           fallback_model=fallback)
+    every_model = _top_k_models_by_norm(means, len(means)) if all_models else None
+    folder = f'shap_per_regime_all_{iterations}' if all_models else f'shap_per_regime_{iterations}'
+    directory = f'myresults/Thomposon/{dataset}/{entity}/{folder}/'
+    os.makedirs(directory, exist_ok=True)
+    for i, (start, end, model, _duration) in enumerate(segments, 1):
+        regime_ctx = contexts[start:end + 1]
+        if not regime_ctx:
+            continue
+        if all_models:
+            sel_models = every_model
+            title = f'SHAP — regime {i} ({model}, windows {start}-{end}, all models)'
+        else:
+            sel_models = _top_k_models_by_expected_reward(means, regime_ctx, top_k_models)
+            title = (f'SHAP — regime {i} ({model}, windows {start}-{end}, '
+                     f'top {top_k_models} by E[R] in regime)')
+        per_channel = _avg_per_channel_shap_map(
+            means, sel_models, regime_ctx, baseline, n_channels, absolute=False)
+        _render_shap_comparison(
+            per_channel, sel_models, top_n_channels,
+            title=title,
+            save_path=os.path.join(directory, f'regime_{i:02d}_w{start}-{end}_{model}.png'),
+        )
+
+
+def plot_shap_average_all(
+    means: Dict[str, np.ndarray],
+    shap_payload: Dict,
+    dataset: str,
+    entity: str,
+    iterations: int,
+    top_k_models: int = 3,
+    top_n_channels: int = 8,
+    all_models: bool = True,
+) -> None:
+    """
+    A single SHAP comparison plot summarising the whole run: the mean of
+    |per-channel SHAP| across all windows (the standard SHAP global-importance
+    measure). The raw signed average over all windows is identically zero — the
+    baseline IS the mean of all contexts — so absolute values are used here.
+
+    all_models : bool
+        When True (default) every model is shown, saved as
+        shap_average_all_{iterations}.png. When False only the top_k_models by
+        expected reward (mu·x) averaged over the whole run are shown, saved as
+        shap_average_top3_{iterations}.png.
+    """
+    if not shap_payload or shap_payload.get("n_channels", 0) <= 0:
+        return
+    contexts = shap_payload.get("all_contexts", [])
+    if not contexts or not means:
+        return
+    baseline = shap_payload["baseline_context"]
+    n_channels = shap_payload["n_channels"]
+
+    if all_models:
+        # Every model, ordered by ||mu||^2 for a stable, meaningful legend order.
+        sel_models = _top_k_models_by_norm(means, len(means))
+        suffix = 'all'
+        title = 'Mean |SHAP| Across All Windows — all models (global importance)'
+    else:
+        sel_models = _top_k_models_by_expected_reward(means, contexts, top_k_models)
+        suffix = f'top{top_k_models}'
+        title = (f'Mean |SHAP| Across All Windows — top {top_k_models} by E[R] '
+                 '(global importance)')
+
+    per_channel = _avg_per_channel_shap_map(
+        means, sel_models, contexts, baseline, n_channels, absolute=True)
+    _render_shap_comparison(
+        per_channel, sel_models, top_n_channels,
+        title=title,
+        save_path=f'myresults/Thomposon/{dataset}/{entity}/shap_average_{suffix}_{iterations}.png',
+    )
 
 
 def explain_thompson_sampling(
     means: Dict[str, np.ndarray],
     expected_rewards_history: Dict[str, List[float]],
     l2_norm_history: Dict[str, List[float]],
+    pre_expected_rewards_history: Dict[str, List[float]],
     list_of_chosen_models: List[str],
     regime_shifts: List[Dict],
     blip_windows: List[str],
@@ -975,30 +1265,40 @@ def explain_thompson_sampling(
     summary, SHAP feature attribution (when shap_payload is provided), SHAP preference
     decomposition, and final ranking by ||mu_k||^2.
 
+    The Dominant / Top E[Reward] columns are computed from pre_expected_rewards_history
+    — the expected rewards at the *time of sampling* (pre-update means). When every
+    model's expected reward is identical (e.g. window 0, all means still the zero
+    vector) there is no meaningful winner, so both columns print 'N/A'.
+
     Saves to myresults/Thomposon/{dataset}/{entity}/explainability_{iterations}.txt.
     """
     model_list = list(expected_rewards_history.keys())
     T = len(list_of_chosen_models)
 
-    # Per-window dominant model (highest expected reward, ignoring NaN)
-    dominant_per_window = []
+    # Per-window dominant model + top expected reward, computed from the PRE-update
+    # means (the beliefs at the time of sampling). 'N/A' when all rewards are tied
+    # (e.g. window 0, where every mean vector is still the zero vector).
+    dominant_per_window: List[str] = []
+    top_reward_per_window: List[Optional[float]] = []
     for t in range(T):
         rewards_at_t = {
-            m: expected_rewards_history[m][t]
+            m: pre_expected_rewards_history[m][t]
             for m in model_list
-            if t < len(expected_rewards_history[m]) and not np.isnan(expected_rewards_history[m][t])
+            if t < len(pre_expected_rewards_history[m]) and not np.isnan(pre_expected_rewards_history[m][t])
         }
-        dominant_per_window.append(max(rewards_at_t, key=rewards_at_t.get) if rewards_at_t else 'N/A')
+        if rewards_at_t and max(rewards_at_t.values()) != min(rewards_at_t.values()):
+            dom = max(rewards_at_t, key=rewards_at_t.get)
+            dominant_per_window.append(dom)
+            top_reward_per_window.append(rewards_at_t[dom])
+        else:
+            dominant_per_window.append('N/A')
+            top_reward_per_window.append(None)
 
-    # Reconstruct regime segments from shift events
-    if regime_shifts:
-        starts = [0] + [s['window'] for s in regime_shifts]
-        ends = [s['window'] for s in regime_shifts] + [T]
-        models_seq = [regime_shifts[0]['from_model']] + [s['to_model'] for s in regime_shifts]
-        regime_segments = [(rs, re - 1, rm, re - rs) for rm, rs, re in zip(models_seq, starts, ends)]
-    else:
-        first_dom = dominant_per_window[0] if dominant_per_window else 'N/A'
-        regime_segments = [(0, T - 1, first_dom, T)]
+    # Reconstruct regime segments from shift events. The no-shift fallback uses the
+    # most frequent dominant model (window 0 is 'N/A' and not a meaningful fallback).
+    _valid_doms = [d for d in dominant_per_window if d != 'N/A']
+    first_dom = max(set(_valid_doms), key=_valid_doms.count) if _valid_doms else 'N/A'
+    regime_segments = reconstruct_regime_segments(regime_shifts, T, fallback_model=first_dom)
 
     directory = f'myresults/Thomposon/{dataset}/{entity}/'
     os.makedirs(directory, exist_ok=True)
@@ -1009,19 +1309,16 @@ def explain_thompson_sampling(
         f.write(f"Dataset: {dataset}  |  Entity: {entity}  |  Windows: {T}\n\n")
 
         f.write("--- Per-Window Summary ---\n")
+        f.write("(Dominant / Top E[Reward] reflect the beliefs at the time of sampling)\n")
         f.write(f"{'Window':>8}  {'Chosen':>12}  {'Dominant':>12}  {'Top E[Reward]':>14}  {'State':>22}\n")
         f.write("-" * 76 + "\n")
         for t in range(T):
             chosen = list_of_chosen_models[t] if t < len(list_of_chosen_models) else 'N/A'
             dominant = dominant_per_window[t]
-            rewards_at_t = {
-                m: expected_rewards_history[m][t]
-                for m in model_list
-                if t < len(expected_rewards_history[m]) and not np.isnan(expected_rewards_history[m][t])
-            }
-            top_reward = max(rewards_at_t.values()) if rewards_at_t else float('nan')
+            top_reward = top_reward_per_window[t]
+            top_str = f"{top_reward:.4f}" if top_reward is not None else "N/A"
             state = selection_states[t] if t < len(selection_states) else 'N/A'
-            f.write(f"{t:>8}  {chosen:>12}  {dominant:>12}  {top_reward:>14.4f}  {state:>22}\n")
+            f.write(f"{t:>8}  {chosen:>12}  {dominant:>12}  {top_str:>14}  {state:>22}\n")
 
         f.write("\n--- Regime Summary ---\n")
         f.write(f"{'Start':>8}  {'End':>8}  {'Model':>12}  {'Duration':>10}\n")
@@ -1241,7 +1538,8 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
     )
     if explain:
         (means, covariances, history, list_of_chosen_models,
-         exp_rewards_hist, l2_norm_hist, selection_states, shap_payload) = _fit_result
+         exp_rewards_hist, l2_norm_hist, selection_states,
+         pre_exp_rewards_hist, shap_payload) = _fit_result
     else:
         means, covariances, history, list_of_chosen_models = _fit_result
 
@@ -1258,11 +1556,24 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
     if explain:
         regime_shifts, blip_windows = detect_regime_shifts(exp_rewards_hist)
         plot_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
-                              dataset, entity, iterations)
+                              dataset, entity, iterations, smooth=False)
+        plot_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
+                              dataset, entity, iterations, smooth=True)
         plot_selection_states(selection_states, dataset, entity, iterations)
         plot_shap_per_model(means, shap_payload, dataset, entity, iterations)
+        # Each SHAP comparison plot is produced in both a top-k and an all-models variant.
         plot_shap_comparison(means, shap_payload, dataset, entity, iterations)
-        explain_thompson_sampling(means, exp_rewards_hist, l2_norm_hist, list_of_chosen_models,
+        plot_shap_comparison(means, shap_payload, dataset, entity, iterations, all_models=True)
+        plot_shap_per_window(means, shap_payload, dataset, entity, iterations)
+        plot_shap_per_window(means, shap_payload, dataset, entity, iterations, all_models=True)
+        plot_shap_per_window(means, shap_payload, dataset, entity, iterations, sample_stride=10)
+        plot_shap_per_regime(means, shap_payload, regime_shifts, dataset, entity, iterations)
+        plot_shap_per_regime(means, shap_payload, regime_shifts, dataset, entity, iterations,
+                             all_models=True)
+        plot_shap_average_all(means, shap_payload, dataset, entity, iterations)
+        plot_shap_average_all(means, shap_payload, dataset, entity, iterations, all_models=False)
+        explain_thompson_sampling(means, exp_rewards_hist, l2_norm_hist, pre_exp_rewards_hist,
+                                  list_of_chosen_models,
                                   regime_shifts, blip_windows, selection_states,
                                   shap_payload,
                                   dataset, entity, iterations)

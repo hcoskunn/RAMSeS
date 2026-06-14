@@ -1,0 +1,531 @@
+"""
+Standalone unit tests for the GA-ensemble selection-explainability layer.
+Mocks the heavy module-level imports of Ensemble_GA.py (sklearn.*, loguru,
+Metrics.metrics, Utils.model_selection_utils) so the pure analysis + plot
+functions can be imported in any env that has numpy + matplotlib.
+"""
+
+import os
+import sys
+import tempfile
+import types
+import unittest
+
+import numpy as np
+
+
+# ── Mock heavy module-level imports so Ensemble_GA.py loads ─────────────────
+def _make_mock_module(*names):
+    for name in names:
+        parts = name.split(".")
+        parent = None
+        for i, part in enumerate(parts):
+            full = ".".join(parts[: i + 1])
+            if full not in sys.modules:
+                mod = types.ModuleType(full)
+                sys.modules[full] = mod
+                if parent is not None:
+                    setattr(parent, part, mod)
+            parent = sys.modules[full]
+
+
+_make_mock_module(
+    "loguru",
+    "sklearn",
+    "sklearn.ensemble",
+    "sklearn.linear_model",
+    "sklearn.svm",
+    "Metrics",
+    "Metrics.metrics",
+    "Utils",
+    "Utils.model_selection_utils",
+)
+# Ensemble_GA does `from loguru import logger`
+class _Logger:
+    def info(self, *a, **k): pass
+    def warning(self, *a, **k): pass
+    def debug(self, *a, **k): pass
+    def error(self, *a, **k): pass
+sys.modules["loguru"].logger = _Logger()
+# Stub the specific classes / callables imported at module top.
+sys.modules["sklearn.ensemble"].RandomForestClassifier = type("RandomForestClassifier", (), {})
+sys.modules["sklearn.ensemble"].GradientBoostingClassifier = type("GradientBoostingClassifier", (), {})
+sys.modules["sklearn.linear_model"].LogisticRegression = type("LogisticRegression", (), {})
+sys.modules["sklearn.svm"].SVC = type("SVC", (), {})
+sys.modules["Metrics.metrics"].prauc = lambda *a, **k: 0.5
+sys.modules["Metrics.metrics"].f1_score = lambda *a, **k: (0.5,) * 7
+sys.modules["Utils.model_selection_utils"].evaluate_model = lambda *a, **k: None
+
+
+# Add project root to sys.path so `from Metrics.Ensemble_GA import ...` works.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_THIS_DIR)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from Metrics.Ensemble_GA import (
+    compute_lofo_utility,
+    compute_mean_marginal_contribution,
+    compute_friedman_h,
+    compute_survival_rates,
+    classify_detector_archetypes,
+    explain_ga_selection,
+    compute_meta_shap,
+    compute_meta_pfi,
+    borda_aggregate_importances,
+    explain_ga_combination,
+)
+from Metrics.Ensemble_GA import _assign_archetype, ARCHETYPE_ORDER, _competition_ranks
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 1.  compute_lofo_utility
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestLofoUtility(unittest.TestCase):
+
+    def test_marginal_equals_base_minus_reduced(self):
+        # Stub evaluate_fitness: fitness = sum of indices of detectors in subset.
+        # Detector 'A' contributes +1, 'B' +2, 'C' +3 → base = 6.
+        # Removing 'B' → reduced = {A,C} = 4 → marginal_B = 6 − 4 = 2.
+        values = {"A": 1.0, "B": 2.0, "C": 3.0}
+        def evaluate_fitness(subset):
+            return float(sum(values[d] for d in subset))
+        lofo = compute_lofo_utility(["A", "B", "C"], evaluate_fitness)
+        self.assertAlmostEqual(lofo["A"], 1.0)
+        self.assertAlmostEqual(lofo["B"], 2.0)
+        self.assertAlmostEqual(lofo["C"], 3.0)
+
+    def test_singleton_ensemble_returns_nan(self):
+        lofo = compute_lofo_utility(["A"], lambda s: 1.0)
+        self.assertTrue(np.isnan(lofo["A"]))
+
+    def test_empty_ensemble_returns_empty_dict(self):
+        self.assertEqual(compute_lofo_utility([], lambda s: 1.0), {})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 2.  compute_mean_marginal_contribution
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestMeanMarginalContribution(unittest.TestCase):
+
+    @staticmethod
+    def _ee(subsets):
+        """Build an evaluated_ensembles dict from {tuple: fitness} pairs.
+        Values are (f1, pr_auc, fitness, y_scores, y_true) — only [2] matters."""
+        return {tuple(sorted(k)): (0.0, 0.0, float(v), None, None)
+                for k, v in subsets.items()}
+
+    def test_difference_of_conditional_means(self):
+        # E[fit|A present] over subsets containing A: 0.8, 0.6 → 0.7
+        # E[fit|A absent]  over subsets without A : 0.2, 0.4 → 0.3
+        # → contribution = 0.4
+        ee = self._ee({
+            ("A", "B"): 0.8,
+            ("A", "C"): 0.6,
+            ("B", "C"): 0.2,
+            ("B",):     0.4,
+        })
+        mm = compute_mean_marginal_contribution(ee, ["A", "B", "C"])
+        self.assertAlmostEqual(mm["A"]["contribution"], 0.4)
+        self.assertAlmostEqual(mm["A"]["e_present"], 0.7)
+        self.assertAlmostEqual(mm["A"]["e_absent"], 0.3)
+        self.assertEqual(mm["A"]["n_present"], 2)
+        self.assertEqual(mm["A"]["n_absent"], 2)
+
+    def test_detector_in_every_subset_yields_nan(self):
+        # A appears in all evaluated subsets → no "absent" sample → NaN.
+        ee = self._ee({("A", "B"): 0.5, ("A", "C"): 0.7, ("A",): 0.3})
+        mm = compute_mean_marginal_contribution(ee, ["A", "B", "C"])
+        self.assertTrue(np.isnan(mm["A"]["contribution"]))
+        self.assertEqual(mm["A"]["n_absent"], 0)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3.  compute_interaction_matrix
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestFriedmanH(unittest.TestCase):
+    """Friedman H is verified by injecting a known surrogate F̂ (predict_fn), so
+    these tests are deterministic and need no real sklearn."""
+
+    # Reference set spanning both values of every variable over 3 detectors.
+    ALGOS = ["A", "B", "C"]
+
+    @staticmethod
+    def _ee_full():
+        # 6 distinct subsets so each detector appears both present and absent.
+        # Fitness values are placeholders — the injected predict_fn defines F̂.
+        keys = [("A", "B"), ("A", "C"), ("B", "C"),
+                ("A", "B", "C"), ("A",), ("B",)]
+        return {tuple(sorted(k)): (0.0, 0.0, 0.1 * i, None, None)
+                for i, k in enumerate(keys, 1)}
+
+    def test_additive_surrogate_has_zero_interaction(self):
+        # F̂(z) = 2*z_A + 3*z_B - 1*z_C  → purely additive → all H ≈ 0.
+        def predict_fn(Z):
+            return 2.0 * Z[:, 0] + 3.0 * Z[:, 1] - 1.0 * Z[:, 2]
+        fh = compute_friedman_h(self._ee_full(), self.ALGOS, predict_fn=predict_fn)
+        self.assertTrue(fh["feasible"])
+        for v in fh["H_two_way"].values():
+            self.assertAlmostEqual(v, 0.0, places=6)
+        for v in fh["H_total"].values():
+            self.assertAlmostEqual(v, 0.0, places=6)
+
+    def test_pure_interaction_surrogate(self):
+        # F̂(z) = z_A * z_B  → A,B interact; C is inert.
+        def predict_fn(Z):
+            return Z[:, 0] * Z[:, 1]
+        fh = compute_friedman_h(self._ee_full(), self.ALGOS, predict_fn=predict_fn)
+        self.assertTrue(fh["feasible"])
+        self.assertGreater(fh["H_two_way"][("A", "B")], 1e-6)
+        self.assertGreater(fh["H_total"]["A"], 1e-6)
+        self.assertGreater(fh["H_total"]["B"], 1e-6)
+        # C never enters F̂ → no interaction involving C.
+        self.assertAlmostEqual(fh["H_total"]["C"], 0.0, places=6)
+
+    def test_two_way_is_symmetric(self):
+        def predict_fn(Z):
+            return Z[:, 0] * Z[:, 1] + 0.5 * Z[:, 2]
+        fh = compute_friedman_h(self._ee_full(), self.ALGOS, predict_fn=predict_fn)
+        self.assertAlmostEqual(fh["H_two_way"][("A", "B")],
+                               fh["H_two_way"][("B", "A")])
+
+    def test_infeasible_with_too_few_subsets(self):
+        ee = {("A", "B"): (0.0, 0.0, 0.5, None, None)}   # only 1 subset
+        fh = compute_friedman_h(ee, self.ALGOS, predict_fn=lambda Z: Z[:, 0])
+        self.assertFalse(fh["feasible"])
+        for v in fh["H_total"].values():
+            self.assertTrue(np.isnan(v))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 4.  compute_survival_rates
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestSurvivalRates(unittest.TestCase):
+
+    def test_counts_and_division(self):
+        # Generation 1: 4 individuals; A in 3 of them → 0.75 (denom 4).
+        # Generation 2: A in 2 of 4 → 0.5.
+        gen_pops = [
+            [["A", "B"], ["A", "C"], ["A", "B", "C"], ["B"]],
+            [["A"],        ["B"],     ["A", "B"],      ["C"]],
+        ]
+        rates = compute_survival_rates(gen_pops, ["A", "B", "C"], 4)
+        self.assertEqual(rates["A"], [0.75, 0.5])
+        self.assertEqual(rates["B"], [0.75, 0.5])
+        self.assertEqual(rates["C"], [0.5,  0.25])
+
+    def test_handles_zero_population_size(self):
+        # Defensive: division-by-zero must not crash.
+        rates = compute_survival_rates([[["A"]]], ["A"], 0)
+        # Denom falls back to 1 internally; rate equals the raw count.
+        self.assertEqual(rates["A"], [1.0])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 5.  classify_detector_archetypes
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestArchetypes(unittest.TestCase):
+
+    @staticmethod
+    def _mm(contribs):
+        return {d: {'contribution': v, 'e_present': float('nan'),
+                    'e_absent': float('nan'), 'n_present': 0, 'n_absent': 0}
+                for d, v in contribs.items()}
+
+    @staticmethod
+    def _fh(htotals, feasible=True):
+        return {"H_total": htotals, "H_two_way": {}, "feasible": feasible}
+
+    def test_all_eight_cells_unique(self):
+        # Every (U, C, S) high/low cell maps to its own 3-letter H/L code.
+        from itertools import product
+        codes = {(u, c, s): _assign_archetype(u, c, s, util_nan=False)
+                 for u, c, s in product([True, False], repeat=3)}
+        self.assertEqual(len(set(codes.values())), 8)          # 8 cells, 8 codes
+        # Codes are the (U,C,S) levels as H/L.
+        self.assertEqual(codes[(True, True, True)], "HHH")
+        self.assertEqual(codes[(False, True, True)], "LHH")
+        self.assertEqual(codes[(True, False, True)], "HLH")
+        self.assertEqual(codes[(False, False, False)], "LLL")
+        # NaN utility short-circuits to Unclassified.
+        self.assertEqual(_assign_archetype(True, True, True, util_nan=True), "Unclassified")
+        # ARCHETYPE_ORDER = the 8 codes + Unclassified, no duplicates.
+        self.assertEqual(len(ARCHETYPE_ORDER), 9)
+        self.assertEqual(len(set(ARCHETYPE_ORDER)), 9)
+        self.assertEqual(set(codes.values()), set(ARCHETYPE_ORDER) - {"Unclassified"})
+
+    def test_core_support_marginal(self):
+        # Absolute scheme has independent cutoffs (util>0, H>0.1, surv>0.5), so the
+        # three target cells can be realised simultaneously.
+        algos = ["A", "B", "C"]
+        mm = self._mm({"A": 0.5, "B": -0.1, "C": -0.2})
+        fh = self._fh({"A": 0.5, "B": 0.9, "C": 0.05})
+        surv = {"A": [0.6, 0.7, 0.8], "B": [0.6, 0.7, 0.8], "C": [0.1, 0.1, 0.1]}
+        arch = classify_detector_archetypes(mm, fh, surv, algos)
+        # A = (H,H,H) → HHH ; B = (L,H,H) → LHH ; C = (L,L,L) → LLL.
+        self.assertEqual(arch["A"]["absolute"]["archetype"], "HHH")
+        self.assertEqual(arch["B"]["absolute"]["archetype"], "LHH")
+        self.assertEqual(arch["C"]["absolute"]["archetype"], "LLL")
+
+    def test_stability_uses_mean_only_not_trend(self):
+        # High mean survival (0.6 > 0.5) but DECLINING trend — stability depends
+        # only on the mean now, so s_high is True despite the downward trend.
+        algos = ["D"]
+        mm = self._mm({"D": 0.5})       # util > 0  → H
+        fh = self._fh({"D": 0.05})      # H_j < 0.1 → L
+        surv = {"D": [0.9, 0.6, 0.3]}   # mean 0.6 > 0.5 → S high; trend −0.6
+        arch = classify_detector_archetypes(mm, fh, surv, algos)
+        self.assertTrue(arch["D"]["absolute"]["s_high"])
+        # (H, L, H) → HLH; trend still reported for context.
+        self.assertEqual(arch["D"]["absolute"]["archetype"], "HLH")
+        self.assertAlmostEqual(arch["D"]["stability_trend"], -0.6)
+
+    def test_unclassified_on_nan_utility(self):
+        algos = ["A", "B"]
+        mm = self._mm({"A": float("nan"), "B": 0.3})
+        fh = self._fh({"A": 0.5, "B": 0.5})
+        surv = {"A": [0.8, 0.8], "B": [0.8, 0.8]}
+        arch = classify_detector_archetypes(mm, fh, surv, algos)
+        self.assertEqual(arch["A"]["relative"]["archetype"], "Unclassified")
+        self.assertEqual(arch["A"]["absolute"]["archetype"], "Unclassified")
+
+    def test_relative_and_absolute_can_differ(self):
+        # All utilities positive (absolute → high) but one below the median
+        # (relative → low) → the two schemes disagree for at least one detector.
+        algos = ["A", "B", "C"]
+        mm = self._mm({"A": 0.2, "B": 0.3, "C": 0.4})
+        fh = self._fh({"A": 0.05, "B": 0.05, "C": 0.05})
+        surv = {"A": [0.1, 0.1, 0.1], "B": [0.1, 0.1, 0.1], "C": [0.1, 0.1, 0.1]}
+        arch = classify_detector_archetypes(mm, fh, surv, algos)
+        differ = any(arch[d]["relative"]["archetype"] != arch[d]["absolute"]["archetype"]
+                     for d in algos)
+        self.assertTrue(differ)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 6.  Combination layer — SHAP + PFI + Borda
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestCombination(unittest.TestCase):
+
+    def test_shap_linear_tracks_weights(self):
+        # Meta-learner f(z) = 2*z0 + 3*z1 + 0*z2. With a mean baseline and feature
+        # spreads equalised, mean|SHAP| ratio ≈ |weight|.  → SHAP[f1] > SHAP[f0] > SHAP[f2].
+        feats = ["f0", "f1", "f2"]
+        rng = np.random.RandomState(0)
+        X = rng.rand(200, 3)
+        baseline = X.mean(axis=0)
+        def predict_fn(Z):
+            return 2.0 * Z[:, 0] + 3.0 * Z[:, 1] + 0.0 * Z[:, 2]
+        shap = compute_meta_shap(predict_fn, X, baseline, feats)
+        self.assertGreater(shap["f1"], shap["f0"])
+        self.assertGreater(shap["f0"], shap["f2"])
+        self.assertAlmostEqual(shap["f2"], 0.0, places=6)
+
+    def test_shap_single_feature_carries_all(self):
+        feats = ["only"]
+        X = np.array([[1.0], [0.0], [0.5]])
+        baseline = X.mean(axis=0)
+        shap = compute_meta_shap(lambda Z: Z[:, 0] * 2.0, X, baseline, feats)
+        self.assertGreater(shap["only"], 0.0)
+
+    def test_shap_signed_reflects_direction(self):
+        # f(z) = z_pos − z_neg with a zero baseline and positive inputs ⇒ phi_pos > 0,
+        # phi_neg < 0 every row. mode="signed" keeps the direction; mode="abs" doesn't.
+        feats = ["pos", "neg"]
+        X = np.random.RandomState(0).rand(200, 2)   # all entries in [0, 1]
+        baseline = np.zeros(2)
+        predict_fn = lambda Z: Z[:, 0] - Z[:, 1]
+        signed = compute_meta_shap(predict_fn, X, baseline, feats, mode="signed")
+        abs_ = compute_meta_shap(predict_fn, X, baseline, feats, mode="abs")
+        self.assertGreater(signed["pos"], 0.0)
+        self.assertLess(signed["neg"], 0.0)
+        # abs magnitude is positive for the negative-direction feature too.
+        self.assertGreater(abs_["neg"], 0.0)
+
+    def test_pfi_informative_vs_noise(self):
+        # f uses only column 0; y derived from column 0. Permuting col 0 hurts the
+        # score; permuting the noise col 1 does not.
+        feats = ["info", "noise"]
+        rng = np.random.RandomState(1)
+        X = rng.rand(300, 2)
+        y = (X[:, 0] >= 0.5).astype(int)
+        def predict_fn(Z):
+            return Z[:, 0]
+        def acc(yy, ss):
+            return float(np.mean((ss >= 0.5).astype(int) == yy))
+        pfi = compute_meta_pfi(predict_fn, X, y, feats, score_fn=acc,
+                               n_repeats=5, random_state=0)
+        self.assertGreater(pfi["info"], 0.1)
+        self.assertLess(abs(pfi["noise"]), 0.05)
+
+    def test_borda_aggregates_two_rankings(self):
+        feats = ["A", "B", "C"]
+        shap = {"A": 0.9, "B": 0.5, "C": 0.1}   # A > B > C
+        pfi = {"A": 0.8, "B": 0.1, "C": 0.4}    # A > C > B
+        borda, final = borda_aggregate_importances({"SHAP": shap, "PFI": pfi}, feats)
+        self.assertEqual(final[0], "A")          # wins both → top
+        # A: (2)+(2)=4 ; B: (1)+(0)=1 ; C: (0)+(1)=1
+        self.assertAlmostEqual(borda["A"], 4.0)
+        self.assertAlmostEqual(borda["B"], 1.0)
+        self.assertAlmostEqual(borda["C"], 1.0)
+
+    def test_competition_ranks_share_rank_on_ties(self):
+        # B and C tie (1 pt each), D and E tie (3 pts each).
+        points = {"A": 6.0, "B": 4.0, "C": 4.0, "D": 3.0, "E": 3.0}
+        order = ["A", "B", "C", "D", "E"]          # points-descending
+        ranks = _competition_ranks(points, order)
+        self.assertEqual(ranks["A"], 1)
+        self.assertEqual(ranks["B"], 2)
+        self.assertEqual(ranks["C"], 2)            # tied with B → same rank
+        self.assertEqual(ranks["D"], 4)            # skips 3 (competition style)
+        self.assertEqual(ranks["E"], 4)
+
+    def test_fitness_function_returns_meta_model(self):
+        # Step 0: fitness_function appends the trained meta-model as a 6th element,
+        # while the first five indices stay unchanged (callers index [0..4]).
+        import Metrics.Ensemble_GA as GA
+
+        class _FakeModel:
+            def predict_proba(self, Z):
+                n = len(Z)
+                return np.column_stack([np.zeros(n), np.full(n, 0.6)])
+
+        orig = GA.train_meta_model_rf
+        GA.train_meta_model_rf = lambda X, y: _FakeModel()
+        try:
+            algos = ["A", "B", "C"]
+            rng = np.random.RandomState(0)
+            Xtr, Xte = rng.rand(20, 3), rng.rand(15, 3)
+            ytr = (rng.rand(20) >= 0.5).astype(int)
+            yte = (rng.rand(15) >= 0.5).astype(int)
+            res = GA.fitness_function(["A", "C"], None, None, None, None,
+                                      Xtr, algos, Xte, ytr, yte, meta_model_type="rf")
+            self.assertEqual(len(res), 6)
+            self.assertIsInstance(res[5], _FakeModel)
+        finally:
+            GA.train_meta_model_rf = orig
+
+    def test_explain_combination_writes_outputs(self):
+        algorithm_list = ["A", "B", "C"]
+        best_ensemble = ["A", "C"]               # features = [A, C] (algorithm_list order)
+        rng = np.random.RandomState(0)
+        Xtr = rng.rand(50, 3)
+        Xte = rng.rand(40, 3)
+        ytr = (Xtr[:, 0] >= 0.5).astype(int)
+        yte = (Xte[:, 0] >= 0.5).astype(int)
+        # Injected predict_fn over the FILTERED (2-column) space: relies on A only.
+        def predict_fn(Z):
+            return Z[:, 0]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                result = explain_ga_combination(
+                    best_ensemble, algorithm_list, Xtr, Xte, ytr, yte,
+                    meta_model_type="rf", dataset="TEST", entity="e1",
+                    predict_fn=predict_fn,
+                )
+                self.assertIsInstance(result, dict)
+                for key in ("feature_names", "shap_importance", "shap_signed_importance",
+                            "pfi_importance", "borda_points", "final_ranking",
+                            "baseline_f1", "model_source"):
+                    self.assertIn(key, result)
+                self.assertEqual(result["feature_names"], ["A", "C"])
+                self.assertEqual(sorted(result["final_ranking"]), ["A", "C"])
+                out = os.path.join("myresults", "GA_Ens", "TEST", "e1")
+                self.assertTrue(os.path.exists(os.path.join(
+                    out, "ga_combination_explainability_TEST_e1.txt")))
+                self.assertTrue(os.path.exists(os.path.join(
+                    out, "ga_combination_importance_TEST_e1.png")))
+            finally:
+                os.chdir(cwd)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7.  explain_ga_selection — integration smoke test
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestExplainGASelection(unittest.TestCase):
+
+    def test_writes_report_and_three_plots(self):
+        algorithm_list = ["A", "B", "C"]
+        best_ensemble = ["A", "B"]
+        ee = {tuple(sorted(k)): (0.0, 0.0, float(v), None, None) for k, v in {
+            ("A", "B"):     0.8,
+            ("A", "C"):     0.5,
+            ("B", "C"):     0.4,
+            ("A", "B", "C"): 0.7,
+            ("A",):          0.3,
+            ("B",):          0.4,
+            ("C",):          0.2,
+        }.items()}
+        gen_pops = [
+            [["A", "B"], ["A", "C"], ["B", "C"], ["A", "B", "C"]],
+            [["A", "B"], ["A", "B"], ["B", "C"], ["A", "B", "C"]],
+        ]
+        # Fitness closure for LOFO — uses the evaluated_ensembles when cached
+        # and a simple stub otherwise (test triggers paths for both).
+        def evaluate_fitness(subset):
+            key = tuple(sorted(subset))
+            if key in ee:
+                return ee[key][2]
+            return 0.6  # fresh subsets get a fixed stub value
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                result = explain_ga_selection(
+                    best_ensemble, ee, gen_pops, algorithm_list,
+                    population_size=4,
+                    evaluate_fitness=evaluate_fitness,
+                    dataset="TEST", entity="e1",
+                )
+                self.assertIsInstance(result, dict)
+                for key in ("best_ensemble", "lofo", "mean_marginal",
+                            "friedman_h", "H_two_way", "H_total", "survival",
+                            "archetypes", "n_subsets_evaluated", "n_generations"):
+                    self.assertIn(key, result)
+                # Old interaction keys must be gone.
+                self.assertNotIn("interaction", result)
+                self.assertNotIn("e_single", result)
+
+                out = os.path.join("myresults", "GA_Ens", "TEST", "e1")
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_explainability_TEST_e1.txt")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_utility_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_interaction_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_total_interaction_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_survival_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_survival_all_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_archetypes_TEST_e1.png")))
+            finally:
+                os.chdir(cwd)
+
+    def test_explain_false_is_noop(self):
+        result = explain_ga_selection(
+            ["A", "B"], {}, [], ["A", "B"],
+            population_size=2,
+            evaluate_fitness=lambda s: 0.5,
+            dataset="X", entity="Y",
+            explain=False,
+        )
+        self.assertIsNone(result)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

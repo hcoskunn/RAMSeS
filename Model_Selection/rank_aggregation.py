@@ -699,6 +699,136 @@ def plot_aggregation_explainability(
     plt.close()
 
 
+def plot_kendall_only_alignment(
+    source_names: List[str],
+    align_scores: Dict[str, float],
+    winner: str,
+    stage_name: str,
+    dataset: str,
+    entity: str,
+    iteration: int,
+) -> None:
+    """
+    Bar chart of Kendall's τ between each of the two sources and the final
+    ranking. The more-aligned source (the winner) is highlighted in green.
+
+    Saves to:
+        myresults/robust_aggregated/{dataset}/{entity}/aggregation_explainability_{stage_name}_kendall_only_{iteration}.png
+    """
+    plt.rcParams.update({
+        "font.family": "serif",
+        "axes.labelsize": 12,
+        "axes.titlesize": 13,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+    })
+    x = np.arange(len(source_names))
+    vals = [align_scores[s] for s in source_names]
+    colours = ["#2ca02c" if s == winner else "#1f77b4" for s in source_names]
+
+    fig, ax = plt.subplots(figsize=(6, 4.5))
+    bars = ax.bar(x, vals, width=0.5, color=colours)
+    for bar, v in zip(bars, vals):
+        ax.text(bar.get_x() + bar.get_width() / 2, v, f"{v:+.3f}",
+                ha="center", va="bottom" if v >= 0 else "top", fontsize=10)
+    ax.axhline(0, color="black", linewidth=0.6)
+    ax.set_xticks(x)
+    ax.set_xticklabels(source_names, rotation=15, ha="right")
+    ax.set_ylabel("Kendall's tau with final ranking")
+    ax.set_ylim(-1.05, 1.05)
+    ax.set_title(f"Kendall-tau-Only Alignment — {stage_name} stage")
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+
+    plt.tight_layout(pad=1.2)
+    directory = f"myresults/robust_aggregated/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(
+        f"{directory}/aggregation_explainability_{stage_name}_kendall_only_{iteration}.png",
+        format="png", dpi=300, bbox_inches="tight",
+    )
+    plt.close()
+
+
+def explain_rank_aggregation_kendall_only(
+    rankings: List[List[str]],
+    source_names: List[str],
+    full_ranking: List[str],
+    stage_name: str,
+    dataset: str,
+    entity: str,
+    iteration: int,
+) -> Optional[Dict[str, Any]]:
+    """
+    Kendall-tau-only explainability for a TWO-source aggregation.
+
+    When exactly two ranking lists feed an aggregation (as in the final stage,
+    Robust_Aggregated + Thompson_Sampling), leave-one-out and Borda voting become
+    degenerate — removing one source simply leaves the other untouched. A direct
+    Kendall's tau comparison is the cleaner diagnostic: whichever source has the
+    higher tau with the final ranking is the one the consensus leans toward.
+
+    This is an alternative to (not a replacement for) explain_rank_aggregation —
+    both sets of outputs are produced so the two methods can be compared.
+
+    Produces (only when len(rankings) == 2):
+        aggregation_explainability_{stage_name}_kendall_only_{iteration}.txt
+        aggregation_explainability_{stage_name}_kendall_only_{iteration}.png
+
+    Returns None when the source count is not 2; otherwise a dict with the tau
+    values and the verdict.
+    """
+    if len(rankings) != 2 or len(source_names) != 2:
+        return None
+
+    align = kendall_tau_alignments(rankings, source_names, full_ranking)
+    ranked = sorted(align.items(), key=lambda x: x[1], reverse=True)
+    winner, winner_tau = ranked[0]
+    runner, runner_tau = ranked[1]
+    gap = winner_tau - runner_tau
+
+    plot_kendall_only_alignment(source_names, align, winner,
+                                stage_name, dataset, entity, iteration)
+
+    directory = f"myresults/robust_aggregated/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    report_path = os.path.join(
+        directory,
+        f"aggregation_explainability_{stage_name}_kendall_only_{iteration}.txt",
+    )
+    with open(report_path, "w") as f:
+        f.write(f"=== Rank Aggregation Explainability (Kendall-tau-only method) "
+                f"— {stage_name} stage ===\n")
+        f.write(f"Dataset: {dataset}  |  Entity: {entity}  |  Iteration: {iteration}\n")
+        f.write(f"Sources (n=2): {', '.join(source_names)}\n")
+        f.write(f"Final ranking: {full_ranking}\n\n")
+        f.write("This method applies only when exactly two ranking lists feed the\n")
+        f.write("aggregation. With two sources, leave-one-out and Borda voting are\n")
+        f.write("degenerate (removing one source leaves the other unchanged), so a\n")
+        f.write("direct Kendall's tau comparison is the cleaner diagnostic.\n\n")
+
+        f.write("--- Kendall's tau Alignment with the Final Ranking ---\n")
+        f.write(f"  {'Source':<22} {'Kendall tau':>12}\n")
+        f.write("  " + "-" * 35 + "\n")
+        for name in source_names:
+            f.write(f"  {name:<22} {align[name]:>+12.4f}\n")
+
+        f.write("\n--- Verdict ---\n")
+        f.write(f"The final ranking is most aligned with: {winner} "
+                f"(tau = {winner_tau:+.4f}).\n")
+        f.write(f"{runner} is less aligned (tau = {runner_tau:+.4f}).\n")
+        f.write(f"Alignment gap: {gap:.4f}.\n")
+
+    return {
+        "align_scores": align,
+        "winner": winner,
+        "winner_tau": winner_tau,
+        "runner_up": runner,
+        "runner_up_tau": runner_tau,
+        "alignment_gap": gap,
+    }
+
+
 def explain_rank_aggregation(
     rankings: List[List[str]],
     source_names: List[str],
@@ -717,6 +847,11 @@ def explain_rank_aggregation(
     Files:
         aggregation_explainability_{stage_name}_{iteration}.txt
         aggregation_explainability_{stage_name}_{iteration}.png
+
+    When exactly two ranking lists feed the aggregation (the final stage), an
+    additional Kendall-τ-only analysis is produced as well — see
+    explain_rank_aggregation_kendall_only — so both methods are visible side by
+    side. The two extra files carry a _kendall_only suffix.
 
     Returns the dict of computed scores + verdicts when explain=True; None otherwise.
     """
@@ -793,12 +928,20 @@ def explain_rank_aggregation(
                     f" (count {v['borda_count']:.2f})\n"
                 )
 
+    # For a two-source aggregation, also run the Kendall-τ-only method so both
+    # diagnostics are visible side by side.
+    kendall_only = None
+    if len(rankings) == 2:
+        kendall_only = explain_rank_aggregation_kendall_only(
+            rankings, source_names, full_ranking, stage_name, dataset, entity, iteration)
+
     return {
         "loo_scores": loo,
         "align_scores": align,
         "borda_counts": borda_counts,
         "verdicts": verdicts,
         "prominent_contradictions": prominent,
+        "kendall_only": kendall_only,
     }
 
 

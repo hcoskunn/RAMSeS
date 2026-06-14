@@ -51,6 +51,7 @@ from rank_aggregation import (
     borda_verdict_per_source,
     prominent_contradictions,
     explain_rank_aggregation,
+    explain_rank_aggregation_kendall_only,
 )
 
 
@@ -285,8 +286,10 @@ class TestExplainRankAggregationIntegration(unittest.TestCase):
                 )
                 self.assertIsInstance(result, dict)
                 for key in ("loo_scores", "align_scores", "borda_counts",
-                            "verdicts", "prominent_contradictions"):
+                            "verdicts", "prominent_contradictions", "kendall_only"):
                     self.assertIn(key, result)
+                # 3 sources → the Kendall-only method does not apply.
+                self.assertIsNone(result["kendall_only"])
 
                 out_dir = os.path.join("myresults", "robust_aggregated", "TEST", "e1")
                 self.assertTrue(os.path.exists(
@@ -306,6 +309,77 @@ class TestExplainRankAggregationIntegration(unittest.TestCase):
             explain=False,
         )
         self.assertIsNone(result)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 8.  explain_rank_aggregation_kendall_only  (two-source method)
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestKendallOnly(unittest.TestCase):
+
+    def test_returns_none_when_not_two_sources(self):
+        for n in (1, 3):
+            result = explain_rank_aggregation_kendall_only(
+                rankings=[["A", "B"]] * n,
+                source_names=[f"s{i}" for i in range(n)],
+                full_ranking=["A", "B"],
+                stage_name="final", dataset="X", entity="Y", iteration=0,
+            )
+            self.assertIsNone(result)
+
+    def test_winner_is_source_with_higher_tau(self):
+        # final == source A exactly → tau(A,final)=+1; B reversed → tau(B,final)=-1
+        full = ["A", "B", "C", "D"]
+        sources = [["A", "B", "C", "D"], ["D", "C", "B", "A"]]
+        names = ["aligned", "reversed"]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                result = explain_rank_aggregation_kendall_only(
+                    sources, names, full, "final", "TEST", "e1", 5)
+            finally:
+                os.chdir(cwd)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["winner"], "aligned")
+        self.assertAlmostEqual(result["winner_tau"], 1.0)
+        self.assertEqual(result["runner_up"], "reversed")
+        self.assertAlmostEqual(result["runner_up_tau"], -1.0)
+        self.assertAlmostEqual(result["alignment_gap"], 2.0)
+
+    def test_writes_report_and_plot(self):
+        full = ["A", "B", "C"]
+        sources = [["A", "B", "C"], ["B", "A", "C"]]
+        names = ["robust_agg", "thompson"]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                explain_rank_aggregation_kendall_only(
+                    sources, names, full, "final", "TEST", "e1", 5)
+                out_dir = os.path.join("myresults", "robust_aggregated", "TEST", "e1")
+                self.assertTrue(os.path.exists(os.path.join(
+                    out_dir, "aggregation_explainability_final_kendall_only_5.txt")))
+                self.assertTrue(os.path.exists(os.path.join(
+                    out_dir, "aggregation_explainability_final_kendall_only_5.png")))
+            finally:
+                os.chdir(cwd)
+
+    def test_explain_rank_aggregation_triggers_kendall_only_for_two_sources(self):
+        full = ["A", "B", "C"]
+        sources = [["A", "B", "C"], ["C", "B", "A"]]
+        names = ["robust_agg", "thompson"]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cwd = os.getcwd()
+            os.chdir(tmpdir)
+            try:
+                result = explain_rank_aggregation(
+                    sources, names, full, "final", "TEST", "e1", 5)
+            finally:
+                os.chdir(cwd)
+        # 2 sources → the nested kendall_only result is populated.
+        self.assertIsNotNone(result["kendall_only"])
+        self.assertIn("winner", result["kendall_only"])
 
 
 # ════════════════════════════════════════════════════════════════════════════

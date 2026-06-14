@@ -45,6 +45,7 @@ from Thompson_Sampling import (
     classify_selection,
     compute_shap_values,
     aggregate_shap_per_channel,
+    reconstruct_regime_segments,
 )
 
 
@@ -536,6 +537,48 @@ class TestSHAP(unittest.TestCase):
         per_channel = aggregate_shap_per_channel(shap, n_channels=2)
         # window_size = 5 // 2 = 2; uses shap[:4] = [1, 2, 3, 4] → [3, 7]
         np.testing.assert_array_almost_equal(per_channel, [3.0, 7.0])
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 11.  reconstruct_regime_segments
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestReconstructRegimeSegments(unittest.TestCase):
+
+    def test_no_shifts_single_segment(self):
+        segs = reconstruct_regime_segments([], T=20, fallback_model="LOF_1")
+        self.assertEqual(segs, [(0, 19, "LOF_1", 20)])
+
+    def test_empty_when_T_zero(self):
+        self.assertEqual(reconstruct_regime_segments([], T=0), [])
+
+    def test_segments_match_shift_events(self):
+        """Shifts at windows 2, 17, 35 over T=50 → four contiguous regimes."""
+        shifts = [
+            {"window": 2,  "from_model": "LOF_4", "to_model": "NN_3"},
+            {"window": 17, "from_model": "NN_3",  "to_model": "NN_1"},
+            {"window": 35, "from_model": "NN_1",  "to_model": "NN_3"},
+        ]
+        segs = reconstruct_regime_segments(shifts, T=50)
+        self.assertEqual(segs, [
+            (0,  1,  "LOF_4", 2),
+            (2,  16, "NN_3",  15),
+            (17, 34, "NN_1",  18),
+            (35, 49, "NN_3",  15),
+        ])
+
+    def test_segments_are_contiguous_and_cover_all_windows(self):
+        shifts = [
+            {"window": 5,  "from_model": "A", "to_model": "B"},
+            {"window": 12, "from_model": "B", "to_model": "C"},
+        ]
+        T = 30
+        segs = reconstruct_regime_segments(shifts, T=T)
+        self.assertEqual(segs[0][0], 0)
+        self.assertEqual(segs[-1][1], T - 1)
+        for earlier, later in zip(segs, segs[1:]):
+            self.assertEqual(earlier[1] + 1, later[0])
+        self.assertEqual(sum(d for _, _, _, d in segs), T)
 
 
 # ════════════════════════════════════════════════════════════════════════════

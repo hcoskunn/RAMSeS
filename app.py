@@ -348,7 +348,7 @@ def load_trained_models(model_names, models_dir):
 # Model-Selection Pipelines
 # ------------------------------------------------------------------------------
 
-def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False):
+def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False, explain=True):
     """
     One-pass model selection pipeline in the order:
       1) GA (stacking ensemble search)
@@ -406,6 +406,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         models_to_use, trained_models,
         population_size=20, generations=20,
         meta_model_type='rf', mutation_rate=0.1,
+        explain=explain,
     )
     timing_dict['1_Genetic_Algorithm'] = time.time() - start_time
     mem_after = get_memory_usage_mb()
@@ -433,7 +434,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         entity=entity,
         iterations=50,
         iteration=iteration,
-        explain=True,
+        explain=explain,
     )
     timing_dict['2_Thompson_Sampling'] = time.time() - start_time
     mem_after = get_memory_usage_mb()
@@ -514,7 +515,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     test_data_for_mc = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
     monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
         test_data_for_mc, trained_models, algorithm_list_instances, dataset, entity,
-        n_simulations=2, noise_level=0.1,
+        n_simulations=2, noise_level=0.1, explain=explain,
     )
     timing_dict['5_Monte_Carlo'] = time.time() - start_time
     mem_after = get_memory_usage_mb()
@@ -547,7 +548,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                       "MonteCarlo_F1", "MonteCarlo_PR_AUC"],
         full_ranking=robust_agg[1],
         stage_name="robust",
-        dataset=dataset, entity=entity, iteration=iteration,
+        dataset=dataset, entity=entity, iteration=iteration, explain=explain,
     )
 
     # Final merge of robust aggregation vs Thompson Sampling
@@ -558,7 +559,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         source_names=["Robust_Aggregated", "Thompson_Sampling"],
         full_ranking=full_aggregated[1],
         stage_name="final",
-        dataset=dataset, entity=entity, iteration=iteration,
+        dataset=dataset, entity=entity, iteration=iteration, explain=explain,
     )
     timing_dict['6_Rank_Aggregation'] = time.time() - start_time
     mem_after = get_memory_usage_mb()
@@ -644,7 +645,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     )
 
 
-def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False):
+def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False, explain=True):
     """
     PARALLEL VERSION: Runs model selection algorithms concurrently using ThreadPoolExecutor.
     
@@ -706,7 +707,8 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             genetic_algorithm,
             dataset, entity, train_data, test_data_ga,
             models_to_use, trained_models,
-            20, 20, 'rf', 0.1
+            population_size=20, generations=20, meta_model_type='rf', mutation_rate=0.1,
+            explain=explain
         )
         thompson_future = executor.submit(
             run_linear_thompson_sampling,
@@ -717,6 +719,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             entity=entity,
             iterations=50,
             iteration=iteration,
+            explain=explain,
         )
         
         if not skip_gan:
@@ -734,7 +737,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         monte_carlo_future = executor.submit(
             run_monte_carlo_simulation,
             test_data_montecarlo, trained_models, models_to_use,
-            dataset, entity, 2, 0.1
+            dataset, entity, 2, 0.1, explain=explain
         )
 
         # Collect results
@@ -822,7 +825,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
                       "MonteCarlo_F1", "MonteCarlo_PR_AUC"],
         full_ranking=robust_agg[1],
         stage_name="robust",
-        dataset=dataset, entity=entity, iteration=iteration,
+        dataset=dataset, entity=entity, iteration=iteration, explain=explain,
     )
     full_ = [robust_agg[1], thompson_model_names]
     full_aggregated = enhanced_markov_chain_rank_aggregator_text(full_)
@@ -831,7 +834,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         source_names=["Robust_Aggregated", "Thompson_Sampling"],
         full_ranking=full_aggregated[1],
         stage_name="final",
-        dataset=dataset, entity=entity, iteration=iteration,
+        dataset=dataset, entity=entity, iteration=iteration, explain=explain,
     )
     timing_dict['6_Aggregation'] = time.time() - agg_start
     mem_after_agg = get_memory_usage_mb()
@@ -1082,16 +1085,16 @@ def perform_reoptimization_task(
         (best_thompson, robust_agg, full_aggregated, best_ensemble,
          individual_predictions_new, base_model_predictions_train_new, base_model_predictions_test_new,
          y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_2(
-            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx, 
-            trained_models=trained_models, model_list=loaded_model_names, 
-            test_data_gan=test_data_before, skip_gan=True
+            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
+            trained_models=trained_models, model_list=loaded_model_names,
+            test_data_gan=test_data_before, skip_gan=True, explain=explain
         )
     else:
         (best_thompson, robust_agg, full_aggregated, best_ensemble,
          individual_predictions_new, base_model_predictions_train_new, base_model_predictions_test_new,
          y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_1(
-            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx, 
-            model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True
+            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
+            model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True, explain=explain
         )
     
     candidate_best_ensemble = best_ensemble.copy()
@@ -1120,6 +1123,7 @@ def run_app(algorithm_list, algorithm_list_instances):
     strategy = args.get('strategy', 'adaptive')  # adaptive, fixed-best, or fixed-random
     inject_online_regime = args.get('inject_online_regime', False)  # Regime shifts on online data only
     max_online_windows = args.get('max_online_windows', None)  # Limit online windows (None = no limit)
+    explain = args.get('explain', True)  # Explainability ON by default; --no_explain disables it
     
     data_dir = args['dataset_path']
     
@@ -1299,15 +1303,17 @@ def run_app(algorithm_list, algorithm_list_instances):
             (best_thompson, robust_agg, full_aggregated, best_ensemble,
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_2(
-                train_data, test_data_new, dataset, entity, iteration=0, 
-                trained_models=trained_models, model_list=loaded_model_names, test_data_gan=test_data_before
+                train_data, test_data_new, dataset, entity, iteration=0,
+                trained_models=trained_models, model_list=loaded_model_names,
+                test_data_gan=test_data_before, explain=explain
             )
         else:
             logger.info("  ⏱ Starting model selection pipeline (SEQUENTIAL mode)...")
             (best_thompson, robust_agg, full_aggregated, best_ensemble,
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
-                train_data, test_data_new, dataset, entity, iteration=0, model_list=loaded_model_names, test_data_gan=test_data_before
+                train_data, test_data_new, dataset, entity, iteration=0,
+                model_list=loaded_model_names, test_data_gan=test_data_before, explain=explain
             )
         
         # Calculate end-to-end time

@@ -1,6 +1,7 @@
 import os
 import random
 from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -277,7 +278,9 @@ def fitness_function(ensemble, train_data, test_data, trained_models,
         meta_model_type (str): Type of meta-model to use ('lr', 'rf', 'gbm', 'svm').
 
     Returns:
-        tuple: Best F1 score, PR AUC, and fitness score.
+        tuple: (best_f1, pr_auc, fitness, y_scores, y_true_test, meta_model).
+        The trained meta_model is included so downstream explainability can
+        attribute the exact meta-learner without retraining.
     """
     logger.info(f"Evaluating fitness for ensemble: {ensemble}")
 
@@ -368,7 +371,10 @@ def fitness_function(ensemble, train_data, test_data, trained_models,
     fitness = best_f1
     logger.info(
         f"Evaluated fitness for ensemble {ensemble} with F1 score {best_f1} and PR AUC {pr_auc}, resulting in fitness {fitness}")
-    return best_f1, pr_auc, fitness, y_scores, y_true_test
+    # The trained meta-model is appended (6th element) so the combination-
+    # explainability layer can attribute the EXACT meta-learner the GA built,
+    # rather than retraining one. Existing callers index [0..4] and are unaffected.
+    return best_f1, pr_auc, fitness, y_scores, y_true_test, meta_model
 
 
 def selection(population, fitness_scores, num_selected):
@@ -598,7 +604,7 @@ def plot_models_scores(algorithm_list, test_data, y_scores_list, dataset, entity
 
 
 def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, trained_models, meta_model_type,
-                      population_size, generations, mutation_rate):
+                      population_size, generations, mutation_rate, explain: bool = True):
     """
     Run the genetic algorithm to find the best ensemble of models.
 
@@ -651,11 +657,17 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     best_pr_auc = 0
     best_fitness = 0
     best_ensemble = None
+    best_meta_model = None   # the trained meta-model of the best ensemble (for combination explainability)
     adjusted_y_pred_list = []
     F1_Score_list = []
     list_ensemble = []
     PR_AUC_Score_list = []
     fitness_list = []
+    # Per-generation populations — used by the selection-explainability layer
+    # (Axis 3: evolutionary survival rate). Snapshotted at the top of each loop
+    # iteration, before fitness evaluation, so it reflects the population OF
+    # that generation rather than the next one's offspring.
+    generation_populations: List[List[List[str]]] = []
     
     # Prepare training data for meta-model
     logger.info(f"  → Evaluating all {len(algorithm_list)} models on TRAINING data (for meta-model training)...")
@@ -687,6 +699,9 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     for generation in range(generations):
         logger.info(f"Generation {generation + 1}")
         print(f"Generation {generation + 1}")
+
+        if explain:
+            generation_populations.append([list(ind) for ind in population if ind is not None])
 
         fitness_results = []
         for ensemble in population:
@@ -729,7 +744,7 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
             child = mutate(child, mutation_rate, algorithm_list)
             new_population.append(child)
 
-        population = new_population
+        
 
         best_idx = np.argmax(fitness_scores)
         if fitness_scores[best_idx] > best_fitness:
@@ -737,6 +752,11 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
             best_pr_auc = pr_aucs[best_idx]
             best_fitness = fitness_scores[best_idx]
             best_ensemble = population[best_idx]
+            # Capture the meta-model that achieved this best fitness (index 5 of the
+            # fitness tuple) for the combination-explainability layer. Aligned with
+            # f1_scores / fitness_scores, which are all derived from fitness_results.
+            best_meta_model = fitness_results[best_idx][5]
+        population = new_population
 
         logger.info(f"End of Generation {generation + 1}, Population: {population}")
         print(f"End of Generation {generation + 1}, Population: {population}")
@@ -828,6 +848,28 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     #    for ensemble, result in sorted_ensembles:
      #       f.write(f"Ensemble: {list(ensemble)}, f1 : {result[0]}, PR_AUC: {result[1]}, Fitness Score: {result[2]}\n")
 
+    if explain and best_ensemble:
+        def _evaluate_fitness(subset):
+            key = tuple(sorted(subset))
+            if key in evaluated_ensembles:
+                return evaluated_ensembles[key][2]
+            res = fitness_function(list(subset), train_data, test_data, trained_models,
+                                   individual_predictions, base_model_predictions_train,
+                                   algorithm_list, base_model_predictions_test,
+                                   y_true_train, y_true_test,
+                                   meta_model_type=meta_model_type)
+            evaluated_ensembles[key] = res
+            return res[2]
+
+        explain_ga_selection(best_ensemble, evaluated_ensembles, generation_populations,
+                             algorithm_list, population_size, _evaluate_fitness,
+                             dataset, entity)
+
+        explain_ga_combination(best_ensemble, algorithm_list,
+                               base_model_predictions_train, base_model_predictions_test,
+                               y_true_train, y_true_test, meta_model_type,
+                               dataset, entity, meta_model=best_meta_model)
+
     return best_ensemble, best_f1, best_pr_auc, best_fitness, individual_predictions, base_model_predictions_train, base_model_predictions_test, y_true_train, y_true_test, meta_model_type
 
 # Usage
@@ -836,3 +878,1348 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
 # trained_models = {'LOF': lof_model, 'NN': nn_model, 'RNN': rnn_model}
 # best_ensemble, best_f1, best_pr_auc, best_fitness = genetic_algorithm(train_data, test_data, algorithm_list, trained_models, meta_model_type='lr')
 # You can change meta_model_type to 'rf', 'gbm', or 'svm' for Random Forest, Gradient Boosting Machine, and SVM respectively
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  GA Ensemble Selection Explainability
+#
+#  Three analytical axes per candidate detector:
+#    1. Utility       — LOFO marginal fitness change on the best ensemble,
+#                       and mean marginal contribution across evaluated subsets.
+#    2. Complementarity — interaction matrix I_jk over detector pairs:
+#                       I_jk = E[y | d_j=1, d_k=1] - (E[y|d_j=1] + E[y|d_k=1]),
+#                       with y = subset fitness.
+#    3. Stability     — evolutionary survival rate per generation:
+#                       P(d_j, g) = (#individuals in gen g containing d_j) /
+#                                    population_size.
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _conditional_mean_fitness(
+    evaluated_ensembles: Dict[Tuple[str, ...], tuple],
+    present: Tuple[str, ...] = (),
+    absent: Tuple[str, ...] = (),
+) -> Tuple[float, int]:
+    """Mean of subset fitness over evaluated subsets that contain every detector
+    in `present` and none in `absent`. Returns (mean, count). When count == 0
+    the mean is NaN."""
+    present_set = set(present)
+    absent_set = set(absent)
+    vals = []
+    for key, result in evaluated_ensembles.items():
+        members = set(key)
+        if present_set.issubset(members) and absent_set.isdisjoint(members):
+            vals.append(float(result[2]))   # result = (f1, pr_auc, fitness, ...)
+    if not vals:
+        return float('nan'), 0
+    return float(np.mean(vals)), len(vals)
+
+
+def compute_lofo_utility(
+    best_ensemble: List[str],
+    evaluate_fitness: Callable[[List[str]], float],
+) -> Dict[str, float]:
+    """
+    Axis 1a — LOFO marginal fitness change on the final ensemble.
+
+    For each detector d in best_ensemble:
+        marginal[d] = fitness(best_ensemble) − fitness(best_ensemble \\ {d})
+    Positive = removing d hurt fitness (d was pulling weight).
+    NaN if best_ensemble has fewer than 2 detectors (LOFO undefined).
+    """
+    if not best_ensemble or len(best_ensemble) < 2:
+        return {d: float('nan') for d in (best_ensemble or [])}
+    base = float(evaluate_fitness(list(best_ensemble)))
+    out: Dict[str, float] = {}
+    for d in best_ensemble:
+        reduced = [x for x in best_ensemble if x != d]
+        out[d] = base - float(evaluate_fitness(reduced))
+    return out
+
+
+def compute_mean_marginal_contribution(
+    evaluated_ensembles: Dict[Tuple[str, ...], tuple],
+    algorithm_list: List[str],
+) -> Dict[str, Dict[str, float]]:
+    """
+    Axis 1b — mean marginal contribution across evaluated subsets.
+
+    For each detector d:
+        contribution[d] = E[fitness | d present] − E[fitness | d absent]
+    over the distinct subsets the GA evaluated. Returns a dict per detector:
+        {'contribution', 'e_present', 'e_absent', 'n_present', 'n_absent'}.
+    Missing means are NaN with the corresponding count = 0.
+    """
+    out: Dict[str, Dict[str, float]] = {}
+    for d in algorithm_list:
+        e_p, n_p = _conditional_mean_fitness(evaluated_ensembles, present=(d,))
+        e_a, n_a = _conditional_mean_fitness(evaluated_ensembles, absent=(d,))
+        contrib = (e_p - e_a) if (n_p > 0 and n_a > 0) else float('nan')
+        out[d] = {
+            'contribution': contrib,
+            'e_present': e_p,
+            'e_absent': e_a,
+            'n_present': n_p,
+            'n_absent': n_a,
+        }
+    return out
+
+
+def _build_subset_matrix(
+    evaluated_ensembles: Dict[Tuple[str, ...], tuple],
+    algorithm_list: List[str],
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Build the binary inclusion matrix X (n_subsets × d) and fitness vector y from
+    the evaluated subsets. X[i, c] = 1 iff algorithm_list[c] is in subset i.
+    y[i] = fitness of subset i (element [2] of the cached fitness tuple).
+    """
+    d = len(algorithm_list)
+    col = {name: c for c, name in enumerate(algorithm_list)}
+    rows, ys = [], []
+    for key, result in evaluated_ensembles.items():
+        z = np.zeros(d, dtype=float)
+        for name in key:
+            if name in col:
+                z[col[name]] = 1.0
+        rows.append(z)
+        ys.append(float(result[2]))
+    if not rows:
+        return np.zeros((0, d)), np.zeros(0)
+    return np.array(rows, dtype=float), np.array(ys, dtype=float)
+
+
+def compute_friedman_h(
+    evaluated_ensembles: Dict[Tuple[str, ...], tuple],
+    algorithm_list: List[str],
+    surrogate: str = "rf",
+    predict_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    max_reference: int = 500,
+    random_state: int = 0,
+) -> Dict[str, Any]:
+    """
+    Axis 2 — Friedman & Popescu (2008) H-statistic over the GA-explored subset
+    space (https://projecteuclid.org/journals/annals-of-applied-statistics/volume-2/issue-3/Predictive-learning-via-rule-ensembles/10.1214/07-AOAS148.pdf).
+
+    Subset fitness is treated as a function F(z) of the binary detector-inclusion
+    vector z ∈ {0,1}^d. A surrogate regressor F̂ is fit on the evaluated
+    (z, fitness) pairs, then partial-dependence functions of F̂ yield:
+
+      Two-way interaction (Eq. 44):
+        H²_jk = Σ_i (F̃_jk − F̃_j − F̃_k)² / Σ_i F̃_jk²
+      Total interaction (Eq. 45):
+        H²_j  = Σ_i (F̃ − F̃_j − F̃_{\\j})² / Σ_i F̃²
+
+    where ~ denotes mean-centering over the reference set and H = sqrt(max(0,H²)).
+    Because inputs are binary, every partial-dependence function takes ≤2 (single)
+    or ≤4 (pair) distinct values, so the computation is cheap.
+
+    Parameters
+    ----------
+    surrogate : "rf" | "gbm"          Surrogate family (used only if predict_fn is None).
+    predict_fn : callable | None      Inject a fitted F̂: (m×d array) -> (m,) preds.
+                                      When None, a surrogate is fit on (X, y).
+    max_reference : int               Cap on reference rows (subsampled if exceeded).
+
+    Returns
+    -------
+    dict with keys:
+        "H_two_way"   : {(j, k): H_jk}  symmetric (j != k); NaN where undefined
+        "H_total"     : {j: H_j}        per detector; NaN where undefined
+        "n_subsets"   : int             training subsets used
+        "surrogate"   : str
+        "surrogate_r2": float           in-sample R² (NaN when predict_fn injected)
+        "feasible"    : bool            False when too few/degenerate subsets
+    """
+    d = len(algorithm_list)
+    nan_two = {(j, k): float('nan')
+               for i, j in enumerate(algorithm_list) for k in algorithm_list[i + 1:]}
+    # make symmetric
+    for (j, k) in list(nan_two.keys()):
+        nan_two[(k, j)] = float('nan')
+    nan_tot = {j: float('nan') for j in algorithm_list}
+
+    X, y = _build_subset_matrix(evaluated_ensembles, algorithm_list)
+    n = X.shape[0]
+    base = {"H_two_way": nan_two, "H_total": nan_tot, "n_subsets": n,
+            "surrogate": surrogate, "surrogate_r2": float('nan'), "feasible": False}
+    if n < 3 or np.allclose(y, y[0]):
+        return base
+
+    # ── Surrogate F̂ ───────────────────────────────────────────────────────
+    surrogate_r2 = float('nan')
+    if predict_fn is None:
+        try:
+            if surrogate == "gbm":
+                from sklearn.ensemble import GradientBoostingRegressor
+                model = GradientBoostingRegressor(random_state=random_state)
+            else:
+                from sklearn.ensemble import RandomForestRegressor
+                model = RandomForestRegressor(n_estimators=200, random_state=random_state)
+            model.fit(X, y)
+            preds_train = model.predict(X)
+            ss_res = float(np.sum((y - preds_train) ** 2))
+            ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+            surrogate_r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float('nan')
+            predict = model.predict
+        except Exception as e:
+            logger.warning(f"Friedman H surrogate fit failed: {e}")
+            return base
+    else:
+        predict = predict_fn
+
+    # ── Reference set (subsample if large) ─────────────────────────────────
+    Xr = X
+    if n > max_reference:
+        rng = np.random.RandomState(random_state)
+        Xr = X[rng.choice(n, size=max_reference, replace=False)]
+    N = Xr.shape[0]
+
+    def _predict_with(col_overrides: Dict[int, float]) -> np.ndarray:
+        Z = Xr.copy()
+        for c, v in col_overrides.items():
+            Z[:, c] = v
+        return np.asarray(predict(Z), dtype=float)
+
+    def _center(a: np.ndarray) -> np.ndarray:
+        return a - float(np.mean(a))
+
+    # Single-variable PD predictions with coord c overridden: pred1[c][v] is the
+    # length-N vector F̂(Xr with col c := v). Used two ways below:
+    #   • its MEAN is the PD scalar F_c(v) = (1/N) Σ_m F̂(x_m, c:=v);
+    #   • the per-row vectors feed the all-but-c PD (Eq. 45).
+    pred1 = {c: {0.0: _predict_with({c: 0.0}), 1.0: _predict_with({c: 1.0})}
+             for c in range(d)}
+    p_marg = {c: float(np.mean(Xr[:, c])) for c in range(d)}   # marginal P(z_c=1)
+    f_base = np.asarray(predict(Xr), dtype=float)
+    f_tilde = _center(f_base)
+    f_base_sq = float(np.sum(f_tilde ** 2))
+
+    # PD scalars F_c(v), then the centered single-variable PD evaluated at each
+    # row's own coordinate x_ic.
+    pd1_scalar = {c: {0.0: float(np.mean(pred1[c][0.0])),
+                      1.0: float(np.mean(pred1[c][1.0]))}
+                  for c in range(d)}
+    pd_j = {}
+    for c in range(d):
+        vals = np.where(Xr[:, c] == 1.0, pd1_scalar[c][1.0], pd1_scalar[c][0.0])
+        pd_j[c] = _center(vals)
+
+    # ── Two-way H (Eq. 44) ─────────────────────────────────────────────────
+    H_two: Dict[Tuple[str, str], float] = {}
+    for a in range(d):
+        for b in range(a + 1, d):
+            # Pairwise PD scalars F_ab(va, vb) = mean over rows of F̂(Xr, a:=va, b:=vb).
+            pd2_scalar = {}
+            for va in (0.0, 1.0):
+                for vb in (0.0, 1.0):
+                    pd2_scalar[(va, vb)] = float(np.mean(_predict_with({a: va, b: vb})))
+            # Evaluate the pairwise PD at each row's own (x_ia, x_ib).
+            pjk = np.array([pd2_scalar[(Xr[i, a], Xr[i, b])] for i in range(N)], dtype=float)
+            f_jk = _center(pjk)
+            num = float(np.sum((f_jk - pd_j[a] - pd_j[b]) ** 2))
+            den = float(np.sum(f_jk ** 2))
+            h = float(np.sqrt(max(0.0, num / den))) if den > 0 else float('nan')
+            H_two[(algorithm_list[a], algorithm_list[b])] = h
+            H_two[(algorithm_list[b], algorithm_list[a])] = h
+
+    # ── Total H (Eq. 45) ───────────────────────────────────────────────────
+    H_tot: Dict[str, float] = {}
+    for c in range(d):
+        # PD on all-but-c: average F̂ over z_c drawn from its marginal.
+        pd_not = (1.0 - p_marg[c]) * pred1[c][0.0] + p_marg[c] * pred1[c][1.0]
+        f_not = _center(pd_not)
+        num = float(np.sum((f_tilde - pd_j[c] - f_not) ** 2))
+        h = float(np.sqrt(max(0.0, num / f_base_sq))) if f_base_sq > 0 else float('nan')
+        H_tot[algorithm_list[c]] = h
+
+    return {"H_two_way": H_two, "H_total": H_tot, "n_subsets": n,
+            "surrogate": "injected" if predict_fn is not None else surrogate,
+            "surrogate_r2": surrogate_r2, "feasible": True}
+
+
+def compute_survival_rates(
+    generation_populations: List[List[List[str]]],
+    algorithm_list: List[str],
+    population_size: int,
+) -> Dict[str, List[float]]:
+    """
+    Axis 3 — survival rate per detector per generation:
+        P(d, g) = (count of individuals in generation g containing d) / population_size
+    Returns {detector: [P(d, g) for g in generations]}.
+    """
+    out: Dict[str, List[float]] = {d: [] for d in algorithm_list}
+    denom = float(population_size) if population_size > 0 else 1.0
+    for pop in generation_populations:
+        for d in algorithm_list:
+            count = sum(1 for ind in pop if d in ind)
+            out[d].append(count / denom)
+    return out
+
+
+# ── Functional archetypes (intersection of the three axes) ──────────────────
+
+# Each detector is labelled by the (Utility, Complementarity, Stability) high/low
+# triple as a 3-letter H/L code, e.g. "HLH" = high utility, low complementarity,
+# high stability. A detector with no utility data is "Unclassified".
+ARCHETYPE_UNCLASSIFIED = "Unclassified"
+
+ARCHETYPE_ORDER = [
+    "HHH", "HHL", "HLH", "HLL", "LHH", "LHL", "LLH", "LLL",
+    ARCHETYPE_UNCLASSIFIED,
+]
+
+
+def _assign_archetype(u_high: bool, c_high: bool, s_high: bool, util_nan: bool) -> str:
+    """
+    Label the (utility, complementarity, stability) high/low triple as a 3-letter
+    H/L code (e.g. "HLH"). A detector with no utility data is "Unclassified".
+    """
+    if util_nan:
+        return ARCHETYPE_UNCLASSIFIED
+    return ("H" if u_high else "L") + ("H" if c_high else "L") + ("H" if s_high else "L")
+
+
+def _finite_median(values: List[float]) -> float:
+    """Median over the finite (non-NaN) values; NaN if none are finite."""
+    finite = [v for v in values if not np.isnan(v)]
+    return float(np.median(finite)) if finite else float('nan')
+
+
+def classify_detector_archetypes(
+    mean_marginal: Dict[str, Dict[str, float]],
+    friedman_h: Dict[str, Any],
+    survival: Dict[str, List[float]],
+    algorithm_list: List[str],
+    abs_utility: float = 0.0,
+    abs_complementarity: float = 0.1,
+    abs_stability: float = 0.5,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    Classify each detector into a functional archetype from the intersection of
+    the three axes. Reports BOTH a relative (median-split) and an absolute
+    (fixed-cutoff) scheme side by side.
+
+    Axis scalars (per detector):
+      utility         = mean_marginal[d]['contribution']  (Axis 1b only; LOFO excluded)
+      complementarity = friedman_h['H_total'][d]          (Axis 2 total Friedman H)
+      stability_mean  = mean(survival[d])  (the Stability axis)
+
+    A detector is "stable-high" when its mean survival is above the threshold.
+    (stability_trend = P(last) − P(first) is still reported for context, but does
+    not affect the classification.)
+
+    Returns {detector: {utility, complementarity, stability_mean, stability_trend,
+                        "relative": {u_high,c_high,s_high,archetype},
+                        "absolute": {u_high,c_high,s_high,archetype}}}.
+    """
+    util = {d: mean_marginal.get(d, {}).get('contribution', float('nan')) for d in algorithm_list}
+    H_total = friedman_h.get("H_total", {})
+    comp = {d: H_total.get(d, float('nan')) for d in algorithm_list}
+    stab_mean, stab_trend = {}, {}
+    for d in algorithm_list:
+        ys = survival.get(d, [])
+        stab_mean[d] = float(np.mean(ys)) if ys else float('nan')
+        stab_trend[d] = (ys[-1] - ys[0]) if ys else float('nan')
+
+    med_u = _finite_median(list(util.values()))
+    med_c = _finite_median(list(comp.values()))
+    med_s = _finite_median(list(stab_mean.values()))
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for d in algorithm_list:
+        u, c, sm, st = util[d], comp[d], stab_mean[d], stab_trend[d]
+        util_nan = bool(np.isnan(u))
+
+        schemes: Dict[str, Dict[str, Any]] = {}
+        for scheme, (tu, tc, ts) in (
+            ("relative", (med_u, med_c, med_s)),
+            ("absolute", (abs_utility, abs_complementarity, abs_stability)),
+        ):
+            u_high = (not np.isnan(u)) and (not np.isnan(tu)) and (u > tu)
+            c_high = (not np.isnan(c)) and (not np.isnan(tc)) and (c > tc)
+            # Stability depends only on the mean survival rate (no trend gate).
+            s_high = (not np.isnan(sm)) and (not np.isnan(ts)) and (sm > ts)
+            schemes[scheme] = {
+                "u_high": u_high, "c_high": c_high, "s_high": s_high,
+                "archetype": _assign_archetype(u_high, c_high, s_high, util_nan),
+            }
+
+        out[d] = {
+            "utility": u, "complementarity": c,
+            "stability_mean": sm, "stability_trend": st,
+            "relative": schemes["relative"], "absolute": schemes["absolute"],
+        }
+    return out
+
+
+# ── Plot helpers ────────────────────────────────────────────────────────────
+
+def _ga_plot_rcparams() -> None:
+    plt.rcParams.update({
+        "font.family": "serif",
+        "axes.labelsize": 12,
+        "axes.titlesize": 13,
+        "legend.fontsize": 10,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+    })
+
+
+def plot_ga_utility(
+    lofo: Dict[str, float],
+    mean_marginal: Dict[str, Dict[str, float]],
+    best_ensemble: List[str],
+    algorithm_list: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Two-panel bar chart for Axis 1.
+      Top    — LOFO marginal for each detector in best_ensemble.
+               Bars are coloured by sign: green = removal hurts fitness (the
+               detector is pulling weight); red = removal helps (its removal
+               would actually improve fitness).
+      Bottom — mean marginal contribution across evaluated subsets for ALL
+               detectors. NaN values are drawn as faded grey bars at zero.
+
+    Saves to myresults/GA_Ens/{dataset}/{entity}/ga_selection_utility_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    fig, (ax_top, ax_bot) = plt.subplots(
+        2, 1, figsize=(max(8, 0.55 * len(algorithm_list) + 4), 7),
+        gridspec_kw={"height_ratios": [1, 1]},
+    )
+
+    # Top: LOFO on best_ensemble
+    if best_ensemble:
+        vals = [lofo.get(d, float('nan')) for d in best_ensemble]
+        colours = []
+        for v in vals:
+            if np.isnan(v):
+                colours.append("#888888")
+            elif v >= 0:
+                colours.append("#2ca02c")
+            else:
+                colours.append("#d62728")
+        x = np.arange(len(best_ensemble))
+        ax_top.bar(x, [0.0 if np.isnan(v) else v for v in vals], color=colours)
+        ax_top.set_xticks(x)
+        ax_top.set_xticklabels(best_ensemble, rotation=30, ha="right")
+        ax_top.axhline(0, color="black", linewidth=0.6)
+        ax_top.set_ylabel("fitness(best) − fitness(best \\ detector)")
+        ax_top.set_title(
+            f"Axis 1a · LOFO on best ensemble: {best_ensemble}")
+        ax_top.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+    else:
+        ax_top.text(0.5, 0.5, "best_ensemble is empty",
+                    ha="center", va="center", transform=ax_top.transAxes)
+
+    # Bottom: mean marginal contribution for ALL detectors
+    raw = [mean_marginal.get(d, {}).get('contribution', float('nan'))
+           for d in algorithm_list]
+    bot_vals = [0.0 if np.isnan(v) else v for v in raw]
+    bot_colours = ["#cccccc" if np.isnan(v) else
+                   ("#2ca02c" if v >= 0 else "#d62728") for v in raw]
+    xb = np.arange(len(algorithm_list))
+    ax_bot.bar(xb, bot_vals, color=bot_colours)
+    ax_bot.set_xticks(xb)
+    ax_bot.set_xticklabels(algorithm_list, rotation=30, ha="right")
+    ax_bot.axhline(0, color="black", linewidth=0.6)
+    ax_bot.set_ylabel("E[fit | present] − E[fit | absent]")
+    ax_bot.set_title(
+        "Axis 1b · Mean marginal contribution across evaluated subsets")
+    ax_bot.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+
+    plt.tight_layout(pad=1.2)
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_utility_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_ga_interaction(
+    friedman_h: Dict[str, Any],
+    algorithm_list: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Heatmap of the two-way Friedman H-statistic H_jk (Eq. 44). H ≥ 0, so a
+    sequential colormap is used (0 = additive / no interaction, higher = stronger
+    interaction). NaN cells (undefined) are drawn grey; diagonal is masked.
+
+    Saves to myresults/GA_Ens/{dataset}/{entity}/ga_selection_interaction_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    H_two = friedman_h.get("H_two_way", {})
+    n = len(algorithm_list)
+    # Keep only the upper-right triangle (row < col); the matrix is symmetric so
+    # the lower triangle is the same values mirrored and is left blank.
+    M = np.full((n, n), np.nan, dtype=float)
+    for (j, k), v in H_two.items():
+        if j == k:
+            continue
+        try:
+            r, c = algorithm_list.index(j), algorithm_list.index(k)
+        except ValueError:
+            continue
+        if r < c:
+            M[r, c] = v
+
+    fig, ax = plt.subplots(figsize=(max(7, 0.6 * n + 2), max(6, 0.55 * n + 2)))
+    masked = np.ma.array(M, mask=np.isnan(M))
+    finite = M[np.isfinite(M)]
+    vmax = float(np.nanmax(finite)) if finite.size > 0 and np.nanmax(finite) > 0 else 1.0
+    cmap = plt.cm.viridis.copy()
+    cmap.set_bad(color="#dddddd")
+    im = ax.imshow(masked, cmap=cmap, vmin=0.0, vmax=vmax, aspect="auto")
+    ax.set_xticks(np.arange(n))
+    ax.set_xticklabels(algorithm_list, rotation=45, ha="right")
+    ax.set_yticks(np.arange(n))
+    ax.set_yticklabels(algorithm_list)
+
+    for jj in range(n):
+        for kk in range(n):
+            v = M[jj, kk]
+            if jj == kk or np.isnan(v):
+                continue
+            shade = "white" if v < 0.5 * vmax else "black"
+            ax.text(kk, jj, f"{v:.3f}", ha="center", va="center",
+                    color=shade, fontsize=7)
+
+    fig.colorbar(im, ax=ax, fraction=0.045, pad=0.04, label="H_jk (two-way)")
+    r2 = friedman_h.get("surrogate_r2", float('nan'))
+    sub = (f"surrogate={friedman_h.get('surrogate', '?')}, "
+           f"R²={r2:.3f}" if not np.isnan(r2) else
+           f"surrogate={friedman_h.get('surrogate', '?')}")
+    ax.set_title("Axis 2 · Friedman two-way interaction  H_jk (Eq. 44)\n"
+                 f"({sub}, n_subsets={friedman_h.get('n_subsets', 0)})")
+    plt.tight_layout(pad=1.2)
+
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_interaction_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_ga_total_interaction(
+    friedman_h: Dict[str, Any],
+    algorithm_list: List[str],
+    best_ensemble: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Bar chart of the total Friedman H-statistic H_j (Eq. 45) — each detector's
+    overall interaction strength with all others. Members of best_ensemble are
+    drawn opaque; the rest faded. NaN values are drawn as faded grey zero bars.
+
+    Saves to myresults/GA_Ens/{dataset}/{entity}/ga_selection_total_interaction_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    H_tot = friedman_h.get("H_total", {})
+    in_best = set(best_ensemble or [])
+    raw = [H_tot.get(d, float('nan')) for d in algorithm_list]
+    vals = [0.0 if np.isnan(v) else v for v in raw]
+    colours = []
+    for d, v in zip(algorithm_list, raw):
+        if np.isnan(v):
+            colours.append("#cccccc")
+        elif d in in_best:
+            colours.append("#1f77b4")
+        else:
+            colours.append("#9ecae1")
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.55 * len(algorithm_list) + 4), 5))
+    x = np.arange(len(algorithm_list))
+    ax.bar(x, vals, color=colours)
+    ax.set_xticks(x)
+    ax.set_xticklabels(algorithm_list, rotation=30, ha="right")
+    ax.set_ylabel("H_j  (total interaction)")
+    ax.set_ylim(0, max(1.0, max(vals) * 1.1) if vals else 1.0)
+    ax.set_title("Axis 2 · Friedman total interaction  H_j (Eq. 45)  "
+                 "— dark = best-ensemble members")
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+
+    plt.tight_layout(pad=1.2)
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_total_interaction_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def _plot_ga_survival_impl(
+    survival_rates: Dict[str, List[float]],
+    bold_set: set,
+    title: str,
+    save_path: str,
+) -> None:
+    """Shared rendering for survival-rate plots. `bold_set` controls which
+    detectors receive the bold/opaque/marker treatment."""
+    _ga_plot_rcparams()
+    detectors = list(survival_rates.keys())
+    if not detectors:
+        return
+    G = len(next(iter(survival_rates.values())))
+    colour_map = {d: plt.cm.tab20(i / max(len(detectors), 1)) for i, d in enumerate(detectors)}
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.4 * G + 4), 5))
+    x = np.arange(G)
+    for d in detectors:
+        ys = survival_rates[d]
+        bold = d in bold_set
+        ax.plot(x, ys, label=d, color=colour_map[d],
+                linewidth=2.0 if bold else 1.0,
+                alpha=1.0 if bold else 0.35,
+                marker="o" if bold else None,
+                markersize=3.5 if bold else 0)
+
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("P(d, g)  —  survival rate")
+    ax.set_ylim(-0.02, 1.05)
+    ax.set_title(title)
+    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    ax.legend(loc="upper left", ncol=1, frameon=False,
+              bbox_to_anchor=(1.01, 1), borderaxespad=0)
+
+    plt.tight_layout(pad=1.2)
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    plt.savefig(save_path, format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_ga_survival(
+    survival_rates: Dict[str, List[float]],
+    best_ensemble: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Produce two survival-rate line plots for Axis 3.
+
+    (a) Ensemble-highlighted version — detectors in best_ensemble are bold/opaque;
+        all others are faded. Emphasises which detectors the GA converged on.
+        → ga_selection_survival_{dataset}_{entity}.png
+
+    (b) All-bold version — every detector is drawn equally bold and opaque,
+        so their trajectories can be compared without any pre-selection bias.
+        → ga_selection_survival_all_{dataset}_{entity}.png
+    """
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    in_best = set(best_ensemble or [])
+
+    _plot_ga_survival_impl(
+        survival_rates,
+        bold_set=in_best,
+        title=("Axis 3 · Evolutionary survival per detector "
+               "(bold = members of best ensemble)"),
+        save_path=f"{directory}/ga_selection_survival_{dataset}_{entity}.png",
+    )
+    _plot_ga_survival_impl(
+        survival_rates,
+        bold_set=set(survival_rates.keys()),   # every detector bold
+        title="Axis 3 · Evolutionary survival per detector (all detectors)",
+        save_path=f"{directory}/ga_selection_survival_all_{dataset}_{entity}.png",
+    )
+
+
+def plot_ga_archetypes(
+    archetypes: Dict[str, Dict[str, Any]],
+    algorithm_list: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Two-panel scatter of the axis intersection that drives the archetypes.
+    Left = relative (median-split) scheme, right = absolute (fixed cutoffs).
+
+      x = utility (mean marginal contribution), y = complementarity (H_j)
+      marker filled  ⇔ stability-high (else hollow)
+      colour         = assigned archetype (shared categorical palette)
+      dashed lines   = that scheme's utility / complementarity thresholds
+
+    Unclassified detectors (NaN utility) are not plotted; they are listed in a
+    caption. Saves to ga_selection_archetypes_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    # Shared archetype → colour palette.
+    palette = {name: plt.cm.tab10(i / max(len(ARCHETYPE_ORDER), 1))
+               for i, name in enumerate(ARCHETYPE_ORDER)}
+
+    util = {d: archetypes[d]["utility"] for d in algorithm_list}
+    comp = {d: archetypes[d]["complementarity"] for d in algorithm_list}
+    med_u = _finite_median(list(util.values()))
+    med_c = _finite_median(list(comp.values()))
+    thresholds = {
+        "relative": (med_u, med_c),
+        "absolute": (0.0, 0.1),
+    }
+
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    unclassified = sorted({d for d in algorithm_list
+                           if archetypes[d]["relative"]["archetype"] == ARCHETYPE_UNCLASSIFIED})
+    seen_labels = set()
+
+    for ax, scheme in zip(axes, ("relative", "absolute")):
+        tu, tc = thresholds[scheme]
+        for d in algorithm_list:
+            u, c = util[d], comp[d]
+            info = archetypes[d][scheme]
+            if np.isnan(u) or np.isnan(c):
+                continue   # cannot place a point without both coordinates
+            arche = info["archetype"]
+            colour = palette.get(arche, "#888888")
+            filled = info["s_high"]
+            label = arche if arche not in seen_labels else None
+            seen_labels.add(arche)
+            ax.scatter([u], [c], s=90, color=colour,
+                       edgecolors=colour, linewidths=1.5,
+                       facecolors=colour if filled else "none",
+                       label=label, zorder=3)
+            ax.annotate(d, (u, c), textcoords="offset points", xytext=(5, 4),
+                        fontsize=8, alpha=0.85)
+        if not np.isnan(tu):
+            ax.axvline(tu, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
+        if not np.isnan(tc):
+            ax.axhline(tc, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
+        ax.set_xlabel("Utility  (mean marginal contribution)")
+        ax.set_ylabel("Complementarity  (total Friedman H_j)")
+        ax.set_title(f"{scheme.capitalize()} thresholds")
+        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
+
+    handles, labels = [], []
+    for ax in axes:
+        h, l = ax.get_legend_handles_labels()
+        for hi, li in zip(h, l):
+            if li not in labels:
+                handles.append(hi)
+                labels.append(li)
+    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.6),
+               frameon=False, title="Archetype")
+    fig.text(1.0, 0.30, "filled = stable-high\nhollow = not stable",
+             fontsize=9, va="top")
+    if unclassified:
+        fig.text(0.5, -0.02, "Unclassified (no marginal-contribution data): "
+                 + ", ".join(unclassified), ha="center", fontsize=9, alpha=0.8)
+
+    fig.suptitle("Functional Archetypes · utility × complementarity × stability",
+                 y=1.02)
+    plt.tight_layout(pad=1.2)
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_archetypes_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+# ── Orchestrator + report ───────────────────────────────────────────────────
+
+def explain_ga_selection(
+    best_ensemble: List[str],
+    evaluated_ensembles: Dict[Tuple[str, ...], tuple],
+    generation_populations: List[List[List[str]]],
+    algorithm_list: List[str],
+    population_size: int,
+    evaluate_fitness: Callable[[List[str]], float],
+    dataset: str,
+    entity: str,
+    explain: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """
+    GA-ensemble selection explainability: explain *why* each detector ended up
+    in best_ensemble, along three analytical axes (utility, complementarity,
+    stability). Produces three plots and a structured text report under
+        myresults/GA_Ens/{dataset}/{entity}/
+
+    Returns a dict with the computed structures when explain=True; None otherwise.
+    """
+    if not explain:
+        return None
+    if not best_ensemble:
+        return None
+
+    lofo = compute_lofo_utility(best_ensemble, evaluate_fitness)
+    mean_marginal = compute_mean_marginal_contribution(evaluated_ensembles, algorithm_list)
+    friedman_h = compute_friedman_h(evaluated_ensembles, algorithm_list)
+    interaction = friedman_h["H_two_way"]
+    survival = compute_survival_rates(generation_populations, algorithm_list, population_size)
+    archetypes = classify_detector_archetypes(
+        mean_marginal, friedman_h, survival, algorithm_list)
+
+    plot_ga_utility(lofo, mean_marginal, best_ensemble, algorithm_list, dataset, entity)
+    plot_ga_interaction(friedman_h, algorithm_list, dataset, entity)
+    plot_ga_total_interaction(friedman_h, algorithm_list, best_ensemble, dataset, entity)
+    plot_ga_survival(survival, best_ensemble, dataset, entity)
+    plot_ga_archetypes(archetypes, algorithm_list, dataset, entity)
+
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    report_path = os.path.join(
+        directory, f"ga_selection_explainability_{dataset}_{entity}.txt")
+
+    n_subsets = len(evaluated_ensembles)
+    n_generations = len(generation_populations)
+
+    with open(report_path, "w") as f:
+        f.write("=== GA Ensemble Selection Explainability ===\n")
+        f.write(f"Dataset: {dataset}  |  Entity: {entity}\n")
+        f.write(f"Best ensemble  : {list(best_ensemble)}\n")
+        f.write(f"Population size: {population_size}\n")
+        f.write(f"Generations    : {n_generations}\n")
+        f.write(f"Distinct subsets evaluated: {n_subsets}\n\n")
+
+        # ── Axis 1 ────────────────────────────────────────────────────────
+        backslash_error_text = r"fitness(best) - fitness(best \ d)"
+        f.write("--- Axis 1: Utility ---\n")
+        f.write("(1a) LOFO marginal fitness change (final ensemble):\n")
+        f.write(f"      {'detector':<14} {backslash_error_text:>40}\n")
+        f.write("      " + "-" * 56 + "\n")
+        for d in best_ensemble:
+            v = lofo.get(d, float('nan'))
+            s = f"{v:+.4f}" if not np.isnan(v) else "N/A"
+            f.write(f"      {d:<14} {s:>40}\n")
+
+        f.write("\n(1b) Mean marginal contribution across all evaluated subsets:\n")
+        f.write(f"      {'detector':<14} {'E[fit|p]-E[fit|a]':>18} "
+                f"{'E[fit|p]':>10} {'E[fit|a]':>10} {'#p':>5} {'#a':>5}\n")
+        f.write("      " + "-" * 68 + "\n")
+        for d in algorithm_list:
+            mm = mean_marginal[d]
+            c = f"{mm['contribution']:+.4f}" if not np.isnan(mm['contribution']) else "N/A"
+            ep = f"{mm['e_present']:.4f}" if not np.isnan(mm['e_present']) else "N/A"
+            ea = f"{mm['e_absent']:.4f}" if not np.isnan(mm['e_absent']) else "N/A"
+            f.write(f"      {d:<14} {c:>18} {ep:>10} {ea:>10} "
+                    f"{mm['n_present']:>5d} {mm['n_absent']:>5d}\n")
+
+        # ── Axis 2 ────────────────────────────────────────────────────────
+        f.write("\n--- Axis 2: Inter-model Complementarity (Friedman H-statistic) ---\n")
+        f.write("Friedman & Popescu (2008) H over the GA-explored subset space.\n")
+        f.write("Subset fitness y is modelled as F(z) of the binary inclusion vector z;\n")
+        f.write("a surrogate F̂ is fit on the evaluated (z, y) pairs and H is computed\n")
+        f.write("from its partial dependences.\n")
+        f.write("  Two-way (Eq. 44): H_jk = sqrt( Σ(F̃_jk−F̃_j−F̃_k)² / Σ F̃_jk² )\n")
+        f.write("  Total   (Eq. 45): H_j  = sqrt( Σ(F̃−F̃_j−F̃_\\j)²  / Σ F̃² )\n")
+        r2 = friedman_h.get("surrogate_r2", float('nan'))
+        r2s = f"{r2:.4f}" if not np.isnan(r2) else "N/A"
+        f.write(f"Surrogate: {friedman_h.get('surrogate', '?')}  |  "
+                f"in-sample R²: {r2s}  |  subsets: {friedman_h.get('n_subsets', 0)}  |  "
+                f"feasible: {friedman_h.get('feasible', False)}\n")
+
+        if not friedman_h.get("feasible", False):
+            f.write("\n(Too few / degenerate subsets to fit a surrogate — H undefined.)\n")
+        else:
+            seen = set()
+            finite_pairs = []
+            for (j, k), v in interaction.items():
+                key = tuple(sorted((j, k)))
+                if key in seen or np.isnan(v):
+                    continue
+                seen.add(key)
+                finite_pairs.append((key[0], key[1], v))
+            finite_pairs.sort(key=lambda t: t[2], reverse=True)
+
+            f.write("\nTop-10 strongest two-way interactions (highest H_jk):\n")
+            for j, k, v in finite_pairs[:10]:
+                f.write(f"      {j:<10} x {k:<10}  H_jk = {v:.4f}\n")
+
+            f.write("\nTotal interaction per detector (H_j, Eq. 45), sorted:\n")
+            f.write(f"      {'detector':<14} {'H_j':>10}\n")
+            f.write("      " + "-" * 26 + "\n")
+            H_tot = friedman_h.get("H_total", {})
+            for d, v in sorted(H_tot.items(),
+                               key=lambda t: (-(t[1]) if not np.isnan(t[1]) else 1.0)):
+                vs = f"{v:.4f}" if not np.isnan(v) else "N/A"
+                f.write(f"      {d:<14} {vs:>10}\n")
+        f.write("\n(Two-way heatmap in ga_selection_interaction_*.png; "
+                "total-H bars in ga_selection_total_interaction_*.png)\n")
+
+        # ── Axis 3 ────────────────────────────────────────────────────────
+        f.write("\n--- Axis 3: Stability (Evolutionary Survival) ---\n")
+        f.write("P(d, g) = (#individuals in generation g containing d) / population_size\n")
+        f.write(f"      {'detector':<14} {'mean P':>8} {'first':>8} "
+                f"{'last':>8} {'trend':>10}\n")
+        f.write("      " + "-" * 52 + "\n")
+        for d in algorithm_list:
+            ys = survival[d]
+            if not ys:
+                f.write(f"      {d:<14} {'N/A':>8} {'N/A':>8} {'N/A':>8} {'N/A':>10}\n")
+                continue
+            f.write(f"      {d:<14} {np.mean(ys):>8.3f} {ys[0]:>8.3f} "
+                    f"{ys[-1]:>8.3f} {(ys[-1] - ys[0]):>+10.3f}\n")
+
+        # ── Synthesis ──────────────────────────────────────────────────────
+        H_tot = friedman_h.get("H_total", {})
+        f.write("\n--- Synthesis: why each detector of the best ensemble was selected ---\n")
+        f.write(f"      {'detector':<14} {'LOFO':>10} {'mean marg.':>12} "
+                f"{'total H_j':>10} {'mean H w/ peers':>16} {'last-gen P':>12}\n")
+        f.write("      " + "-" * 78 + "\n")
+        for d in best_ensemble:
+            lv = lofo.get(d, float('nan'))
+            mv = mean_marginal[d]['contribution']
+            hj = H_tot.get(d, float('nan'))
+            peer_hs = [interaction.get((d, other), float('nan'))
+                       for other in best_ensemble if other != d]
+            peer_hs = [x for x in peer_hs if not np.isnan(x)]
+            avg_h = float(np.mean(peer_hs)) if peer_hs else float('nan')
+            last_p = survival[d][-1] if survival[d] else float('nan')
+
+            def _sgn(v):
+                return f"{v:+.4f}" if not np.isnan(v) else "N/A"
+
+            def _pos(v):
+                return f"{v:.4f}" if not np.isnan(v) else "N/A"
+
+            f.write(
+                f"      {d:<14} {_sgn(lv):>10} {_sgn(mv):>12} "
+                f"{_pos(hj):>10} {_pos(avg_h):>16} "
+                f"{(f'{last_p:.3f}' if not np.isnan(last_p) else 'N/A'):>12}\n"
+            )
+
+        # ── Functional archetypes ──────────────────────────────────────────
+        f.write("\n--- Functional Archetypes (axis intersections) ---\n")
+        f.write("Utility = mean marginal contribution (Axis 1b only; LOFO excluded).\n")
+        f.write("Complementarity = total Friedman H_j.  Stability = mean survival rate\n")
+        f.write("(trend P_last − P_first is shown for context but does not affect classification).\n")
+        f.write("Two threshold schemes reported: relative (median split) | absolute "
+                "(util>0, H_j>0.1, surv>0.5).\n")
+        f.write("Archetype = the (U,C,S) high/low triple as a 3-letter code, e.g. "
+                "HLH = high utility, low complementarity, high stability.\n\n")
+        f.write(f"      {'detector':<14} {'util':>9} {'compl.':>9} {'stab':>7} "
+                f"{'trend':>8}  {'archetype[rel]':<24} {'archetype[abs]'}\n")
+        f.write("      " + "-" * 96 + "\n")
+
+        def _num(v, fmt="{:+.4f}"):
+            return fmt.format(v) if not np.isnan(v) else "N/A"
+
+        for d in algorithm_list:
+            a = archetypes[d]
+            f.write(
+                f"      {d:<14} {_num(a['utility']):>9} {_num(a['complementarity'], '{:.4f}'):>9} "
+                f"{_num(a['stability_mean'], '{:.3f}'):>7} {_num(a['stability_trend'], '{:+.3f}'):>8}  "
+                f"{a['relative']['archetype']:<24} {a['absolute']['archetype']}\n"
+            )
+
+        for scheme in ("relative", "absolute"):
+            tally: Dict[str, int] = {}
+            for d in algorithm_list:
+                name = archetypes[d][scheme]["archetype"]
+                tally[name] = tally.get(name, 0) + 1
+            ordered = [(nm, tally[nm]) for nm in ARCHETYPE_ORDER if nm in tally]
+            summary = ", ".join(f"{nm}: {ct}" for nm, ct in ordered)
+            f.write(f"\n  Tally [{scheme}]: {summary}\n")
+        if not friedman_h.get("feasible", False):
+            f.write("  (Note: Friedman H was infeasible — complementarity treated as low for all.)\n")
+
+    return {
+        "best_ensemble": list(best_ensemble),
+        "lofo": lofo,
+        "mean_marginal": mean_marginal,
+        "friedman_h": friedman_h,
+        "H_two_way": friedman_h["H_two_way"],
+        "H_total": friedman_h["H_total"],
+        "survival": survival,
+        "archetypes": archetypes,
+        "n_subsets_evaluated": n_subsets,
+        "n_generations": n_generations,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  GA Ensemble Combination Explainability
+#
+#  Explains *how the meta-learner combines* the chosen detectors, by attributing
+#  its output to the per-detector score columns via two methods, then merging
+#  their rankings with a Borda count:
+#    • SHAP — exact interventional Shapley (single mean baseline), label-free.
+#    • PFI  — permutation feature importance measured as F1 drop, label-based.
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _best_threshold_f1(y_true: np.ndarray, y_scores: np.ndarray) -> float:
+    """Maximum F1 over the same threshold grid fitness_function uses."""
+    y_true = np.asarray(y_true).flatten()
+    y_scores = np.asarray(y_scores).flatten()
+    best = 0.0
+    for t in np.linspace(0.1, 0.9, 50):
+        y_pred = (y_scores >= t).astype(int)
+        f1 = f1_score(y_pred, y_true)[0]
+        if f1 > best:
+            best = f1
+    return float(best)
+
+
+def compute_meta_shap(
+    predict_fn: Callable[[np.ndarray], np.ndarray],
+    X_explain: np.ndarray,
+    baseline_row: np.ndarray,
+    feature_names: List[str],
+    mode: str = "abs",
+) -> Dict[str, float]:
+    """
+    Exact interventional Shapley values of the meta-learner over its detector
+    features, using a SINGLE mean baseline. Global importance per feature:
+      mode="abs"    → mean over explained rows of |phi_i(x)|  (magnitude of influence)
+      mode="signed" → mean over explained rows of  phi_i(x)   (net direction of influence)
+
+    For instance x and subset S of features, F(S) marginalises the absent
+    features to the baseline:  z_j = x_j if j in S else baseline_row[j].
+    phi_i(x) = Σ_{S ⊆ F\\{i}} w(|S|) (F(S∪i) − F(S)),  w(s)=s!(d−s−1)!/d!.
+
+    Because features are binary-ish score columns and d = ensemble size is small,
+    all 2^d subset predictions are enumerated exactly (cheap).
+    """
+    _agg = (lambda p: float(np.mean(np.abs(p)))) if mode == "abs" else (lambda p: float(np.mean(p)))
+    d = len(feature_names)
+    n = X_explain.shape[0]
+    if d == 0 or n == 0:
+        return {f: float('nan') for f in feature_names}
+    if d == 1:
+        # Single feature carries the entire deviation from baseline.
+        Z1 = X_explain.copy()
+        Z0 = np.tile(baseline_row, (n, 1))
+        phi = np.asarray(predict_fn(Z1), float) - np.asarray(predict_fn(Z0), float)
+        return {feature_names[0]: _agg(phi)}
+
+    import math
+    # Cache F(S) for every subset mask (bitmask over feature indices).
+    pred_cache: Dict[int, np.ndarray] = {}
+    for mask in range(1 << d):
+        Z = np.tile(baseline_row.astype(float), (n, 1))
+        for j in range(d):
+            if mask & (1 << j):
+                Z[:, j] = X_explain[:, j]
+        pred_cache[mask] = np.nan_to_num(np.asarray(predict_fn(Z), dtype=float),
+                                         nan=0.0, posinf=1.0, neginf=0.0)
+
+    fact = math.factorial
+    weight = {s: fact(s) * fact(d - s - 1) / fact(d) for s in range(d)}
+    out: Dict[str, float] = {}
+    for i in range(d):
+        phi = np.zeros(n, dtype=float)
+        others = [j for j in range(d) if j != i]
+        # Enumerate every subset S of the other features.
+        for sub in range(1 << (d - 1)):
+            mask = 0
+            s = 0
+            for b, j in enumerate(others):
+                if sub & (1 << b):
+                    mask |= (1 << j)
+                    s += 1
+            phi += weight[s] * (pred_cache[mask | (1 << i)] - pred_cache[mask])
+        out[feature_names[i]] = _agg(phi)
+    return out
+
+
+def compute_meta_pfi(
+    predict_fn: Callable[[np.ndarray], np.ndarray],
+    X: np.ndarray,
+    y: np.ndarray,
+    feature_names: List[str],
+    score_fn: Callable[[np.ndarray, np.ndarray], float] = _best_threshold_f1,
+    n_repeats: int = 10,
+    random_state: int = 0,
+) -> Dict[str, float]:
+    """
+    Permutation feature importance of the meta-learner: importance of feature i =
+    baseline_score − mean over n_repeats of the score after shuffling column i.
+    score_fn defaults to best-threshold F1 (matches GA fitness); injectable.
+    """
+    d = len(feature_names)
+    n = X.shape[0]
+    if d == 0 or n == 0:
+        return {f: float('nan') for f in feature_names}
+    y = np.asarray(y).flatten()
+    base_scores = np.nan_to_num(np.asarray(predict_fn(X), float),
+                                nan=0.0, posinf=1.0, neginf=0.0)
+    baseline = score_fn(y, base_scores)
+    rng = np.random.RandomState(random_state)
+    out: Dict[str, float] = {}
+    for i in range(d):
+        drops = []
+        for _ in range(n_repeats):
+            Xp = X.copy()
+            Xp[:, i] = Xp[rng.permutation(n), i]
+            sp = np.nan_to_num(np.asarray(predict_fn(Xp), float),
+                               nan=0.0, posinf=1.0, neginf=0.0)
+            drops.append(baseline - score_fn(y, sp))
+        out[feature_names[i]] = float(np.mean(drops))
+    return out
+
+
+def borda_aggregate_importances(
+    importances_by_method: Dict[str, Dict[str, float]],
+    feature_names: List[str],
+) -> Tuple[Dict[str, float], List[str]]:
+    """
+    Borda count over each method's importance ranking. In a method's descending
+    order a feature at 0-based position p earns (n − 1 − p) points; points are
+    summed across methods. NaN importances are ranked last. Returns
+    ({feature: borda_points}, final_ranking_descending).
+    """
+    n = len(feature_names)
+    borda = {f: 0.0 for f in feature_names}
+    for method, imp in importances_by_method.items():
+        order = sorted(
+            feature_names,
+            key=lambda f: (imp.get(f, float('nan'))
+                           if not np.isnan(imp.get(f, float('nan'))) else -np.inf),
+            reverse=True,
+        )
+        for p, f in enumerate(order):
+            borda[f] += (n - 1 - p)
+    final_ranking = sorted(feature_names, key=lambda f: borda[f], reverse=True)
+    return borda, final_ranking
+
+
+def _competition_ranks(points: Dict[str, float], order: List[str]) -> Dict[str, int]:
+    """
+    Standard competition ranking ("1224"): features with equal points share the
+    smallest rank in their group (so two features tied for 2nd are both rank 2 and
+    the next is rank 4). `order` must be the points-descending feature order.
+    """
+    ranks: Dict[str, int] = {}
+    prev_pts = None
+    rank = 0
+    for i, f in enumerate(order):
+        if prev_pts is None or points[f] != prev_pts:
+            rank = i + 1
+            prev_pts = points[f]
+        ranks[f] = rank
+    return ranks
+
+
+def plot_ga_combination(
+    shap_abs: Dict[str, float],
+    shap_signed: Dict[str, float],
+    pfi_imp: Dict[str, float],
+    borda_points: Dict[str, float],
+    final_ranking: List[str],
+    feature_names: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Two-panel summary of the meta-learner weighting.
+      Left  — grouped horizontal bars per detector: mean|SHAP|, mean SHAP (signed),
+              and PFI importances, each normalised to its own max abs so the three
+              methods are comparable (signed SHAP can be negative).
+      Right — Borda final ranking: horizontal bars of Borda points, winner on top.
+
+    Saves to ga_combination_importance_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+
+    def _norm(dct):
+        vals = [dct.get(f, float('nan')) for f in feature_names]
+        m = np.nanmax(np.abs(vals)) if np.any(~np.isnan(vals)) else 0.0
+        m = m if m > 0 else 1.0
+        return [0.0 if np.isnan(v) else v / m for v in vals]
+
+    fig, (ax_imp, ax_borda) = plt.subplots(1, 2, figsize=(13, max(4, 0.6 * len(feature_names) + 2)))
+
+    y = np.arange(len(feature_names))
+    h = 0.27
+    ax_imp.barh(y - h, _norm(shap_abs), height=h, label="mean|SHAP|", color="#1f77b4")
+    ax_imp.barh(y, _norm(shap_signed), height=h, label="mean SHAP (signed)", color="#9467bd")
+    ax_imp.barh(y + h, _norm(pfi_imp), height=h, label="PFI (F1 drop)", color="#ff7f0e")
+    ax_imp.axvline(0, color="black", linewidth=0.6)
+    ax_imp.set_yticks(y)
+    ax_imp.set_yticklabels(feature_names)
+    ax_imp.invert_yaxis()
+    ax_imp.set_xlabel("Importance (normalised to each method's max |·|)")
+    ax_imp.set_title("Meta-learner feature attribution")
+    ax_imp.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
+    ax_imp.legend(loc="lower right", frameon=False)
+
+    ranked = list(final_ranking)
+    pts = [borda_points.get(f, 0.0) for f in ranked]
+    yb = np.arange(len(ranked))
+    # Competition ranks so tied Borda points share a rank number on the labels.
+    rk = _competition_ranks(borda_points, ranked)
+    ax_borda.barh(yb, pts, color="#2ca02c")
+    ax_borda.set_yticks(yb)
+    ax_borda.set_yticklabels([f"{rk[f]}. {f}" for f in ranked])
+    ax_borda.invert_yaxis()
+    ax_borda.set_xlabel("Borda points")
+    ax_borda.set_title("Final ranking (Borda: SHAP + PFI)")
+    ax_borda.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
+
+    plt.tight_layout(pad=1.2)
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_combination_importance_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def explain_ga_combination(
+    best_ensemble: List[str],
+    algorithm_list: List[str],
+    base_model_predictions_train: np.ndarray,
+    base_model_predictions_test: np.ndarray,
+    y_true_train: np.ndarray,
+    y_true_test: np.ndarray,
+    meta_model_type: str,
+    dataset: str,
+    entity: str,
+    meta_model: Any = None,
+    predict_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    max_explain: int = 200,
+    explain: bool = True,
+) -> Optional[Dict[str, Any]]:
+    """
+    Combination-layer explainability: attribute the best-ensemble meta-learner's
+    output to its detector score-columns via SHAP and PFI, then merge the two
+    rankings with a Borda count. Writes a report + plot under
+    myresults/GA_Ens/{dataset}/{entity}/ and returns a dict (None if explain=False).
+
+    The meta-learner is, in priority order: an injected predict_fn (tests); the
+    GA's actual captured meta_model; or — only as a defensive fallback — a freshly
+    trained model of meta_model_type. The captured model is validated against the
+    feature count and the fallback is used on any mismatch.
+    """
+    if not explain or not best_ensemble:
+        return None
+
+    feature_names = [a for a in algorithm_list if a in best_ensemble]
+    d = len(feature_names)
+    if d == 0:
+        return None
+
+    header = np.array(algorithm_list)
+    mask = np.isin(header, best_ensemble)
+    X_train_f = np.asarray(base_model_predictions_train, dtype=float)[:, mask]
+    X_test_f = np.asarray(base_model_predictions_test, dtype=float)[:, mask]
+    X_train_f = np.nan_to_num(X_train_f, nan=0.0, posinf=1.0, neginf=0.0)
+    X_test_f = np.nan_to_num(X_test_f, nan=0.0, posinf=1.0, neginf=0.0)
+
+    used_source = "injected"
+    if predict_fn is None:
+        candidate = meta_model
+        # Validate the captured model's expected feature width when discoverable.
+        ok = candidate is not None
+        n_in = getattr(candidate, "n_features_in_", None)
+        if ok and n_in is not None and n_in != d:
+            ok = False
+        if ok:
+            predict_fn = lambda Z: candidate.predict_proba(Z)[:, 1]
+            used_source = "captured"
+        else:
+            # Defensive fallback: retrain a meta-model of the requested type.
+            yt = np.asarray(y_true_train).flatten()
+            if len(np.unique(yt)) < 2:
+                yt = inject_synthetic_anomalies(yt)
+            trainer = {
+                'lr': train_meta_model, 'rf': train_meta_model_rf,
+                'gbm': train_meta_model_gbm, 'svm': train_meta_model_svm,
+            }.get(meta_model_type, train_meta_model_rf)
+            model = trainer(X_train_f, yt)
+            predict_fn = lambda Z: model.predict_proba(Z)[:, 1]
+            used_source = "retrained_fallback"
+
+    # Subsample explained rows for SHAP speed (deterministic).
+    n_test = X_test_f.shape[0]
+    if n_test > max_explain:
+        rng = np.random.RandomState(0)
+        idx = rng.choice(n_test, size=max_explain, replace=False)
+        X_explain = X_test_f[idx]
+    else:
+        X_explain = X_test_f
+    baseline_row = X_train_f.mean(axis=0) if X_train_f.shape[0] > 0 else np.zeros(d)
+
+    shap_abs = compute_meta_shap(predict_fn, X_explain, baseline_row, feature_names, mode="abs")
+    shap_signed = compute_meta_shap(predict_fn, X_explain, baseline_row, feature_names, mode="signed")
+    pfi_imp = compute_meta_pfi(predict_fn, X_test_f, y_true_test, feature_names)
+    borda_points, final_ranking = borda_aggregate_importances(
+        {"SHAP_abs": shap_abs, "SHAP_signed": shap_signed, "PFI": pfi_imp}, feature_names)
+
+    baseline_f1 = _best_threshold_f1(
+        y_true_test, np.nan_to_num(np.asarray(predict_fn(X_test_f), float),
+                                   nan=0.0, posinf=1.0, neginf=0.0))
+
+    plot_ga_combination(shap_abs, shap_signed, pfi_imp, borda_points, final_ranking,
+                        feature_names, dataset, entity)
+
+    # Per-method ranks (1 = most important / most positive).
+    def _ranks(imp):
+        order = sorted(feature_names,
+                       key=lambda f: (imp[f] if not np.isnan(imp[f]) else -np.inf),
+                       reverse=True)
+        return {f: i + 1 for i, f in enumerate(order)}
+    shap_abs_rank, shap_signed_rank, pfi_rank = _ranks(shap_abs), _ranks(shap_signed), _ranks(pfi_imp)
+
+    directory = f"myresults/GA_Ens/{dataset}/{entity}/"
+    os.makedirs(directory, exist_ok=True)
+    report_path = os.path.join(
+        directory, f"ga_combination_explainability_{dataset}_{entity}.txt")
+    with open(report_path, "w") as f:
+        f.write("=== GA Ensemble Combination Explainability ===\n")
+        f.write(f"Dataset: {dataset}  |  Entity: {entity}\n")
+        f.write(f"Best ensemble : {list(best_ensemble)}\n")
+        f.write(f"Meta-learner  : {meta_model_type}  (model source: {used_source})\n")
+        f.write(f"Features (detector score columns): {d}\n")
+        f.write(f"Baseline meta-learner F1 (best threshold): {baseline_f1:.4f}\n\n")
+
+        f.write("--- SHAP |.| (mean |SHAP|: magnitude of contribution; label-free) ---\n")
+        f.write(f"      {'detector':<14} {'mean|SHAP|':>12} {'rank':>6}\n")
+        f.write("      " + "-" * 34 + "\n")
+        for f_ in sorted(feature_names, key=lambda x: shap_abs_rank[x]):
+            v = shap_abs[f_]
+            vs = f"{v:.6f}" if not np.isnan(v) else "N/A"
+            f.write(f"      {f_:<14} {vs:>12} {shap_abs_rank[f_]:>6}\n")
+
+        f.write("\n--- SHAP signed (mean SHAP: net direction of contribution; label-free) ---\n")
+        f.write(f"      {'detector':<14} {'mean SHAP':>12} {'rank':>6}\n")
+        f.write("      " + "-" * 34 + "\n")
+        for f_ in sorted(feature_names, key=lambda x: shap_signed_rank[x]):
+            v = shap_signed[f_]
+            vs = f"{v:+.6f}" if not np.isnan(v) else "N/A"
+            f.write(f"      {f_:<14} {vs:>12} {shap_signed_rank[f_]:>6}\n")
+
+        f.write("\n--- PFI (F1 drop when the detector's column is shuffled; label-based) ---\n")
+        f.write(f"      {'detector':<14} {'F1 drop':>12} {'rank':>6}\n")
+        f.write("      " + "-" * 34 + "\n")
+        for f_ in sorted(feature_names, key=lambda x: pfi_rank[x]):
+            v = pfi_imp[f_]
+            vs = f"{v:+.6f}" if not np.isnan(v) else "N/A"
+            f.write(f"      {f_:<14} {vs:>12} {pfi_rank[f_]:>6}\n")
+
+        f.write("\n--- Borda aggregation (SHAP |.| + SHAP signed + PFI) ---\n")
+        f.write(f"      {'detector':<14} {'|SHAP| rk':>9} {'SHAP rk':>8} "
+                f"{'PFI rk':>7} {'Borda pts':>10}\n")
+        f.write("      " + "-" * 52 + "\n")
+        for f_ in final_ranking:
+            f.write(f"      {f_:<14} {shap_abs_rank[f_]:>9} {shap_signed_rank[f_]:>8} "
+                    f"{pfi_rank[f_]:>7} {borda_points[f_]:>10.1f}\n")
+        # Final ranking with ties shown as equals (e.g. "1.A > 2.B = C > 4.D").
+        ranks = _competition_ranks(borda_points, final_ranking)
+        groups: List[Tuple[int, List[str]]] = []
+        for f_ in final_ranking:
+            r = ranks[f_]
+            if groups and groups[-1][0] == r:
+                groups[-1][1].append(f_)
+            else:
+                groups.append((r, [f_]))
+        f.write("\nFinal ranking (Borda): "
+                + " > ".join(f"{r}.{' = '.join(fs)}" for r, fs in groups) + "\n")
+        f.write("\nNote: mean|SHAP| = magnitude of the detector's influence on the meta-learner's "
+                "output; mean SHAP = its net (signed) direction; both are label-free. PFI = F1 drop "
+                "when the column is shuffled (label-based). Borda merges the three rankings.\n")
+
+    return {
+        "best_ensemble": list(best_ensemble),
+        "feature_names": feature_names,
+        "meta_model_type": meta_model_type,
+        "model_source": used_source,
+        "baseline_f1": baseline_f1,
+        "shap_importance": shap_abs,
+        "shap_signed_importance": shap_signed,
+        "pfi_importance": pfi_imp,
+        "borda_points": borda_points,
+        "final_ranking": final_ranking,
+    }
