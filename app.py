@@ -53,6 +53,11 @@ algorithm_list_instances = [
         'CBLOF_1', 'CBLOF_2', 'CBLOF_3', 'CBLOF_4'
     ]
 
+# Sub-stages of the offline model-selection pipeline (stage 6). The --stages CLI
+# flag selects a subset; a strict subset is a "partial run" (runs only those
+# stages + their explainability, then stops before rank aggregation).
+ALL_STAGES = {"ga", "thompson", "gan", "offby", "montecarlo"}
+
 # ------------------------------------------------------------------------------
 # Logging
 # ------------------------------------------------------------------------------
@@ -348,7 +353,7 @@ def load_trained_models(model_names, models_dir):
 # Model-Selection Pipelines
 # ------------------------------------------------------------------------------
 
-def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False, explain=True):
+def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False, explain=True, stages=None):
     """
     One-pass model selection pipeline in the order:
       1) GA (stacking ensemble search)
@@ -383,73 +388,95 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     """
     # Use provided model list or fall back to global
     models_to_use = model_list if model_list is not None else algorithm_list_instances
-    
+
+    # Which sub-stages to run (a strict subset of ALL_STAGES is a "partial run":
+    # those stages execute, then the function returns before rank aggregation).
+    stages = set(ALL_STAGES) if stages is None else set(stages)
+
     timing_dict = {}
     memory_dict = {'modules': {}}
-    
+
+    # Safe defaults so the return tuple is well-formed even when a stage is skipped.
+    best_ensemble = []
+    best_f1 = best_pr_auc = best_fitness = 0.0
+    individual_predictions = None
+    base_model_predictions_train = base_model_predictions_test = None
+    y_true_train = y_true_test = None
+    meta_model_type = None
+    thompson_model_names = []
+    Gan_ranked_by_f1 = Gan_ranked_by_pr_auc = []
+    Gan_ranked_by_f1_names = Gan_ranked_by_pr_auc_names = []
+    ranked_by_f1 = ranked_by_pr_auc = []
+    ranked_by_f1_names_sensitivity = ranked_by_pr_auc_names_sensitivity = []
+    monte_carlo_ranked_models_F1 = monte_carlo_ranked_models_PR = []
+    robust_agg = [None, []]
+    full_aggregated = [None, []]
+
     # Track initial memory
     initial_memory = get_memory_usage_mb()
     memory_dict['initial'] = initial_memory
     logger.info(f"  💾 Initial memory usage: {initial_memory:.2f} MB")
-    
+
     # -------------------------
     # 1) Genetic Algorithm (GA)
     # -------------------------
-    logger.info("  📊 Sub-stage 6.1: Genetic Algorithm (GA) - Finding best ensemble...")
-    logger.info("     This will evaluate individual models and run 20 generations")
-    mem_before = get_memory_usage_mb()
-    start_time = time.time()
-    best_ensemble, best_f1, best_pr_auc, best_fitness, \
-    individual_predictions, base_model_predictions_train, base_model_predictions_test, \
-    y_true_train, y_true_test, meta_model_type = genetic_algorithm(
-        dataset, entity, train_data, test_data,
-        models_to_use, trained_models,
-        population_size=20, generations=20,
-        meta_model_type='rf', mutation_rate=0.1,
-        explain=explain,
-    )
-    timing_dict['1_Genetic_Algorithm'] = time.time() - start_time
-    mem_after = get_memory_usage_mb()
-    memory_dict['modules']['1_Genetic_Algorithm'] = {
-        'before': mem_before,
-        'after': mem_after,
-        'delta': mem_after - mem_before
-    }
-    logger.info(
-        "  ✓ [GA] Best ensemble=%s | F1=%.4f | PR-AUC=%.4f | fitness=%.4f | Time=%.4fs",
-        best_ensemble, best_f1, best_pr_auc, best_fitness, timing_dict['1_Genetic_Algorithm']
-    )
+    if "ga" in stages:
+        logger.info("  📊 Sub-stage 6.1: Genetic Algorithm (GA) - Finding best ensemble...")
+        logger.info("     This will evaluate individual models and run 20 generations")
+        mem_before = get_memory_usage_mb()
+        start_time = time.time()
+        best_ensemble, best_f1, best_pr_auc, best_fitness, \
+        individual_predictions, base_model_predictions_train, base_model_predictions_test, \
+        y_true_train, y_true_test, meta_model_type = genetic_algorithm(
+            dataset, entity, train_data, test_data,
+            models_to_use, trained_models,
+            population_size=20, generations=20,
+            meta_model_type='rf', mutation_rate=0.1,
+            explain=explain,
+        )
+        timing_dict['1_Genetic_Algorithm'] = time.time() - start_time
+        mem_after = get_memory_usage_mb()
+        memory_dict['modules']['1_Genetic_Algorithm'] = {
+            'before': mem_before,
+            'after': mem_after,
+            'delta': mem_after - mem_before
+        }
+        logger.info(
+            "  ✓ [GA] Best ensemble=%s | F1=%.4f | PR-AUC=%.4f | fitness=%.4f | Time=%.4fs",
+            best_ensemble, best_f1, best_pr_auc, best_fitness, timing_dict['1_Genetic_Algorithm']
+        )
 
     # -----------------------------------
     # 2) Thompson Sampling (LinTS, online)
     # -----------------------------------
-    logger.info("  📊 Sub-stage 6.2: Thompson Sampling - Online model selection...")
-    mem_before = get_memory_usage_mb()
-    start_time = time.time()
-    thompson_model_names = run_linear_thompson_sampling(
-        test_data=test_data,
-        trained_models=trained_models,
-        model_names=algorithm_list_instances,
-        dataset=dataset,
-        entity=entity,
-        iterations=50,
-        iteration=iteration,
-        explain=explain,
-    )
-    timing_dict['2_Thompson_Sampling'] = time.time() - start_time
-    mem_after = get_memory_usage_mb()
-    memory_dict['modules']['2_Thompson_Sampling'] = {
-        'before': mem_before,
-        'after': mem_after,
-        'delta': mem_after - mem_before
-    }
-    logger.info("  ✓ [Thompson] Top-5: %s | Time=%.4fs", thompson_model_names[:5], 
-                timing_dict['2_Thompson_Sampling'])
+    if "thompson" in stages:
+        logger.info("  📊 Sub-stage 6.2: Thompson Sampling - Online model selection...")
+        mem_before = get_memory_usage_mb()
+        start_time = time.time()
+        thompson_model_names = run_linear_thompson_sampling(
+            test_data=test_data,
+            trained_models=trained_models,
+            model_names=algorithm_list_instances,
+            dataset=dataset,
+            entity=entity,
+            iterations=50,
+            iteration=iteration,
+            explain=explain,
+        )
+        timing_dict['2_Thompson_Sampling'] = time.time() - start_time
+        mem_after = get_memory_usage_mb()
+        memory_dict['modules']['2_Thompson_Sampling'] = {
+            'before': mem_before,
+            'after': mem_after,
+            'delta': mem_after - mem_before
+        }
+        logger.info("  ✓ [Thompson] Top-5: %s | Time=%.4fs", thompson_model_names[:5],
+                    timing_dict['2_Thompson_Sampling'])
 
     # -------------------------
     # 3) GAN Robustness Testing
     # -------------------------
-    if not skip_gan:
+    if "gan" in stages and not skip_gan:
         logger.info("  📊 Sub-stage 6.3: GAN Robustness Testing...")
         mem_before = get_memory_usage_mb()
         start_time = time.time()
@@ -474,59 +501,114 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                     timing_dict['3_GAN_Robustness'])
         logger.info("     [GAN] PR names top-5: %s", Gan_ranked_by_pr_auc_names[:5])
     else:
-        logger.info("  ⏩ Sub-stage 6.3: GAN Robustness Testing SKIPPED (skip_gan=True)")
-        # Use empty placeholders for skipped GAN
-        Gan_ranked_by_f1 = []
-        Gan_ranked_by_pr_auc = []
-        Gan_ranked_by_f1_names = []
-        Gan_ranked_by_pr_auc_names = []
+        reason = "skip_gan=True" if ("gan" in stages and skip_gan) else "not in --stages"
+        logger.info(f"  ⏩ Sub-stage 6.3: GAN Robustness Testing SKIPPED ({reason})")
+        # Empty placeholders already set above for skipped GAN
         timing_dict['3_GAN_Robustness'] = 0.0
 
     # --------------------------------------------
     # 4) Off-by-threshold (borderline sensitivity)
     # --------------------------------------------
-    logger.info("  📊 Sub-stage 6.4: Off-by-Threshold Testing...")
-    mem_before = get_memory_usage_mb()
-    start_time = time.time()
-    # Use original un-injected data so synthetic spike labels don't cause single-class skips
-    test_data_for_borderline = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
-    ranked_by_f1, ranked_by_pr_auc, \
-    ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = run_off_by_threshold(
-        test_data_for_borderline, trained_models, algorithm_list_instances, dataset, entity
-    )
-    timing_dict['4_Borderline_Sensitivity'] = time.time() - start_time
-    mem_after = get_memory_usage_mb()
-    memory_dict['modules']['4_Borderline_Sensitivity'] = {
-        'before': mem_before,
-        'after': mem_after,
-        'delta': mem_after - mem_before
-    }
-    logger.info("  ✓ [Borderline] F1 names top-5: %s | Time=%.4fs", ranked_by_f1_names_sensitivity[:5],
-                timing_dict['4_Borderline_Sensitivity'])
-    logger.info("     [Borderline] PR names top-5: %s", ranked_by_pr_auc_names_sensitivity[:5])
+    if "offby" in stages:
+        logger.info("  📊 Sub-stage 6.4: Off-by-Threshold Testing...")
+        mem_before = get_memory_usage_mb()
+        start_time = time.time()
+        # Use original un-injected data so synthetic spike labels don't cause single-class skips
+        test_data_for_borderline = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
+        ranked_by_f1, ranked_by_pr_auc, \
+        ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = run_off_by_threshold(
+            test_data_for_borderline, trained_models, algorithm_list_instances, dataset, entity, explain=explain
+        )
+        timing_dict['4_Borderline_Sensitivity'] = time.time() - start_time
+        mem_after = get_memory_usage_mb()
+        memory_dict['modules']['4_Borderline_Sensitivity'] = {
+            'before': mem_before,
+            'after': mem_after,
+            'delta': mem_after - mem_before
+        }
+        logger.info("  ✓ [Borderline] F1 names top-5: %s | Time=%.4fs", ranked_by_f1_names_sensitivity[:5],
+                    timing_dict['4_Borderline_Sensitivity'])
+        logger.info("     [Borderline] PR names top-5: %s", ranked_by_pr_auc_names_sensitivity[:5])
 
     # ---------------------------------
     # 5) Monte Carlo (noise stress test)
     # ---------------------------------
-    logger.info("  📊 Sub-stage 6.5: Monte Carlo Simulation...")
-    mem_before = get_memory_usage_mb()
-    start_time = time.time()
-    # Use original un-injected data for the same reason
-    test_data_for_mc = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
-    monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
-        test_data_for_mc, trained_models, algorithm_list_instances, dataset, entity,
-        n_simulations=2, noise_level=0.1, explain=explain,
-    )
-    timing_dict['5_Monte_Carlo'] = time.time() - start_time
-    mem_after = get_memory_usage_mb()
-    memory_dict['modules']['5_Monte_Carlo'] = {
-        'before': mem_before,
-        'after': mem_after,
-        'delta': mem_after - mem_before
-    }
-    logger.info("  ✓ [MonteCarlo] F1 names top-5: %s | Time=%.4fs", monte_carlo_ranked_models_F1[:5],
-                timing_dict['5_Monte_Carlo'])
-    logger.info("     [MonteCarlo] PR names top-5: %s", monte_carlo_ranked_models_PR[:5])
+    if "montecarlo" in stages:
+        logger.info("  📊 Sub-stage 6.5: Monte Carlo Simulation...")
+        mem_before = get_memory_usage_mb()
+        start_time = time.time()
+        # Use original un-injected data for the same reason
+        test_data_for_mc = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
+        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
+            test_data_for_mc, trained_models, algorithm_list_instances, dataset, entity,
+            n_simulations=2, noise_level=0.1, explain=explain,
+        )
+        timing_dict['5_Monte_Carlo'] = time.time() - start_time
+        mem_after = get_memory_usage_mb()
+        memory_dict['modules']['5_Monte_Carlo'] = {
+            'before': mem_before,
+            'after': mem_after,
+            'delta': mem_after - mem_before
+        }
+        logger.info("  ✓ [MonteCarlo] F1 names top-5: %s | Time=%.4fs", monte_carlo_ranked_models_F1[:5],
+                    timing_dict['5_Monte_Carlo'])
+        logger.info("     [MonteCarlo] PR names top-5: %s", monte_carlo_ranked_models_PR[:5])
+
+    # Builder for the 11-item return tuple, shared by the partial-run early return
+    # below and the full-run return at the end (captures current values at call time).
+    def _result():
+        return (
+            (thompson_model_names[0] if thompson_model_names else None),
+            robust_agg[1],
+            full_aggregated[1],
+            best_ensemble,
+            individual_predictions,
+            base_model_predictions_train,
+            base_model_predictions_test,
+            y_true_train,
+            y_true_test,
+            meta_model_type,
+            {
+                'ga': {'f1': best_f1, 'pr_auc': best_pr_auc, 'fitness': best_fitness},
+                'thompson': thompson_model_names,
+                'gan': {
+                    'f1_names': Gan_ranked_by_f1_names,
+                    'pr_auc_names': Gan_ranked_by_pr_auc_names,
+                    'f1_scores': Gan_ranked_by_f1,
+                    'pr_auc_scores': Gan_ranked_by_pr_auc,
+                    'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
+                    'best_f1': Gan_ranked_by_f1[0][1][0]['f1'] if len(Gan_ranked_by_f1) > 0 else 0.0,
+                    'best_pr_auc': Gan_ranked_by_pr_auc[0][1][0]['pr_auc'] if len(Gan_ranked_by_pr_auc) > 0 else 0.0,
+                },
+                'borderline': {
+                    'f1_names': ranked_by_f1_names_sensitivity,
+                    'pr_auc_names': ranked_by_pr_auc_names_sensitivity,
+                    'f1_scores': ranked_by_f1,
+                    'pr_auc_scores': ranked_by_pr_auc,
+                    'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
+                    'best_f1': ranked_by_f1[0][1][0]['f1'] if len(ranked_by_f1) > 0 else 0.0,
+                    'best_pr_auc': ranked_by_pr_auc[0][1][0]['pr_auc'] if len(ranked_by_pr_auc) > 0 else 0.0,
+                },
+                'monte_carlo': {
+                    'f1_names': monte_carlo_ranked_models_F1,
+                    'pr_auc_names': monte_carlo_ranked_models_PR,
+                    'best_model_f1': monte_carlo_ranked_models_F1[0] if len(monte_carlo_ranked_models_F1) > 0 else 'N/A',
+                    'best_model_pr_auc': monte_carlo_ranked_models_PR[0] if len(monte_carlo_ranked_models_PR) > 0 else 'N/A'
+                },
+                'robust_agg': robust_agg,
+                'full_aggregated': full_aggregated,
+                'timing': timing_dict,
+                'memory': memory_dict
+            }
+        )
+
+    # Partial run (strict subset of stages): rank aggregation needs all robustness
+    # tests + Thompson, so stop here and return what ran.
+    if stages != ALL_STAGES:
+        logger.info(f"  ⏩ Sub-stage 6.6: Rank Aggregation SKIPPED (partial run: {','.join(sorted(stages))})")
+        memory_dict['final'] = get_memory_usage_mb()
+        memory_dict['peak'] = get_peak_memory_mb()
+        return _result()
 
     # -----------------------
     # 6) Rank Aggregations
@@ -597,52 +679,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         f.write(f"{full_aggregated}\n")
 
     # Return extended tuple with all necessary data for comprehensive results
-    return (
-        thompson_model_names[0],
-        robust_agg[1],
-        full_aggregated[1],
-        best_ensemble,
-        individual_predictions,
-        base_model_predictions_train,
-        base_model_predictions_test,
-        y_true_train,
-        y_true_test,
-        meta_model_type,
-        # Additional data for comprehensive results
-        {
-            'ga': {'f1': best_f1, 'pr_auc': best_pr_auc, 'fitness': best_fitness},
-            'thompson': thompson_model_names,
-            'gan': {
-                'f1_names': Gan_ranked_by_f1_names, 
-                'pr_auc_names': Gan_ranked_by_pr_auc_names,
-                'f1_scores': Gan_ranked_by_f1,
-                'pr_auc_scores': Gan_ranked_by_pr_auc,
-                'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
-                'best_f1': Gan_ranked_by_f1[0][1][0]['f1'] if len(Gan_ranked_by_f1) > 0 else 0.0,
-                'best_pr_auc': Gan_ranked_by_pr_auc[0][1][0]['pr_auc'] if len(Gan_ranked_by_pr_auc) > 0 else 0.0,
-            },
-            'borderline': {
-                'f1_names': ranked_by_f1_names_sensitivity, 
-                'pr_auc_names': ranked_by_pr_auc_names_sensitivity,
-                'f1_scores': ranked_by_f1,
-                'pr_auc_scores': ranked_by_pr_auc,
-                'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
-                'best_f1': ranked_by_f1[0][1][0]['f1'] if len(ranked_by_f1) > 0 else 0.0,
-                'best_pr_auc': ranked_by_pr_auc[0][1][0]['pr_auc'] if len(ranked_by_pr_auc) > 0 else 0.0,
-            },
-            'monte_carlo': {
-                'f1_names': monte_carlo_ranked_models_F1, 
-                'pr_auc_names': monte_carlo_ranked_models_PR,
-                # Note: Monte Carlo returns names only, not scores
-                'best_model_f1': monte_carlo_ranked_models_F1[0] if len(monte_carlo_ranked_models_F1) > 0 else 'N/A',
-                'best_model_pr_auc': monte_carlo_ranked_models_PR[0] if len(monte_carlo_ranked_models_PR) > 0 else 'N/A'
-            },
-            'robust_agg': robust_agg,
-            'full_aggregated': full_aggregated,
-            'timing': timing_dict,
-            'memory': memory_dict
-        }
-    )
+    return _result()
 
 
 def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False, explain=True):
@@ -732,7 +769,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         borderline_future = executor.submit(
             run_off_by_threshold,
             test_data_borderline, trained_models, models_to_use,
-            dataset, entity
+            dataset, entity, explain=explain
         )
         monte_carlo_future = executor.submit(
             run_monte_carlo_simulation,
@@ -1124,7 +1161,9 @@ def run_app(algorithm_list, algorithm_list_instances):
     inject_online_regime = args.get('inject_online_regime', False)  # Regime shifts on online data only
     max_online_windows = args.get('max_online_windows', None)  # Limit online windows (None = no limit)
     explain = args.get('explain', True)  # Explainability ON by default; --no_explain disables it
-    
+    stages = set(args.get('stages', ALL_STAGES))  # Which stage-6 sub-stages to run
+    is_partial = stages != ALL_STAGES  # Strict subset → partial run (stop after selected stages)
+
     data_dir = args['dataset_path']
     
     logger.info("="*80)
@@ -1298,7 +1337,9 @@ def run_app(algorithm_list, algorithm_list_instances):
 
         # Start end-to-end timing
         e2e_start_time = time.time()
-        if use_parallel:
+        # Partial runs (a strict subset of stages) always take the sequential path
+        # and stop after the selected stages — see the early-exit just below.
+        if use_parallel and not is_partial:
             logger.info("  ⏱ Starting model selection pipeline (PARALLEL mode)...")
             (best_thompson, robust_agg, full_aggregated, best_ensemble,
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
@@ -1308,16 +1349,29 @@ def run_app(algorithm_list, algorithm_list_instances):
                 test_data_gan=test_data_before, explain=explain
             )
         else:
-            logger.info("  ⏱ Starting model selection pipeline (SEQUENTIAL mode)...")
+            mode = f"PARTIAL: {','.join(sorted(stages))}" if is_partial else "SEQUENTIAL mode"
+            logger.info(f"  ⏱ Starting model selection pipeline ({mode})...")
             (best_thompson, robust_agg, full_aggregated, best_ensemble,
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
                 train_data, test_data_new, dataset, entity, iteration=0,
-                model_list=loaded_model_names, test_data_gan=test_data_before, explain=explain
+                model_list=loaded_model_names, test_data_gan=test_data_before, explain=explain,
+                stages=stages
             )
-        
+
         # Calculate end-to-end time
         e2e_time = time.time() - e2e_start_time
+
+        # Partial run: the selected stages (+ their explainability) are done. The
+        # downstream rank aggregation, ensemble-vs-single decision, comprehensive
+        # report and online phase all require the full set of stages, so stop here.
+        if is_partial:
+            logger.info("="*80)
+            logger.info(f"✅ Partial run complete (stages={','.join(sorted(stages))}). "
+                        f"Skipped rank aggregation, final decision, comprehensive report & online phase. "
+                        f"Time: {e2e_time:.2f}s")
+            logger.info("="*80)
+            return
         logger.info(f"✓ Model selection completed in {e2e_time:.2f}s ({e2e_time/60:.2f} min)")
         
         # Helper function to convert any value to scalar

@@ -74,6 +74,14 @@ def get_args_from_cmdline():
     parser.add_argument('--no_explain',
                         action='store_true',
                         help='Disable all explainability outputs (reports/plots). Explainability is ON by default.')
+    parser.add_argument('--stages',
+                        type=str,
+                        default='all',
+                        help="Comma-separated sub-stages of the model-selection pipeline to run. "
+                             "Tokens: ga, thompson, gan, offby, montecarlo (plus 'all' and "
+                             "'robustness'=gan,offby,montecarlo). Default 'all' runs the full pipeline; "
+                             "any strict subset runs only those stages + their explainability, then stops "
+                             "(no rank aggregation / final decision / online phase) and runs sequentially.")
 
     cmd_args = parser.parse_args()
     
@@ -119,6 +127,21 @@ def get_args_from_cmdline():
 
     # Explainability is ON by default; --no_explain disables it everywhere.
     args['explain'] = not cmd_args.no_explain
+
+    # Which pipeline sub-stages to run. Normalize the comma list into a set of
+    # canonical tokens; 'all' and 'robustness' are convenience groups.
+    _ALL_STAGES = {"ga", "thompson", "gan", "offby", "montecarlo"}
+    _GROUPS = {"all": _ALL_STAGES, "robustness": {"gan", "offby", "montecarlo"}}
+    selected = set()
+    for tok in (t.strip().lower() for t in cmd_args.stages.split(",") if t.strip()):
+        if tok in _GROUPS:
+            selected |= _GROUPS[tok]
+        elif tok in _ALL_STAGES:
+            selected.add(tok)
+        else:
+            parser.error(f"--stages: unknown stage '{tok}'. Valid tokens: "
+                         f"{', '.join(sorted(_ALL_STAGES))}, all, robustness")
+    args['stages'] = selected if selected else set(_ALL_STAGES)
 
     return args
 
