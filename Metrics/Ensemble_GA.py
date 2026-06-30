@@ -989,6 +989,11 @@ def _build_subset_matrix(
     return np.array(rows, dtype=float), np.array(ys, dtype=float)
 
 
+# NOTE: The Complementarity axis (Friedman H) is currently DISABLED in
+# explain_ga_selection. This function and its plots (plot_ga_interaction,
+# plot_ga_total_interaction) are retained, but not invoked, so the axis can be
+# re-enabled by uncommenting the call sites in explain_ga_selection and restoring
+# the complementarity inputs to classify_detector_archetypes / plot_ga_archetypes.
 def compute_friedman_h(
     evaluated_ensembles: Dict[Tuple[str, ...], tuple],
     algorithm_list: List[str],
@@ -1157,27 +1162,28 @@ def compute_survival_rates(
     return out
 
 
-# ── Functional archetypes (intersection of the three axes) ──────────────────
+# ── Functional archetypes (intersection of the axes) ────────────────────────
 
-# Each detector is labelled by the (Utility, Complementarity, Stability) high/low
-# triple as a 3-letter H/L code, e.g. "HLH" = high utility, low complementarity,
-# high stability. A detector with no utility data is "Unclassified".
+# Complementarity (Friedman H) is currently disabled, so each detector is labelled
+# by the (Utility, Stability) high/low pair as a 2-letter H/L code, e.g. "HL" =
+# high utility, low stability. A detector with no utility data is "Unclassified".
 ARCHETYPE_UNCLASSIFIED = "Unclassified"
 
 ARCHETYPE_ORDER = [
-    "HHH", "HHL", "HLH", "HLL", "LHH", "LHL", "LLH", "LLL",
+    "HH", "HL", "LH", "LL",
     ARCHETYPE_UNCLASSIFIED,
 ]
 
 
-def _assign_archetype(u_high: bool, c_high: bool, s_high: bool, util_nan: bool) -> str:
+def _assign_archetype(u_high: bool, s_high: bool, util_nan: bool) -> str:
     """
-    Label the (utility, complementarity, stability) high/low triple as a 3-letter
-    H/L code (e.g. "HLH"). A detector with no utility data is "Unclassified".
+    Label the (utility, stability) high/low pair as a 2-letter H/L code (e.g.
+    "HL"). A detector with no utility data is "Unclassified".
+    (Complementarity axis is currently disabled — see compute_friedman_h note.)
     """
     if util_nan:
         return ARCHETYPE_UNCLASSIFIED
-    return ("H" if u_high else "L") + ("H" if c_high else "L") + ("H" if s_high else "L")
+    return ("H" if u_high else "L") + ("H" if s_high else "L")
 
 
 def _finite_median(values: List[float]) -> float:
@@ -1188,34 +1194,30 @@ def _finite_median(values: List[float]) -> float:
 
 def classify_detector_archetypes(
     mean_marginal: Dict[str, Dict[str, float]],
-    friedman_h: Dict[str, Any],
     survival: Dict[str, List[float]],
     algorithm_list: List[str],
     abs_utility: float = 0.0,
-    abs_complementarity: float = 0.1,
     abs_stability: float = 0.5,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Classify each detector into a functional archetype from the intersection of
-    the three axes. Reports BOTH a relative (median-split) and an absolute
-    (fixed-cutoff) scheme side by side.
+    the two active axes (Utility × Stability). Reports BOTH a relative
+    (median-split) and an absolute (fixed-cutoff) scheme side by side.
+    (Complementarity / Friedman H is currently disabled.)
 
     Axis scalars (per detector):
-      utility         = mean_marginal[d]['contribution']  (Axis 1b only; LOFO excluded)
-      complementarity = friedman_h['H_total'][d]          (Axis 2 total Friedman H)
-      stability_mean  = mean(survival[d])  (the Stability axis)
+      utility        = mean_marginal[d]['contribution']  (Axis 1b only; LOFO excluded)
+      stability_mean = mean(survival[d])  (the Stability axis)
 
     A detector is "stable-high" when its mean survival is above the threshold.
     (stability_trend = P(last) − P(first) is still reported for context, but does
     not affect the classification.)
 
-    Returns {detector: {utility, complementarity, stability_mean, stability_trend,
-                        "relative": {u_high,c_high,s_high,archetype},
-                        "absolute": {u_high,c_high,s_high,archetype}}}.
+    Returns {detector: {utility, stability_mean, stability_trend,
+                        "relative": {u_high,s_high,archetype},
+                        "absolute": {u_high,s_high,archetype}}}.
     """
     util = {d: mean_marginal.get(d, {}).get('contribution', float('nan')) for d in algorithm_list}
-    H_total = friedman_h.get("H_total", {})
-    comp = {d: H_total.get(d, float('nan')) for d in algorithm_list}
     stab_mean, stab_trend = {}, {}
     for d in algorithm_list:
         ys = survival.get(d, [])
@@ -1223,30 +1225,28 @@ def classify_detector_archetypes(
         stab_trend[d] = (ys[-1] - ys[0]) if ys else float('nan')
 
     med_u = _finite_median(list(util.values()))
-    med_c = _finite_median(list(comp.values()))
     med_s = _finite_median(list(stab_mean.values()))
 
     out: Dict[str, Dict[str, Any]] = {}
     for d in algorithm_list:
-        u, c, sm, st = util[d], comp[d], stab_mean[d], stab_trend[d]
+        u, sm, st = util[d], stab_mean[d], stab_trend[d]
         util_nan = bool(np.isnan(u))
 
         schemes: Dict[str, Dict[str, Any]] = {}
-        for scheme, (tu, tc, ts) in (
-            ("relative", (med_u, med_c, med_s)),
-            ("absolute", (abs_utility, abs_complementarity, abs_stability)),
+        for scheme, (tu, ts) in (
+            ("relative", (med_u, med_s)),
+            ("absolute", (abs_utility, abs_stability)),
         ):
             u_high = (not np.isnan(u)) and (not np.isnan(tu)) and (u > tu)
-            c_high = (not np.isnan(c)) and (not np.isnan(tc)) and (c > tc)
             # Stability depends only on the mean survival rate (no trend gate).
             s_high = (not np.isnan(sm)) and (not np.isnan(ts)) and (sm > ts)
             schemes[scheme] = {
-                "u_high": u_high, "c_high": c_high, "s_high": s_high,
-                "archetype": _assign_archetype(u_high, c_high, s_high, util_nan),
+                "u_high": u_high, "s_high": s_high,
+                "archetype": _assign_archetype(u_high, s_high, util_nan),
             }
 
         out[d] = {
-            "utility": u, "complementarity": c,
+            "utility": u,
             "stability_mean": sm, "stability_trend": st,
             "relative": schemes["relative"], "absolute": schemes["absolute"],
         }
@@ -1538,13 +1538,13 @@ def plot_ga_archetypes(
     Two-panel scatter of the axis intersection that drives the archetypes.
     Left = relative (median-split) scheme, right = absolute (fixed cutoffs).
 
-      x = utility (mean marginal contribution), y = complementarity (H_j)
-      marker filled  ⇔ stability-high (else hollow)
-      colour         = assigned archetype (shared categorical palette)
-      dashed lines   = that scheme's utility / complementarity thresholds
+      x = utility (mean marginal contribution), y = stability (mean survival rate)
+      colour       = assigned archetype (shared categorical palette)
+      dashed lines = that scheme's utility / stability thresholds
 
-    Unclassified detectors (NaN utility) are not plotted; they are listed in a
-    caption. Saves to ga_selection_archetypes_{dataset}_{entity}.png.
+    (Complementarity / Friedman H axis is currently disabled.) Unclassified
+    detectors (NaN utility) are not plotted; they are listed in a caption.
+    Saves to ga_selection_archetypes_{dataset}_{entity}.png.
     """
     _ga_plot_rcparams()
     # Shared archetype → colour palette.
@@ -1552,12 +1552,12 @@ def plot_ga_archetypes(
                for i, name in enumerate(ARCHETYPE_ORDER)}
 
     util = {d: archetypes[d]["utility"] for d in algorithm_list}
-    comp = {d: archetypes[d]["complementarity"] for d in algorithm_list}
+    stab = {d: archetypes[d]["stability_mean"] for d in algorithm_list}
     med_u = _finite_median(list(util.values()))
-    med_c = _finite_median(list(comp.values()))
+    med_s = _finite_median(list(stab.values()))
     thresholds = {
-        "relative": (med_u, med_c),
-        "absolute": (0.0, 0.1),
+        "relative": (med_u, med_s),
+        "absolute": (0.0, 0.5),
     }
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
@@ -1566,29 +1566,27 @@ def plot_ga_archetypes(
     seen_labels = set()
 
     for ax, scheme in zip(axes, ("relative", "absolute")):
-        tu, tc = thresholds[scheme]
+        tu, ts = thresholds[scheme]
         for d in algorithm_list:
-            u, c = util[d], comp[d]
+            u, s = util[d], stab[d]
             info = archetypes[d][scheme]
-            if np.isnan(u) or np.isnan(c):
+            if np.isnan(u) or np.isnan(s):
                 continue   # cannot place a point without both coordinates
             arche = info["archetype"]
             colour = palette.get(arche, "#888888")
-            filled = info["s_high"]
             label = arche if arche not in seen_labels else None
             seen_labels.add(arche)
-            ax.scatter([u], [c], s=90, color=colour,
+            ax.scatter([u], [s], s=90, color=colour,
                        edgecolors=colour, linewidths=1.5,
-                       facecolors=colour if filled else "none",
-                       label=label, zorder=3)
-            ax.annotate(d, (u, c), textcoords="offset points", xytext=(5, 4),
+                       facecolors=colour, label=label, zorder=3)
+            ax.annotate(d, (u, s), textcoords="offset points", xytext=(5, 4),
                         fontsize=8, alpha=0.85)
         if not np.isnan(tu):
             ax.axvline(tu, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
-        if not np.isnan(tc):
-            ax.axhline(tc, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
+        if not np.isnan(ts):
+            ax.axhline(ts, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
         ax.set_xlabel("Utility  (mean marginal contribution)")
-        ax.set_ylabel("Complementarity  (total Friedman H_j)")
+        ax.set_ylabel("Stability  (mean survival rate)")
         ax.set_title(f"{scheme.capitalize()} thresholds")
         ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
 
@@ -1601,13 +1599,11 @@ def plot_ga_archetypes(
                 labels.append(li)
     fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.6),
                frameon=False, title="Archetype")
-    fig.text(1.0, 0.30, "filled = stable-high\nhollow = not stable",
-             fontsize=9, va="top")
     if unclassified:
         fig.text(0.5, -0.02, "Unclassified (no marginal-contribution data): "
                  + ", ".join(unclassified), ha="center", fontsize=9, alpha=0.8)
 
-    fig.suptitle("Functional Archetypes · utility × complementarity × stability",
+    fig.suptitle("Functional Archetypes · utility × stability",
                  y=1.02)
     plt.tight_layout(pad=1.2)
     directory = f"myresults/GA_Ens/{dataset}/{entity}/"
@@ -1632,8 +1628,9 @@ def explain_ga_selection(
 ) -> Optional[Dict[str, Any]]:
     """
     GA-ensemble selection explainability: explain *why* each detector ended up
-    in best_ensemble, along three analytical axes (utility, complementarity,
-    stability). Produces three plots and a structured text report under
+    in best_ensemble, along two analytical axes (utility, stability). The
+    Complementarity / Friedman H axis is currently disabled. Produces three plots
+    and a structured text report under
         myresults/GA_Ens/{dataset}/{entity}/
 
     Returns a dict with the computed structures when explain=True; None otherwise.
@@ -1645,15 +1642,16 @@ def explain_ga_selection(
 
     lofo = compute_lofo_utility(best_ensemble, evaluate_fitness)
     mean_marginal = compute_mean_marginal_contribution(evaluated_ensembles, algorithm_list)
-    friedman_h = compute_friedman_h(evaluated_ensembles, algorithm_list)
-    interaction = friedman_h["H_two_way"]
+    # --- Complementarity axis (Friedman H) temporarily disabled ---
+    # friedman_h = compute_friedman_h(evaluated_ensembles, algorithm_list)
+    # interaction = friedman_h["H_two_way"]
     survival = compute_survival_rates(generation_populations, algorithm_list, population_size)
     archetypes = classify_detector_archetypes(
-        mean_marginal, friedman_h, survival, algorithm_list)
+        mean_marginal, survival, algorithm_list)
 
     plot_ga_utility(lofo, mean_marginal, best_ensemble, algorithm_list, dataset, entity)
-    plot_ga_interaction(friedman_h, algorithm_list, dataset, entity)
-    plot_ga_total_interaction(friedman_h, algorithm_list, best_ensemble, dataset, entity)
+    # plot_ga_interaction(friedman_h, algorithm_list, dataset, entity)
+    # plot_ga_total_interaction(friedman_h, algorithm_list, best_ensemble, dataset, entity)
     plot_ga_survival(survival, best_ensemble, dataset, entity)
     plot_ga_archetypes(archetypes, algorithm_list, dataset, entity)
 
@@ -1696,47 +1694,9 @@ def explain_ga_selection(
             f.write(f"      {d:<14} {c:>18} {ep:>10} {ea:>10} "
                     f"{mm['n_present']:>5d} {mm['n_absent']:>5d}\n")
 
-        # ── Axis 2 ────────────────────────────────────────────────────────
+        # ── Axis 2 (Complementarity / Friedman H) — temporarily disabled ───
         f.write("\n--- Axis 2: Inter-model Complementarity (Friedman H-statistic) ---\n")
-        f.write("Friedman & Popescu (2008) H over the GA-explored subset space.\n")
-        f.write("Subset fitness y is modelled as F(z) of the binary inclusion vector z;\n")
-        f.write("a surrogate F̂ is fit on the evaluated (z, y) pairs and H is computed\n")
-        f.write("from its partial dependences.\n")
-        f.write("  Two-way (Eq. 44): H_jk = sqrt( Σ(F̃_jk−F̃_j−F̃_k)² / Σ F̃_jk² )\n")
-        f.write("  Total   (Eq. 45): H_j  = sqrt( Σ(F̃−F̃_j−F̃_\\j)²  / Σ F̃² )\n")
-        r2 = friedman_h.get("surrogate_r2", float('nan'))
-        r2s = f"{r2:.4f}" if not np.isnan(r2) else "N/A"
-        f.write(f"Surrogate: {friedman_h.get('surrogate', '?')}  |  "
-                f"in-sample R²: {r2s}  |  subsets: {friedman_h.get('n_subsets', 0)}  |  "
-                f"feasible: {friedman_h.get('feasible', False)}\n")
-
-        if not friedman_h.get("feasible", False):
-            f.write("\n(Too few / degenerate subsets to fit a surrogate — H undefined.)\n")
-        else:
-            seen = set()
-            finite_pairs = []
-            for (j, k), v in interaction.items():
-                key = tuple(sorted((j, k)))
-                if key in seen or np.isnan(v):
-                    continue
-                seen.add(key)
-                finite_pairs.append((key[0], key[1], v))
-            finite_pairs.sort(key=lambda t: t[2], reverse=True)
-
-            f.write("\nTop-10 strongest two-way interactions (highest H_jk):\n")
-            for j, k, v in finite_pairs[:10]:
-                f.write(f"      {j:<10} x {k:<10}  H_jk = {v:.4f}\n")
-
-            f.write("\nTotal interaction per detector (H_j, Eq. 45), sorted:\n")
-            f.write(f"      {'detector':<14} {'H_j':>10}\n")
-            f.write("      " + "-" * 26 + "\n")
-            H_tot = friedman_h.get("H_total", {})
-            for d, v in sorted(H_tot.items(),
-                               key=lambda t: (-(t[1]) if not np.isnan(t[1]) else 1.0)):
-                vs = f"{v:.4f}" if not np.isnan(v) else "N/A"
-                f.write(f"      {d:<14} {vs:>10}\n")
-        f.write("\n(Two-way heatmap in ga_selection_interaction_*.png; "
-                "total-H bars in ga_selection_total_interaction_*.png)\n")
+        f.write("(Temporarily disabled — the Complementarity axis is currently left out.)\n")
 
         # ── Axis 3 ────────────────────────────────────────────────────────
         f.write("\n--- Axis 3: Stability (Evolutionary Survival) ---\n")
@@ -1753,45 +1713,37 @@ def explain_ga_selection(
                     f"{ys[-1]:>8.3f} {(ys[-1] - ys[0]):>+10.3f}\n")
 
         # ── Synthesis ──────────────────────────────────────────────────────
-        H_tot = friedman_h.get("H_total", {})
+        # (Complementarity columns total-H_j / mean-H-with-peers disabled.)
         f.write("\n--- Synthesis: why each detector of the best ensemble was selected ---\n")
         f.write(f"      {'detector':<14} {'LOFO':>10} {'mean marg.':>12} "
-                f"{'total H_j':>10} {'mean H w/ peers':>16} {'last-gen P':>12}\n")
-        f.write("      " + "-" * 78 + "\n")
+                f"{'last-gen P':>12}\n")
+        f.write("      " + "-" * 50 + "\n")
         for d in best_ensemble:
             lv = lofo.get(d, float('nan'))
             mv = mean_marginal[d]['contribution']
-            hj = H_tot.get(d, float('nan'))
-            peer_hs = [interaction.get((d, other), float('nan'))
-                       for other in best_ensemble if other != d]
-            peer_hs = [x for x in peer_hs if not np.isnan(x)]
-            avg_h = float(np.mean(peer_hs)) if peer_hs else float('nan')
             last_p = survival[d][-1] if survival[d] else float('nan')
 
             def _sgn(v):
                 return f"{v:+.4f}" if not np.isnan(v) else "N/A"
 
-            def _pos(v):
-                return f"{v:.4f}" if not np.isnan(v) else "N/A"
-
             f.write(
                 f"      {d:<14} {_sgn(lv):>10} {_sgn(mv):>12} "
-                f"{_pos(hj):>10} {_pos(avg_h):>16} "
                 f"{(f'{last_p:.3f}' if not np.isnan(last_p) else 'N/A'):>12}\n"
             )
 
         # ── Functional archetypes ──────────────────────────────────────────
+        # (Complementarity axis disabled — archetypes use Utility × Stability.)
         f.write("\n--- Functional Archetypes (axis intersections) ---\n")
         f.write("Utility = mean marginal contribution (Axis 1b only; LOFO excluded).\n")
-        f.write("Complementarity = total Friedman H_j.  Stability = mean survival rate\n")
-        f.write("(trend P_last − P_first is shown for context but does not affect classification).\n")
+        f.write("Stability = mean survival rate "
+                "(trend P_last − P_first is shown for context but does not affect classification).\n")
         f.write("Two threshold schemes reported: relative (median split) | absolute "
-                "(util>0, H_j>0.1, surv>0.5).\n")
-        f.write("Archetype = the (U,C,S) high/low triple as a 3-letter code, e.g. "
-                "HLH = high utility, low complementarity, high stability.\n\n")
-        f.write(f"      {'detector':<14} {'util':>9} {'compl.':>9} {'stab':>7} "
-                f"{'trend':>8}  {'archetype[rel]':<24} {'archetype[abs]'}\n")
-        f.write("      " + "-" * 96 + "\n")
+                "(util>0, surv>0.5).\n")
+        f.write("Archetype = the (U,S) high/low pair as a 2-letter code, e.g. "
+                "HL = high utility, low stability.\n\n")
+        f.write(f"      {'detector':<14} {'util':>9} {'stab':>7} "
+                f"{'trend':>8}  {'archetype[rel]':<16} {'archetype[abs]'}\n")
+        f.write("      " + "-" * 78 + "\n")
 
         def _num(v, fmt="{:+.4f}"):
             return fmt.format(v) if not np.isnan(v) else "N/A"
@@ -1799,9 +1751,9 @@ def explain_ga_selection(
         for d in algorithm_list:
             a = archetypes[d]
             f.write(
-                f"      {d:<14} {_num(a['utility']):>9} {_num(a['complementarity'], '{:.4f}'):>9} "
+                f"      {d:<14} {_num(a['utility']):>9} "
                 f"{_num(a['stability_mean'], '{:.3f}'):>7} {_num(a['stability_trend'], '{:+.3f}'):>8}  "
-                f"{a['relative']['archetype']:<24} {a['absolute']['archetype']}\n"
+                f"{a['relative']['archetype']:<16} {a['absolute']['archetype']}\n"
             )
 
         for scheme in ("relative", "absolute"):
@@ -1812,16 +1764,12 @@ def explain_ga_selection(
             ordered = [(nm, tally[nm]) for nm in ARCHETYPE_ORDER if nm in tally]
             summary = ", ".join(f"{nm}: {ct}" for nm, ct in ordered)
             f.write(f"\n  Tally [{scheme}]: {summary}\n")
-        if not friedman_h.get("feasible", False):
-            f.write("  (Note: Friedman H was infeasible — complementarity treated as low for all.)\n")
 
     return {
         "best_ensemble": list(best_ensemble),
         "lofo": lofo,
         "mean_marginal": mean_marginal,
-        "friedman_h": friedman_h,
-        "H_two_way": friedman_h["H_two_way"],
-        "H_total": friedman_h["H_total"],
+        # Complementarity axis disabled: friedman_h / H_two_way / H_total omitted.
         "survival": survival,
         "archetypes": archetypes,
         "n_subsets_evaluated": n_subsets,
@@ -1834,7 +1782,7 @@ def explain_ga_selection(
 #
 #  Explains *how the meta-learner combines* the chosen detectors, by attributing
 #  its output to the per-detector score columns via two methods, then merging
-#  their rankings with a Borda count:
+#  their rankings with a Markov-chain rank aggregation:
 #    • SHAP — exact interventional Shapley (single mean baseline), label-free.
 #    • PFI  — permutation feature importance measured as F1 drop, label-based.
 # ════════════════════════════════════════════════════════════════════════════
@@ -1951,29 +1899,66 @@ def compute_meta_pfi(
     return out
 
 
-def borda_aggregate_importances(
+def markov_aggregate_importances(
     importances_by_method: Dict[str, Dict[str, float]],
     feature_names: List[str],
+    smoothing: float = 0.1,
 ) -> Tuple[Dict[str, float], List[str]]:
     """
-    Borda count over each method's importance ranking. In a method's descending
-    order a feature at 0-based position p earns (n − 1 − p) points; points are
-    summed across methods. NaN importances are ranked last. Returns
-    ({feature: borda_points}, final_ranking_descending).
+    Markov-chain rank aggregation over each method's importance ranking — the same
+    family as enhanced_markov_chain_rank_aggregator_text in
+    Model_Selection/rank_aggregation.py, reimplemented here (numpy-only) so the
+    Metrics explainability layer stays free of that module's heavy deps and exposes
+    a per-feature stationary score.
+
+    Each method induces a best-first ranking (descending importance; NaN last). A
+    pairwise preference matrix C[i,j] counts the methods that rank i above j. The
+    chain moves preferentially toward the better item: P[i,j] ∝ sigmoid(C[j,i] −
+    C[i,j]) for i≠j, with a small Laplace `smoothing` added to every off-diagonal so
+    the chain is irreducible/aperiodic (a unique stationary distribution exists);
+    rows are then normalised. The stationary distribution π (left eigenvector of P
+    for eigenvalue 1) is the per-feature Markov score — higher π = stronger consensus
+    importance. Returns ({feature: π}, final_ranking_descending).
     """
     n = len(feature_names)
-    borda = {f: 0.0 for f in feature_names}
-    for method, imp in importances_by_method.items():
+    if n == 0:
+        return {}, []
+    if n == 1:
+        return {feature_names[0]: 1.0}, list(feature_names)
+
+    idx = {f: i for i, f in enumerate(feature_names)}
+
+    # Pairwise preference counts from each method's best-first ranking.
+    C = np.zeros((n, n), dtype=float)
+    for imp in importances_by_method.values():
         order = sorted(
             feature_names,
             key=lambda f: (imp.get(f, float('nan'))
                            if not np.isnan(imp.get(f, float('nan'))) else -np.inf),
             reverse=True,
         )
-        for p, f in enumerate(order):
-            borda[f] += (n - 1 - p)
-    final_ranking = sorted(feature_names, key=lambda f: borda[f], reverse=True)
-    return borda, final_ranking
+        for a in range(n):
+            for b in range(a + 1, n):
+                C[idx[order[a]], idx[order[b]]] += 1.0  # order[a] preferred over order[b]
+
+    # Transition matrix: move toward the better item; Laplace smoothing → ergodic.
+    P = np.zeros((n, n), dtype=float)
+    for i in range(n):
+        for j in range(n):
+            if i != j:
+                P[i, j] = 1.0 / (1.0 + np.exp(-(C[j, i] - C[i, j]))) + smoothing
+    P /= P.sum(axis=1, keepdims=True)
+
+    # Stationary distribution: left eigenvector of P for the eigenvalue closest to 1.
+    vals, vecs = np.linalg.eig(P.T)
+    k = int(np.argmin(np.abs(vals - 1.0)))
+    pi = np.abs(vecs[:, k].real)
+    total = pi.sum()
+    pi = pi / total if total > 0 else np.full(n, 1.0 / n)
+
+    scores = {f: float(pi[idx[f]]) for f in feature_names}
+    final_ranking = sorted(feature_names, key=lambda f: scores[f], reverse=True)
+    return scores, final_ranking
 
 
 def _competition_ranks(points: Dict[str, float], order: List[str]) -> Dict[str, int]:
@@ -1997,7 +1982,7 @@ def plot_ga_combination(
     shap_abs: Dict[str, float],
     shap_signed: Dict[str, float],
     pfi_imp: Dict[str, float],
-    borda_points: Dict[str, float],
+    markov_scores: Dict[str, float],
     final_ranking: List[str],
     feature_names: List[str],
     dataset: str,
@@ -2008,7 +1993,8 @@ def plot_ga_combination(
       Left  — grouped horizontal bars per detector: mean|SHAP|, mean SHAP (signed),
               and PFI importances, each normalised to its own max abs so the three
               methods are comparable (signed SHAP can be negative).
-      Right — Borda final ranking: horizontal bars of Borda points, winner on top.
+      Right — Markov final ranking: horizontal bars of the stationary-probability
+              score, winner on top.
 
     Saves to ga_combination_importance_{dataset}_{entity}.png.
     """
@@ -2020,7 +2006,7 @@ def plot_ga_combination(
         m = m if m > 0 else 1.0
         return [0.0 if np.isnan(v) else v / m for v in vals]
 
-    fig, (ax_imp, ax_borda) = plt.subplots(1, 2, figsize=(13, max(4, 0.6 * len(feature_names) + 2)))
+    fig, (ax_imp, ax_markov) = plt.subplots(1, 2, figsize=(13, max(4, 0.6 * len(feature_names) + 2)))
 
     y = np.arange(len(feature_names))
     h = 0.27
@@ -2037,17 +2023,17 @@ def plot_ga_combination(
     ax_imp.legend(loc="lower right", frameon=False)
 
     ranked = list(final_ranking)
-    pts = [borda_points.get(f, 0.0) for f in ranked]
+    pts = [markov_scores.get(f, 0.0) for f in ranked]
     yb = np.arange(len(ranked))
-    # Competition ranks so tied Borda points share a rank number on the labels.
-    rk = _competition_ranks(borda_points, ranked)
-    ax_borda.barh(yb, pts, color="#2ca02c")
-    ax_borda.set_yticks(yb)
-    ax_borda.set_yticklabels([f"{rk[f]}. {f}" for f in ranked])
-    ax_borda.invert_yaxis()
-    ax_borda.set_xlabel("Borda points")
-    ax_borda.set_title("Final ranking (Borda: SHAP + PFI)")
-    ax_borda.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
+    # Competition ranks so tied Markov scores share a rank number on the labels.
+    rk = _competition_ranks(markov_scores, ranked)
+    ax_markov.barh(yb, pts, color="#2ca02c")
+    ax_markov.set_yticks(yb)
+    ax_markov.set_yticklabels([f"{rk[f]}. {f}" for f in ranked])
+    ax_markov.invert_yaxis()
+    ax_markov.set_xlabel("Markov score (stationary prob.)")
+    ax_markov.set_title("Final ranking (Markov: SHAP + PFI)")
+    ax_markov.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
 
     plt.tight_layout(pad=1.2)
     directory = f"myresults/GA_Ens/{dataset}/{entity}/"
@@ -2074,9 +2060,10 @@ def explain_ga_combination(
 ) -> Optional[Dict[str, Any]]:
     """
     Combination-layer explainability: attribute the best-ensemble meta-learner's
-    output to its detector score-columns via SHAP and PFI, then merge the two
-    rankings with a Borda count. Writes a report + plot under
-    myresults/GA_Ens/{dataset}/{entity}/ and returns a dict (None if explain=False).
+    output to its detector score-columns via SHAP and PFI, then merge the three
+    rankings (mean|SHAP|, signed SHAP, PFI) with a Markov-chain rank aggregation.
+    Writes a report + plot under myresults/GA_Ens/{dataset}/{entity}/ and returns a
+    dict (None if explain=False).
 
     The meta-learner is, in priority order: an injected predict_fn (tests); the
     GA's actual captured meta_model; or — only as a defensive fallback — a freshly
@@ -2135,14 +2122,14 @@ def explain_ga_combination(
     shap_abs = compute_meta_shap(predict_fn, X_explain, baseline_row, feature_names, mode="abs")
     shap_signed = compute_meta_shap(predict_fn, X_explain, baseline_row, feature_names, mode="signed")
     pfi_imp = compute_meta_pfi(predict_fn, X_test_f, y_true_test, feature_names)
-    borda_points, final_ranking = borda_aggregate_importances(
+    markov_scores, final_ranking = markov_aggregate_importances(
         {"SHAP_abs": shap_abs, "SHAP_signed": shap_signed, "PFI": pfi_imp}, feature_names)
 
     baseline_f1 = _best_threshold_f1(
         y_true_test, np.nan_to_num(np.asarray(predict_fn(X_test_f), float),
                                    nan=0.0, posinf=1.0, neginf=0.0))
 
-    plot_ga_combination(shap_abs, shap_signed, pfi_imp, borda_points, final_ranking,
+    plot_ga_combination(shap_abs, shap_signed, pfi_imp, markov_scores, final_ranking,
                         feature_names, dataset, entity)
 
     # Per-method ranks (1 = most important / most positive).
@@ -2189,15 +2176,15 @@ def explain_ga_combination(
             vs = f"{v:+.6f}" if not np.isnan(v) else "N/A"
             f.write(f"      {f_:<14} {vs:>12} {pfi_rank[f_]:>6}\n")
 
-        f.write("\n--- Borda aggregation (SHAP |.| + SHAP signed + PFI) ---\n")
+        f.write("\n--- Markov aggregation (SHAP |.| + SHAP signed + PFI) ---\n")
         f.write(f"      {'detector':<14} {'|SHAP| rk':>9} {'SHAP rk':>8} "
-                f"{'PFI rk':>7} {'Borda pts':>10}\n")
+                f"{'PFI rk':>7} {'Markov π':>10}\n")
         f.write("      " + "-" * 52 + "\n")
         for f_ in final_ranking:
             f.write(f"      {f_:<14} {shap_abs_rank[f_]:>9} {shap_signed_rank[f_]:>8} "
-                    f"{pfi_rank[f_]:>7} {borda_points[f_]:>10.1f}\n")
+                    f"{pfi_rank[f_]:>7} {markov_scores[f_]:>10.4f}\n")
         # Final ranking with ties shown as equals (e.g. "1.A > 2.B = C > 4.D").
-        ranks = _competition_ranks(borda_points, final_ranking)
+        ranks = _competition_ranks(markov_scores, final_ranking)
         groups: List[Tuple[int, List[str]]] = []
         for f_ in final_ranking:
             r = ranks[f_]
@@ -2205,11 +2192,13 @@ def explain_ga_combination(
                 groups[-1][1].append(f_)
             else:
                 groups.append((r, [f_]))
-        f.write("\nFinal ranking (Borda): "
+        f.write("\nFinal ranking (Markov): "
                 + " > ".join(f"{r}.{' = '.join(fs)}" for r, fs in groups) + "\n")
         f.write("\nNote: mean|SHAP| = magnitude of the detector's influence on the meta-learner's "
                 "output; mean SHAP = its net (signed) direction; both are label-free. PFI = F1 drop "
-                "when the column is shuffled (label-based). Borda merges the three rankings.\n")
+                "when the column is shuffled (label-based). A Markov-chain rank aggregation "
+                "(stationary distribution over the three methods' pairwise preferences) merges the "
+                "rankings; π is each detector's stationary probability (higher = stronger consensus).\n")
 
     return {
         "best_ensemble": list(best_ensemble),
@@ -2220,6 +2209,6 @@ def explain_ga_combination(
         "shap_importance": shap_abs,
         "shap_signed_importance": shap_signed,
         "pfi_importance": pfi_imp,
-        "borda_points": borda_points,
+        "markov_scores": markov_scores,
         "final_ranking": final_ranking,
     }
