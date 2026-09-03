@@ -131,11 +131,11 @@ class ArtifactTreeCase(unittest.TestCase):
                  "subject": "NN_1",
                  "value": {"channel": 3, "total": 0.559322,
                            "per_channel": [[3, 0.229], [0, 0.101]]},
-                 "text": "NN_1's score is built mostly from channel 3 (41.0%)."},
+                 "text": "NN_1's score is built mostly from context feature 3 (41.0%)."},
                 {"id": "tsr.gap.runner_up", "type": "rank_gap", "subject": "NN_1",
                  "value": {"rivals": ["NN_2"], "runner_up": "NN_2",
                            "per_channel": [[3, 0.091], [0, -0.058]]},
-                 "text": "NN_1's lead over NN_2 came mostly from channel 3."},
+                 "text": "NN_1's lead over NN_2 came mostly from context feature 3."},
                 {"id": "tsr.regime.0", "type": "regime", "subject": "NN_2",
                  "value": {"start": 10, "end": 71, "duration": 62, "leader": "NN_2"},
                  "text": "Regime 0 (windows 10 to 71, 62 windows) was led by NN_2."},
@@ -144,7 +144,7 @@ class ArtifactTreeCase(unittest.TestCase):
                _nl("The ranking score is the sum of every squared weight.",
                    "Ranked by the size of its learned weights, NN_1 scored "
                    "0.559322, ahead of NN_2 by 0.000410. NN_1's score is built "
-                   "mostly from channel 3 (41.0%). Regime 0 (windows 10 to 71, "
+                   "mostly from context feature 3 (41.0%). Regime 0 (windows 10 to 71, "
                    "62 windows) was led by NN_2."))
 
         _write(self.ir_dir / "ir_monte_carlo.json", _ir(
@@ -440,12 +440,16 @@ class TestBuildPayload(ArtifactTreeCase):
         self.assertIsNotNone(artifacts.build_payload("skab", "7"))
         self.assertIsNotNone(artifacts.build_payload("SKAB", "7"))
 
-    def test_glossary_is_separated_from_narrative(self):
+    def test_legacy_glossary_is_stripped_from_the_narrative(self):
+        """Footers are no longer written — the documentation page carries the
+        glossary — but files from earlier runs still lead with the marker, and
+        the reader must not render one as prose."""
         p = artifacts.build_payload(self.DATASET, self.ENTITY)
         ts = next(s for s in p["stages"] if s["key"] == "thompson_sampling")
-        self.assertEqual(ts["info"], "Expected reward is the weights applied to the window.")
         self.assertEqual(ts["full"], "Thompson Sampling ranked NN_1 first.")
         self.assertNotIn("INFO:", ts["full"])
+        self.assertNotIn("Expected reward is the weights", ts["full"])
+        self.assertNotIn("info", ts)
 
     def test_headline_pick_handles_each_stages_naming(self):
         p = artifacts.build_payload(self.DATASET, self.ENTITY)
@@ -861,7 +865,7 @@ class TestThompsonRegimeHandling(unittest.TestCase):
              "text": "The 173 windows split into 2 regimes led by 2 detectors."},
             {"id": "ts.winner.channels", "type": "winner_channels",
              "subject": "NN_1", "value": {},
-             "text": "Across the regimes NN_1 led, channel 7 contributed most."},
+             "text": "Across the regimes NN_1 led, context feature 7 contributed most."},
         ]
         for i, (lead, a, b) in enumerate(((("NN_3"), 0, 4), ("NN_1", 5, 18))):
             atoms.append({"id": f"ts.regime.{i}", "type": "regime", "subject": lead,
@@ -872,8 +876,8 @@ class TestThompsonRegimeHandling(unittest.TestCase):
     NARRATIVE = (
         "Thompson Sampling ranked NN_1 first. The run was divided into 2 "
         "regimes led by 2 detectors. Regime 0 (windows 0 to 4) was led by "
-        "NN_3, with channel 7 raising its reward. Regime 1 (windows 5 to 18) "
-        "was led by NN_1. Across the regimes NN_1 led, channel 7 contributed "
+        "NN_3, with context feature 7 raising its reward. Regime 1 (windows 5 to 18) "
+        "was led by NN_1. Across the regimes NN_1 led, context feature 7 contributed "
         "most.")
 
     # A regime's second sentence — the deviation clause — carries no detector
@@ -881,11 +885,11 @@ class TestThompsonRegimeHandling(unittest.TestCase):
     TWO_SENTENCE_NARRATIVE = (
         "Thompson Sampling ranked NN_1 first. The run was divided into 2 "
         "regimes led by 2 detectors. Regime 0 (windows 0 to 4) was led by "
-        "NN_3, with channel 7 raising its reward. In regime 0, channel 4 "
+        "NN_3, with context feature 7 raising its reward. In regime 0, context feature 4 "
         "departed furthest from its usual contribution, running below it. "
-        "Regime 1 (windows 5 to 18) was led by NN_1. In regime 1, channel 7 "
+        "Regime 1 (windows 5 to 18) was led by NN_1. In regime 1, context feature 7 "
         "departed furthest from its usual contribution, running above it. "
-        "Across the regimes NN_1 led, channel 7 contributed most.")
+        "Across the regimes NN_1 led, context feature 7 contributed most.")
 
     def test_regime_walk_leaves_the_default_view(self):
         out = summarize.summarize(self.NARRATIVE, stage="thompson_sampling",
@@ -893,37 +897,41 @@ class TestThompsonRegimeHandling(unittest.TestCase):
         self.assertNotIn("Regime 0", out["summary"])
         self.assertNotIn("Regime 1", out["summary"])
 
-    def test_ordinal_worded_regimes_attach_to_nothing(self):
-        """Why the prompt demands the literal "Regime N".
+    def test_a_regime_is_anchored_by_its_index_or_its_window_range(self):
+        """The two forms the prompt offers, and the one it does not.
 
-        A narrative that says "the first regime" pairs with no regime atom, and
-        there is NO error: `narrated` stays empty and the disclosure quietly
-        renders the IR's own wording instead. Every regime on SMD's ranking
-        stage was in that state, and the page looked fine.
+        A word-ordinal ("the first regime") is not an anchor: the narrator
+        wrote it for every regime at once, so it identifies nothing. The index
+        and the window range each identify one regime exactly, and accepting
+        both is what lets the openings vary. Failure is quiet either way —
+        `narrated` stays empty and the disclosure renders the IR's own wording.
         """
         ir_doc = self._ir()
+        for narrative in (
+            ("Thompson Sampling ranked NN_1 first. Regime 0 (windows 0 "
+             "to 4) was led by NN_3. Regime 1 (windows 5 to 18) was led "
+             "by NN_1."),
+            ("Thompson Sampling ranked NN_1 first. Across windows 0 to 4, "
+             "NN_3 was in charge. NN_1 then led from window 5 to 18."),
+        ):
+            regimes = artifacts._regimes_from_ir(ir_doc)
+            artifacts._attach_narrated_regimes(regimes, narrative, ir_doc)
+            self.assertTrue(all(r.get("narrated") for r in regimes), narrative)
+
         ordinal = ("Thompson Sampling ranked NN_1 first. In the first regime "
-                   "(windows 0 to 4), NN_3 was in charge. The second regime "
-                   "(windows 5 to 18) was led by NN_1.")
+                   "NN_3 was in charge. The second regime was led by NN_1.")
         regimes = artifacts._regimes_from_ir(ir_doc)
         artifacts._attach_narrated_regimes(regimes, ordinal, ir_doc)
         self.assertTrue(all(not r.get("narrated") for r in regimes))
-
-        numbered = ("Thompson Sampling ranked NN_1 first. Regime 0 (windows 0 "
-                    "to 4) was led by NN_3. Regime 1 (windows 5 to 18) was led "
-                    "by NN_1.")
-        regimes = artifacts._regimes_from_ir(ir_doc)
-        artifacts._attach_narrated_regimes(regimes, numbered, ir_doc)
-        self.assertTrue(all(r.get("narrated") for r in regimes))
 
     def test_a_regimes_second_sentence_goes_with_its_regime(self):
         """Resilience, not the primary path: the IR now packs every claim about
         a regime into ONE sentence, so there is normally no second sentence to
         strand. But the narrator may still split one off, and if it does the
         clause must carry the regime number — that name is the only thing
-        attribution can key on. It has no detector name, and its lone channel
+        attribution can key on. It has no detector name, and its lone context feature
         index gets captured by whichever unrelated atom holds that integer
-        ("channel 4" landing on the regime summary's "4 detectors"). Unanchored,
+        ("context feature 4" landing on the regime summary's "4 detectors"). Unanchored,
         such sentences escaped the walk, survived the summary drop, and piled up
         as a block of context-free sentences at the end of the card.
         """
@@ -932,16 +940,45 @@ class TestThompsonRegimeHandling(unittest.TestCase):
                                   stage="thompson_sampling", ir_doc=ir_doc)
         # Gone from the default view, with the rest of the walk.
         self.assertNotIn("departed furthest", out["summary"])
-        # And filed under the right regime — channel 4 with 0, channel 7 with 1.
+        # And filed under the right regime — context feature 4 with 0, context feature 7 with 1.
         regimes = artifacts._regimes_from_ir(ir_doc)
         artifacts._attach_narrated_regimes(regimes, self.TWO_SENTENCE_NARRATIVE,
                                            ir_doc)
-        self.assertIn("channel 4 departed furthest", regimes[0]["narrated"])
-        self.assertNotIn("channel 7 departed", regimes[0]["narrated"])
-        self.assertIn("channel 7 departed furthest", regimes[1]["narrated"])
+        self.assertIn("context feature 4 departed furthest", regimes[0]["narrated"])
+        self.assertNotIn("context feature 7 departed", regimes[0]["narrated"])
+        self.assertIn("context feature 7 departed furthest", regimes[1]["narrated"])
         # The roll-up says "regimes" with no index and must NOT be swallowed by
         # the last regime just because it trails the walk.
         self.assertNotIn("contributed most", regimes[1]["narrated"])
+
+    CARRIED_NARRATIVE = (
+        "Thompson Sampling ranked NN_1 first. The run was divided into 2 "
+        "regimes led by 2 detectors. Regime 0 (windows 0 to 4) was led by "
+        "NN_3, with context feature 7 raising its reward. This regime also "
+        "saw context feature 4 depart furthest from its usual contribution. "
+        "Regime 1 (windows 5 to 18) was led by NN_1. Across the regimes NN_1 "
+        "led, context feature 7 contributed most.")
+
+    def test_an_unanchored_second_sentence_carries_the_regime_forward(self):
+        """Only the FIRST sentence about a regime needs an anchor. The second
+        may refer back ("This regime also saw ..."), which is what lets the
+        walk read as prose rather than eight copies of one template.
+
+        The veto is the roll-up that trails the last regime: it accounts for an
+        atom of its own, so it breaks the carry rather than joining regime 1.
+        """
+        ir_doc = self._ir()
+        regimes = artifacts._regimes_from_ir(ir_doc)
+        artifacts._attach_narrated_regimes(regimes, self.CARRIED_NARRATIVE, ir_doc)
+        self.assertIn("depart furthest", regimes[0]["narrated"])
+        self.assertNotIn("depart furthest", regimes[1].get("narrated", ""))
+        self.assertNotIn("contributed most", regimes[1]["narrated"])
+
+        out = summarize.summarize(self.CARRIED_NARRATIVE,
+                                  stage="thompson_sampling", ir_doc=ir_doc)
+        # It leaves the default view WITH its regime, not stranded after it.
+        self.assertNotIn("depart furthest", out["summary"])
+        self.assertIn("Across the regimes NN_1 led", out["summary"])
 
     def test_the_regime_disclosure_is_the_only_extended_view(self):
         """The regime sentences belong beside their SHAP plots, not in a second
@@ -963,7 +1000,7 @@ class TestThompsonRegimeHandling(unittest.TestCase):
 
     def test_roll_up_sentences_survive_the_regime_walk(self):
         """These lost ties against regime atoms and vanished with them: both
-        share one detector name and one channel number with some regime. A
+        share one detector name and one context feature number with some regime. A
         regime is identified by its index or not at all."""
         out = summarize.summarize(self.NARRATIVE, stage="thompson_sampling",
                                   ir_doc=self._ir())
@@ -976,7 +1013,7 @@ class TestThompsonRegimeHandling(unittest.TestCase):
         artifacts._attach_narrated_regimes(regimes, self.NARRATIVE, self._ir())
         self.assertEqual(regimes[0]["narrated"],
                          "Regime 0 (windows 0 to 4) was led by NN_3, with "
-                         "channel 7 raising its reward.")
+                         "context feature 7 raising its reward.")
         self.assertIn("Regime 1", regimes[1]["narrated"])
         # The deterministic text stays as the fallback.
         self.assertTrue(regimes[0]["text"])
@@ -1003,11 +1040,11 @@ class TestThompsonRankingStage(unittest.TestCase):
              "subject": "NN_1",
              "value": {"channel": 3, "total": 0.5,
                        "per_channel": [[3, 0.25], [0, 0.15], [7, 0.10]]},
-             "text": "NN_1's score is built mostly from channel 3 (50.0%)."},
+             "text": "NN_1's score is built mostly from context feature 3 (50.0%)."},
             {"id": "tsr.gap.runner_up", "type": "rank_gap", "subject": "NN_1",
              "value": {"rivals": ["NN_2"], "runner_up": "NN_2",
                        "per_channel": [[3, 0.091], [0, -0.058]]},
-             "text": "NN_1's lead over NN_2 came mostly from channel 3 (0.091)."},
+             "text": "NN_1's lead over NN_2 came mostly from context feature 3 (0.091)."},
             {"id": "tsr.support", "type": "support", "subject": "NN_1",
              "value": {"winner_selections": 23, "runner_up": "NN_2"},
              "text": "NN_1 was selected in 23 of the 173 windows, against 30 "
@@ -1024,20 +1061,20 @@ class TestThompsonRankingStage(unittest.TestCase):
 
     NARRATIVE = (
         "Ranked by the size of its learned weights, NN_1 scored 0.559322, ahead "
-        "of NN_2 by 0.000410. NN_1's score is built mostly from channel 3 "
-        "(50.0%). NN_1's lead over NN_2 came mostly from channel 3 (0.091). "
+        "of NN_2 by 0.000410. NN_1's score is built mostly from context feature 3 "
+        "(50.0%). NN_1's lead over NN_2 came mostly from context feature 3 (0.091). "
         "NN_1 was selected in 23 of the 173 windows, against 30 for NN_2. "
         "Leadership splits into 2 regimes led by 2 detectors. Regime 0 (windows "
         "10 to 71) was led by NN_2. Regime 1 (windows 72 to 172) was led by NN_1.")
 
     def test_summary_stops_after_the_answer(self):
-        """The default view answers the question — winner, the channels its
-        score is built from, which channels decided the margin — and stops.
+        """The default view answers the question — winner, the context features its
+        score is built from, which context features decided the margin — and stops.
         The selection counts, the regime walk and the limitations are all
         supporting detail behind the click."""
         out = summarize.summarize(self.NARRATIVE, stage="thompson_ranking",
                                   ir_doc=self._ir())
-        self.assertIn("built mostly from channel 3", out["summary"])
+        self.assertIn("built mostly from context feature 3", out["summary"])
         self.assertIn("lead over NN_2", out["summary"])
         for held_back in ("Regime 0", "Regime 1", "Leadership splits",
                           "was selected in"):
@@ -1063,26 +1100,26 @@ class TestThompsonRankingStage(unittest.TestCase):
 
 
     def test_a_drop_stage_can_also_carry_a_table(self):
-        """The channel split is the stage's headline answer and 38 channels on
+        """The context feature split is the stage's headline answer and 38 context features on
         SMD do not read as prose, so this stage holds sentences back AND
         tabulates — a combination no other stage used before."""
         out = summarize.summarize(self.NARRATIVE, stage="thompson_ranking",
                                   ir_doc=self._ir())
         table = out["table"]
         self.assertEqual(table["columns"],
-                         ["Channel", "Share", "Contribution", "vs NN_2"])
+                         ["Context feature", "Share", "Contribution", "vs NN_2"])
         self.assertEqual([r[0] for r in table["rows"]],
-                         ["channel 3", "channel 0", "channel 7"])
+                         ["context feature 3", "context feature 0", "context feature 7"])
         self.assertEqual(table["collapse_after"], 5)
         self.assertEqual(table["rows"][0][1], "50.0%")
         self.assertEqual(table["rows"][0][3], "+0.091000")
-        # A channel the gap atom does not mention renders as a blank, not a zero:
+        # A context feature the gap atom does not mention renders as a blank, not a zero:
         # "no delta recorded" and "the two are level" are different claims.
         self.assertIsNone(table["rows"][2][3])
 
-    def test_the_table_keeps_every_channel_and_folds_the_tail(self):
+    def test_the_table_keeps_every_context_feature_and_folds_the_tail(self):
         """The shares only mean anything because they sum to the whole score,
-        so no channel may be dropped however many there are — SMD carries 38.
+        so no context feature may be dropped however many there are — SMD carries 38.
         The default view shows five; the rest are folded, not discarded."""
         ir_doc = self._ir()
         atom = next(a for a in ir_doc["evidence"] if a["type"] == "winner_channels")
@@ -1302,6 +1339,19 @@ class TestCatalog(unittest.TestCase):
         for name in ("ABOD_1", "KDE_1", "IFOREST_1", "HBOS_1", "OCSVM_1"):
             self.assertIn(name, dets)
             self.assertFalse(dets[name]["available"], name)
+
+    def test_width_unsuitable_families_are_hidden_not_disabled(self):
+        """A missing checkpoint can be trained; a family that cannot mean
+        anything at this width can never run, so the run page should not offer
+        it at all. `app.py` drops it too — this is the UI half."""
+        from Utils.pipeline_spec import UNIVARIATE_FAMILIES, MULTIVARIATE_FAMILIES
+        self.assertEqual(catalog.unusable_families(38), UNIVARIATE_FAMILIES)
+        self.assertEqual(catalog.unusable_families(1), MULTIVARIATE_FAMILIES)
+
+    def test_unknown_channel_count_hides_nothing(self):
+        """Failing open: hiding a usable detector is worse than showing one the
+        run would drop anyway."""
+        self.assertEqual(catalog.unusable_families(None), frozenset())
 
     def test_every_detector_carries_its_paper_group(self):
         """The run page colours chips and builds its select-all buttons from
@@ -1642,9 +1692,9 @@ class TestPlots(unittest.TestCase):
         self.assertEqual([f["title"] for f in variants[1]],
                          ["Expected-reward contribution"])
 
-    def test_channel_plot_captions_state_the_selection_rule(self):
-        """These figures plot a subset — 9 channels on SKAB, 38 on SMD — and the
-        bars cannot say whether a missing channel was small or just not picked.
+    def test_context_feature_plot_captions_state_the_selection_rule(self):
+        """These figures plot a subset — 9 context features on SKAB, 38 on SMD — and the
+        bars cannot say whether a missing context feature was small or just not picked.
 
         Both mean|SHAP| figures carry the rule. The headline captions were
         deliberately shortened and no longer repeat it, so this asserts on the
@@ -1830,6 +1880,43 @@ class TestBuildArgv(unittest.TestCase):
         self.assertEqual(argv[argv.index("--max_online_windows") + 1], "50")
         self.assertEqual(argv[argv.index("--iteration") + 1], "3")
         self.assertEqual(argv[argv.index("--strategy") + 1], "fixed-best")
+
+    def test_anomaly_flags(self):
+        argv = self._argv(anomaly_type="wander", anomaly_rate=0.25)
+        self.assertEqual(argv[argv.index("--anomaly_type") + 1], "wander")
+        self.assertEqual(argv[argv.index("--anomaly_rate") + 1], "0.25")
+
+    def test_default_anomaly_type_emits_no_flag(self):
+        self.assertNotIn("--anomaly_type", self._argv(anomaly_type="spikes"))
+        self.assertNotIn("--anomaly_type", self._argv())
+        self.assertNotIn("--anomaly_rate", self._argv())
+
+    def test_decision_metric_flag(self):
+        argv = self._argv(decision_metric="pr_auc")
+        self.assertEqual(argv[argv.index("--decision_metric") + 1], "pr_auc")
+
+    def test_default_decision_metric_emits_no_flag(self):
+        self.assertNotIn("--decision_metric", self._argv(decision_metric="f1,pr_auc"))
+        self.assertNotIn("--decision_metric", self._argv())
+
+    def test_a_single_metric_is_no_longer_the_default(self):
+        argv = self._argv(decision_metric="f1")
+        self.assertEqual(argv[argv.index("--decision_metric") + 1], "f1")
+
+    def test_weighted_decision_metrics_reach_the_flag(self):
+        argv = self._argv(decision_metrics={"f1": 0.5, "pr_auc": 0.3, "vus": 0.2})
+        self.assertEqual(argv[argv.index("--decision_metric") + 1],
+                         "f1:0.5,pr_auc:0.3,vus:0.2")
+
+    def test_uniform_weights_keep_the_plain_spelling(self):
+        argv = self._argv(decision_metrics={"f1": 1, "vus": 1})
+        self.assertEqual(argv[argv.index("--decision_metric") + 1], "f1,vus")
+
+    def test_uniform_weights_on_the_default_metrics_emit_no_flag(self):
+        self.assertNotIn("--decision_metric",
+                         self._argv(decision_metrics={"f1": 1, "pr_auc": 1}))
+        self.assertNotIn("--decision_metric",
+                         self._argv(decision_metrics={"f1": 0.5, "pr_auc": 0.5}))
 
     def test_overwrite_is_always_explicit(self):
         """config.yml ships with overwrite: True, so omitting the flag would
@@ -2205,6 +2292,18 @@ class TestRoutes(ArtifactTreeCase):
             ({"dataset": "S"}, "entity"),
             ({"dataset": "S", "entity": "7", "stages": ["nope"]}, "unknown stage"),
             ({"dataset": "S", "entity": "7", "detectors": ["LOF_1"]}, "at least two"),
+            ({"dataset": "S", "entity": "7", "anomaly_type": "nope"}, "unknown anomaly type"),
+            ({"dataset": "S", "entity": "7", "anomaly_rate": 0}, "at most 1"),
+            ({"dataset": "S", "entity": "7", "anomaly_rate": 1.5}, "at most 1"),
+            ({"dataset": "S", "entity": "7", "anomaly_rate": "x"}, "must be a number"),
+            ({"dataset": "S", "entity": "7", "decision_metric": "auroc"},
+             "unknown decision metric"),
+            ({"dataset": "S", "entity": "7", "decision_metrics": {"f1": -1}},
+             "must not be negative"),
+            ({"dataset": "S", "entity": "7", "decision_metrics": {"f1": "x"}},
+             "must be numbers"),
+            ({"dataset": "S", "entity": "7", "decision_metrics": {"f1": 0, "vus": 0}},
+             "at least one decision metric"),
         ):
             r = self.client.post("/api/runs", json=body)
             self.assertEqual(r.status_code, 400, body)
@@ -2315,7 +2414,7 @@ class TestOnDemandRankingGap(unittest.TestCase):
         """Result trees written before the block existed must degrade to the
         pipeline's static figure, not to a broken control."""
         self._write_ir(None)
-        self.assertEqual(self.ondemand.ranking_channel_shares("SKAB", "7"), {})
+        self.assertEqual(self.ondemand.ranking_context_feature_shares("SKAB", "7"), {})
         from WebUI import plots
         self.assertIsNone(plots._ranking_pair_picker("SKAB", "7"))
 
@@ -2343,7 +2442,7 @@ class TestOnDemandPerWindowFrames(unittest.TestCase):
 
     MODELS = ["A", "B", "C"]
     N_WINDOWS = 25
-    N_CHANNELS = 4
+    N_CONTEXT_FEATURES = 4
 
     def setUp(self):
         from WebUI import ondemand, plots
@@ -2363,10 +2462,10 @@ class TestOnDemandPerWindowFrames(unittest.TestCase):
         """A per-window document whose rows are distinct per (window, model)."""
         def frame(t, scale):
             return [[float(scale * (t + 1) * (i + 1) * (c + 1))
-                     for c in range(self.N_CHANNELS)]
+                     for c in range(self.N_CONTEXT_FEATURES)]
                     for i in range(len(self.MODELS))]
         doc = {
-            "schema": 1, "n_channels": self.N_CHANNELS,
+            "schema": 1, "n_channels": self.N_CONTEXT_FEATURES,
             "n_windows": self.N_WINDOWS, "top_k_models": 2, "top_n_channels": 3,
             "models": list(self.MODELS),
             "models_by_final_norm": list(reversed(self.MODELS)),

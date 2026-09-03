@@ -1,14 +1,10 @@
 /* The explanation page.
  *
- * Two disclosure mechanisms, both native <details> so they work without JS and
- * are keyboard/screen-reader correct with zero ARIA:
- *   - summary -> full narrative
- *   - the INFO glossary, closed by default and styled as reference material
+ * The summary -> full narrative disclosure is a native <details>, so it works
+ * without JS and is keyboard/screen-reader correct with zero ARIA.
  *
- * When the API says summary_is_full (which is the case today, since no
- * summariser has been chosen yet), the narrative disclosure renders open and
- * labelled "Full text" — the same DOM, so landing a real summariser changes
- * only the payload.
+ * When the API says summary_is_full — a stage whose summariser found nothing to
+ * hold back — it renders open and labelled "Full text", the same DOM either way.
  */
 
 import { $, $$, el, getJSON, pct, proseNode, familyClass, timeAgo, postJSON,
@@ -42,7 +38,7 @@ function figureNode(fig) {
  *
  * Not a variant toggle: with 11 detectors there are 55 unordered pairs, so the
  * images cannot be enumerated up front. The server renders one from the IR's
- * per-detector channel shares. The initial pair is the ranking's first two —
+ * per-detector context feature shares. The initial pair is the ranking's first two —
  * the winner and the runner-up — which reproduces the static figure the
  * pipeline writes, so the default view is unchanged by this control existing.
  */
@@ -212,7 +208,7 @@ function termsNode(stage) {
  * card and wants to come back to it. `rel=noopener` because target=_blank hands
  * the opened page a reference to this one otherwise. */
 function docsLink(stage) {
-  if (!stage.doc_section || !stage.info) return null;
+  if (!stage.doc_section) return null;
   return el("a", { class: "button no-print stage-docs-link",
                    href: `/docs/${dataset}/${entity}#${stage.doc_section}`,
                    target: "_blank", rel: "noopener",
@@ -329,7 +325,7 @@ function regimeSection(stage) {
   // now that the stage has no full-text disclosure, and the print stylesheet
   // forces every <details> open.
   return el("details", {},
-    el("summary", { text: `Each regime with its channel attribution (${stage.regimes.length})` }),
+    el("summary", { text: `Each regime with its context feature attribution (${stage.regimes.length})` }),
     el("div", { class: "stack" }, rows));
 }
 

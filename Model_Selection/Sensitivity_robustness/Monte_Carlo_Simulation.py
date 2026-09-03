@@ -3,7 +3,7 @@ import copy
 import os
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from Metrics.metrics import range_based_precision_recall_f1_auc, prauc, f1_score, f1_soft_score
-from Utils.model_selection_utils import evaluate_model
+from Utils.model_selection_utils import evaluate_model, ScoringTimeout
 from loguru import logger
 import matplotlib.pyplot as plt
 from Explainability import ir
@@ -61,15 +61,20 @@ def monte_carlo_simulation(test_data, trained_models, model_names, dataset, enti
 
         for model_name in model_names:
             model = trained_models.get(model_name)
-            if model:
+            if not model or model_name not in results:
+                continue
+            try:
                 evaluation = evaluate_model(noisy_data, model, model_name)
-                y_true = evaluation['anomaly_labels'].flatten()
-                y_scores = evaluation['entity_scores'].flatten()
-                _, _, f1, pr_auc, _ = range_based_precision_recall_f1_auc(y_true, y_scores)
-                # f1, precision, recall, TP, TN, FP, FN = f1_score(y_scores, y_true)
-                # pr_auc = prauc(y_true, y_scores)
-                results[model_name]['f1_scores'].append(f1)
-                results[model_name]['pr_auc_scores'].append(pr_auc)
+            except ScoringTimeout:
+                results.pop(model_name, None)
+                continue
+            y_true = evaluation['anomaly_labels'].flatten()
+            y_scores = evaluation['entity_scores'].flatten()
+            _, _, f1, pr_auc, _ = range_based_precision_recall_f1_auc(y_true, y_scores)
+            # f1, precision, recall, TP, TN, FP, FN = f1_score(y_scores, y_true)
+            # pr_auc = prauc(y_true, y_scores)
+            results[model_name]['f1_scores'].append(f1)
+            results[model_name]['pr_auc_scores'].append(pr_auc)
 
     return results
 

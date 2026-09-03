@@ -71,15 +71,9 @@ class LLMClient:
     """
 
     def __init__(self, base_url: str = DEFAULT_BASE_URL, model: str = DEFAULT_MODEL,
-                 # 600s, not 120: a 14B model narrating the Thompson stage
-                 # exceeds two minutes. ir_thompson.json is 35.9 KB and 19 atoms
-                 # on skab/1 — nearly double the next-largest IR and eight times
-                 # the smallest — so it is the one stage that reliably times out
-                 # while the other ten finish in 14-46s. The failure is quiet:
-                 # narrate_entity records a per-stage error and carries on, the
-                 # run still reports "LLM narratives written" with a clean
-                 # faithfulness score (a stage with no prose cannot hallucinate),
-                 # and the staleness warning on the result page is the only sign.
+                 # 600s, not 120: the Thompson stage alone exceeds two
+                 # minutes on a 14B model, and it fails quietly — narrate_entity
+                 # records the error and the run still reports success.
                  temperature: float = 0.0, seed: int = 0, timeout: int = 600,
                  transport: Optional[Callable[[Dict[str, Any]], str]] = None):
         self.base_url = base_url.rstrip("/")
@@ -138,10 +132,8 @@ SYSTEM_PROMPT = (
     "tables, or markdown."
 )
 # Rules 1-5 are the contract the verifier measures; rule 6 is format. Four
-# further rules were dropped when the narrator moved to qwen2.5:14b — each is
-# now covered by the verifier, the scaling word budget, or the facts' format.
-# THEY ARE MODEL-SIZE DEPENDENT: if the narrator is ever downgraded, restore
-# them from git history before trusting the output.
+# further rules were dropped for qwen2.5:14b and are MODEL-SIZE DEPENDENT:
+# restore them from git history if the narrator is ever downgraded.
 
 
 def _render_value(v: Any) -> str:
@@ -159,13 +151,17 @@ def _output_lines(output: Dict[str, Any]) -> List[str]:
 def _content_words(ir_doc: Dict[str, Any]) -> int:
     """How many words of material the narrative actually has to convey.
 
-    Evidence only. Caveats are shown to the reader from the IR rather than
-    narrated, so counting them would budget words for prose that must not be
-    written — and a floor set above what there is to say is what forces
+    REQUIRED evidence only: sizing to every atom left room for all of them, so
+    the optional ones were optional in name only. Caveats are excluded — they
+    are shown from the IR, and a floor above what there is to say forces
     padding.
     """
-    return sum(len(str(a.get("text", "")).split())
-               for a in ir_doc.get("evidence", []))
+    required = set(ir_doc.get("required_atom_ids") or ())
+    evidence = ir_doc.get("evidence", [])
+    marked = [a for a in evidence if a.get("id") in required]
+    # A required list naming no present atom is malformed, not empty: a 0 here
+    # would floor a 500-word stage at 40.
+    return sum(len(str(a.get("text", "")).split()) for a in (marked or evidence))
 
 
 # The floor is deliberately BELOW the content length: the narrative restates the
@@ -174,8 +170,8 @@ def _content_words(ir_doc: Dict[str, Any]) -> int:
 _BUDGET_FLOOR_RATIO = 0.9
 _BUDGET_CEILING_RATIO = 2.2
 _BUDGET_MIN_FLOOR = 40
-# The default ceiling, and now also what the floor is clamped against so the two
-# can never cross. Was an inline literal in two places.
+# The default ceiling, and what the floor is clamped against so the two can
+# never cross.
 _BUDGET_HARD_CAP = 400
 
 
@@ -183,30 +179,19 @@ def _word_budget(n_atoms: int, lo: int = 120, hi: int = 220,
                  content_words: Optional[int] = None) -> tuple:
     """Word budget for the WHOLE narrative, scaled to how much there is to say.
 
-    Driven by the atoms' CONTENT LENGTH rather than their count. Counting atoms
-    is a poor proxy: consolidating several near-identical atoms into one (which
-    is what stops a narrator shuffling names between them) cuts the count
-    without cutting the material, and the old count-based floor then demanded
-    more words than the facts contained. A 4-atom ga_selection carrying 74 words
-    of facts was asked for at least 120 — so ~46 words had to be invented, and
-    they arrived as an unsupported concluding sentence and "(fact 2)" citations
-    of the prompt's own numbering.
+    Driven by the atoms' CONTENT LENGTH, not their count: consolidating
+    near-identical atoms cuts the count without cutting the material, and a
+    count-based floor then demands more words than the facts contain — which
+    the narrator supplies by inventing them.
 
     Falls back to the count-based curve when the caller has no document.
     """
     if content_words:
         floor = max(_BUDGET_MIN_FLOOR, int(content_words * _BUDGET_FLOOR_RATIO))
         ceiling = max(floor + 40, int(content_words * _BUDGET_CEILING_RATIO))
-        # The cap is applied to BOTH ends, not to the ceiling alone. Capping only
-        # the ceiling inverted the range once a stage carried more than ~445
-        # words of facts: the GAN stage, at 711, was told to write "between 639
-        # and 400 words". A model handed a contradictory range compresses, and
-        # what it drops is the numbers — 4 of 29 rule thresholds survived, the
-        # rest becoming "under specific conditions related to ...".
-        #
-        # Clamping the floor keeps the global ceiling meaningful. A stage that
-        # genuinely needs to exceed it says so in _STAGE_WORD_BUDGETS below,
-        # which is the mechanism for exactly that and guards its own range.
+        # Clamped at BOTH ends. Capping the ceiling alone inverted the range
+        # past ~445 words of facts ("between 639 and 400 words"), and a model
+        # handed a contradictory range compresses by dropping the numbers.
         if floor > _BUDGET_HARD_CAP - 40:
             floor = _BUDGET_HARD_CAP - 40
         return floor, min(_BUDGET_HARD_CAP, max(ceiling, floor + 40))
@@ -220,49 +205,43 @@ def _word_budget(n_atoms: int, lo: int = 120, hi: int = 220,
 # (words_per_atom, base, ceiling), keyed by exact stage name.
 _STAGE_WORD_BUDGETS: Dict[str, tuple] = {
     # Thompson narrates every regime individually; ~20 words each plus the
-    # lead, regime summary, winner channel and state line.
+    # lead, regime summary, winner context feature and state line.
     "thompson_sampling": (20, 40, 700),
     # The ranking sibling narrates regimes too, but plain run-length encoding of
     # the ||mu||^2 leader yields a handful of them rather than a dozen, so it
     # needs a lower ceiling than the stage above.
     "thompson_ranking": (20, 40, 500),
 }
-# NEITHER point-injection stage gets an entry, and that is deliberate.
-#
-# GAN had one — (30, 40, 900), sized so its rules would fit — and it backfired:
-# asked for 640-900 words it wrote 325, dropped 36% of its required atoms
-# INCLUDING the winner, opened on the feature importances and broke into five
-# paragraphs. Off-by, carrying MORE material (827 content words against GAN's
-# 771) but left on the generic budget, wrote 818 words in one paragraph with
-# zero omissions. A floor far above what the model wants to write is not a
-# nudge to write more; it makes it reorganise.
-#
-# The inverted range that first motivated the entry is fixed at source in
-# `_word_budget` above, and that fix — not the entry — is what recovered the
-# thresholds: on SKAB/3, the entity where they were first lost, the same IR goes
-# from 4 of 29 reproduced under the inverted range to 29 of 29 on the generic
-# budget with no entry at all.
-#
-# Both stages now run the generic path, and their prompts were diffed to confirm
-# nothing else drifted: identical but for the stage name, the question's wording,
-# and one sentence of task hint (gan's spells out that thresholds must be copied
-# with their numbers, which off-by does not need). The IRs match on envelope
-# keys, atom-type set and order bands, and their edge atoms are the same size —
-# 53 words and 3.7 thresholds each on SKAB/4 against off-by's 52 and 3.4.
-#
-# Note what does NOT bind: the 400 ceiling. Both stages routinely write past it
-# — 641 and 818 words on SKAB/4 — with zero omissions, across repeat runs. The
-# ceiling is advisory; it is a FLOOR above what the model wants to write that
-# breaks it.
+# NEITHER point-injection stage gets an entry, deliberately. GAN had one —
+# (30, 40, 900) — and asked for 640-900 words it wrote 325 and dropped 36% of
+# its required atoms including the winner. A floor far above what the model
+# wants to write is not a nudge to write more, it makes it reorganise. The
+# ceiling does not bind either way: both stages routinely write past 400 with
+# zero omissions.
 
 
-def _stage_word_budget(stage: Any, n_atoms: int) -> Optional[tuple]:
+def _stage_word_budget(stage: Any, n_atoms: int,
+                       content_words: Optional[int] = None) -> Optional[tuple]:
+    """Per-atom allowance for the stages that narrate one statement per atom.
+
+    `content_words` widens the range when the per-atom allowance lands below
+    what the required facts run to. The curve counts atoms, not their length,
+    and Thompson's regime sentences are long enough that the two nearly cross:
+    seven required atoms buy 180-270 words against 252 of fact. Below that it is
+    the contradictory range `_word_budget` documents.
+    """
     cfg = _STAGE_WORD_BUDGETS.get(str(stage))
     if not cfg:
         return None
     per, base, cap = cfg
     lo = min(cap - 60, base + per * max(0, n_atoms))
-    return lo, min(cap, int(lo * 1.5))
+    hi = min(cap, int(lo * 1.5))
+    if content_words:
+        floor = int(content_words * _BUDGET_FLOOR_RATIO)
+        if hi < floor:
+            lo = min(lo, floor)
+            hi = min(cap, max(floor + 60, int(floor * 1.4)))
+    return lo, hi
 
 
 def _fact_lines(ir_doc: Dict[str, Any]) -> List[str]:
@@ -275,10 +254,8 @@ def _fact_lines(ir_doc: Dict[str, Any]) -> List[str]:
         idx, atom = pair
         o = atom.get("order")
         return (float(o) if o is not None else float("inf"), idx)
-    # Bulleted, never numbered. Nothing references the numbers — they were pure
-    # decoration — but they handed the narrator a citation handle, and it used
-    # it: "These detectors were selected for their high utility (fact 2). Fact 3
-    # reveals that…". With no numbers there is nothing to cite.
+    # Bulleted, never numbered: numbering handed the narrator a citation
+    # handle it used ("... for their high utility (fact 2)").
     lines = []
     for _, atom in sorted(enumerate(evidence), key=_key):
         marker = "[REQUIRED] " if atom.get("id") in required else ""
@@ -296,30 +273,51 @@ def _caveat_lines(ir_doc: Dict[str, Any]) -> List[str]:
     return lines
 
 
-# Stage-specific rendering guidance appended to the prompt's TASK. This is a
-# NARRATION concern (how to render), so it lives here in the narrator, not in
-# the grounded IR — and it is the same for every run of a stage, so it is not a
-# per-IR field. Keyed by exact stage name; add other stages here as their
-# narratives need shaping.
+# Shared by off_by_threshold and gan — ONE string, because two near-copies
+# drifted: the threshold ban reached gan only, and off_by then reproduced 0 of
+# its 11 rule thresholds against gan's 11 of 11. The ban has to be by phrasing,
+# since the verifier scores an atom as covered from its subject and win count
+# alone and cannot see a missing threshold. The importance figures are
+# subordinated because they are optional yet crowded out the required rules.
+_POINT_INJECTION_HINT = (
+    " Open with one short sentence naming the highest-ranked model, then "
+    "give each fact about the models it beat as its OWN separate sentence. "
+    "The rival models named in a sentence must be EXACTLY the models that "
+    "fact lists. State every condition WITH ITS NUMBERS, copied exactly as "
+    "the fact writes them: never replace a threshold with 'specific ranges', "
+    "'certain conditions', 'specific values', 'certain constraints', "
+    "'specific criteria', 'conditions related to' or a bare list of property "
+    "names. A sentence that names a property without its number is wrong. "
+    "The importance figures come last, and only once every condition has "
+    "been stated with its numbers. If a fact says the highest-ranked model "
+    "never exclusively beat some models, state that too."
+)
+
+# Stage-specific rendering guidance appended to the prompt's TASK. A NARRATION
+# concern, so it lives here rather than in the grounded IR. Keyed by exact
+# stage name.
 _STAGE_TASK_HINTS: Dict[str, str] = {
     # The opening sentence is load-bearing: without it the narrator went
     # straight into the per-source walk and dropped both the consensus winner
     # and the source list (omission 0.000 -> 0.250). One positive instruction
     # replaced three defensive ones and scored better.
     "rank_aggregation_robust": (
-        " Open by naming the consensus's own top-ranked detector and the source "
-        "rankings being aggregated. Then describe each source in the order "
-        "given; for each one, state its overall rank, its influence "
+        " Open by naming the source ranking that shaped the consensus most — "
+        "all of them, if several are tied at that rank — then the consensus's "
+        "own top-ranked detector and the source rankings being aggregated. Then describe each source in the order "
+        "given; for each one, state its overall standing rank, its influence "
         "rank, and its agreement rank. A rank is a position — rank "
-        "1 is best — so give the rank number itself rather than calling it high "
-        "or low."
+        "1 is best — so give the rank number itself. NEVER call a rank "
+        "'highest', 'lowest', 'best', 'worst', 'least', 'strongest' or "
+        "'weakest' — write the ordinal or the number instead. Keep the fact's "
+        "own wording for overall standing, such as 'shaped the consensus third "
+        "most', and never restate a standing as influence or agreement. Do not "
+        "compare one source's rank with another's unless a fact states that "
+        "comparison."
     ),
-    # The two facts here describe different KINDS of thing — one names a
-    # detector, the other a source ranking — and with nothing between them the
-    # narrator joined them into "LOF_3, which aligns more closely with
-    # Thompson_Sampling's ranking". On SKAB/7 that inverted the finding: LOF_3
-    # leads because Robust_Aggregated ranked it first and Thompson ranked it
-    # third. It scored 0.000 hallucination, every name in it being in the IR.
+    # Two facts about different KINDS of thing. The narrator joined them into
+    # "LOF_3, which aligns more closely with Thompson_Sampling's ranking",
+    # inverting the finding on SKAB/7 at 0.000 hallucination.
     "rank_aggregation_final": (
         " Say which of the two sources the consensus followed more closely, "
         "with both agreement scores and the gap. Then, in a sentence of its "
@@ -345,63 +343,54 @@ _STAGE_TASK_HINTS: Dict[str, str] = {
         "the rest were left out, using the high/low utility and stability "
         "wording the facts use."
     ),
-    # Direction is the whole risk here. A detector's channel shares are sums of
-    # squares, so every one is positive and none can "drag the score down" —
-    # but that is exactly the sentence a narrator reaches for when a share is
-    # small, and the verifier cannot see it: the number and the channel name are
-    # both correct. Only the comparison against the named rival has a sign, so
-    # the hint puts direction language where it belongs and nowhere else.
+    # Direction is the whole risk. Shares are sums of squares, so none can
+    # "drag the score down" — but that is what a narrator writes when a share
+    # is small, and the verifier cannot see it. Only the rival comparison has
+    # a sign.
     "thompson_ranking": (
-        " Open with the winner and its score, then the channels its score is "
-        "built from. Describe those channels only as larger or smaller shares "
-        "of that detector's own score — a small share means a channel "
+        " Open with the winner and its score, then the context features its score is "
+        "built from. Describe those context features only as larger or smaller shares "
+        "of that detector's own score — a small share means a context feature "
         "contributed little, never that it lowered the score or worked against "
         "the detector. Only when comparing the winner with the named runner-up "
-        "may you say a channel favoured one over the other, and there keep the "
+        "may you say a context feature favoured one over the other, and there keep the "
         "direction exactly as the fact states it. Then give the selection "
-        "counts, then how leadership divided into regimes, then EVERY regime "
+        "counts, then how leadership divided into regimes and any fact comparing "
+        "that with the winner, then EVERY regime "
         "its own sentence in the order listed, each naming its window range, "
-        "its leader and its channels. "
-        # The regime NUMBER is what pairs each sentence with its own figure in
-        # the page's regime disclosure — an ordinal cannot do it, and there is
-        # no error when one is used: the disclosure quietly falls back to the
-        # IR's own wording, so the narrative simply stops being what the reader
-        # sees. Left to itself the narrator wrote "In the first regime (windows
-        # 10 to 12)" for all seven.
+        "its leader and its context features. "
+        # The number or the window range is what pairs each sentence with its
+        # own figure in the disclosure. A word-ordinal cannot, and fails
+        # silently: the disclosure falls back to the IR's own wording.
         "Begin each of those sentences with the literal words 'Regime N "
         "(windows ...)', using the number the fact gives — never 'the first "
         "regime', 'the second regime', or any other ordinal in place of it. "
         "Name that leader outright — never "
-        "describe it by reference to the previous regime. Do not add a sentence "
-        "interpreting what any of this implies."
+        "describe it by reference to the previous regime. Do not draw a conclusion "
+        "the facts do not state."
     ),
-    # The regime-shape instruction is the one clause here that earns its length:
-    # a narrator that describes a regime by reference to the previous one writes
-    # false continuity ("NN_3 continued as leader" when the previous regime was
-    # led by NN_2), and no metric can see it — the names and numbers are all
-    # correct. A positive template held where a shorter ban leaked.
+    # Describing a regime by reference to the previous one writes false
+    # continuity ("NN_3 continued as leader") that no metric can see, since the
+    # names and numbers are all correct.
     "thompson_sampling": (
         " Open with the winner and its margin, then how the run divided into "
         "regimes. Then give EVERY regime its own sentence, in the order listed, "
-        "keeping each regime's window range, its leader and its channels "
+        "keeping each regime's window range, its leader and its context features "
         "together. Begin each of those sentences with the literal words "
         "'Regime N (windows ...)', then the detector that led it, then its "
-        "channels. Name that detector outright — never describe it by reference "
-        "to the previous regime. Three different things are said about channels "
-        "and they must not be merged or traded for one another: one channel "
+        "context features. Name that detector outright — never describe it by reference "
+        "to the previous regime. Three different things are said about context features "
+        "and they must not be merged or traded for one another: one context feature "
         "SUPPLIES a share of a detector's expected reward, one GIVES IT AN EDGE "
         "over the named rival, and one DEPARTS FURTHEST FROM ITS USUAL "
         "contribution. The last is a separate sentence in the facts and must "
         "stay separate clauses. Keep whichever wording the fact uses. "
-        # Every claim about a regime now arrives in ONE fact sentence carrying
-        # that regime's number, so keeping it in one sentence is what keeps the
-        # page able to file it. Splitting off a trailing clause strands it: it
-        # carries no regime number, matches no atom, and lands in a heap of
-        # context-free sentences at the end of the summary.
+        # The rigidity IS the fidelity. Asking for varied openings cost half the
+        # content: SKAB/7 went 8/8 -> 1/8 regimes keeping all three claims.
         "Keep each regime to a SINGLE sentence — never split a trailing clause "
         "off into a sentence of its own, and never refer back with 'in this "
         "regime' or 'here'. "
-        "Finish with the winner's overall channel and the selection-state "
+        "Finish with the winner's overall context feature and the selection-state "
         "percentages."
     ),
     "monte_carlo": (
@@ -414,45 +403,13 @@ _STAGE_TASK_HINTS: Dict[str, str] = {
         "noise range as it is written ('from 0.000 to 0.042') — never turn a "
         "range into a hyphenated pair."
     ),
-    "off_by_threshold": (
-        " Open with one short sentence naming the highest-ranked model, then "
-        "give each fact about the models it beat as its OWN separate sentence, "
-        "then the importance figures. The rival models named in a sentence must "
-        "be EXACTLY the models that fact lists. State each condition exactly as "
-        "it is worded in the facts. If a fact says the highest-ranked model "
-        "never exclusively beat some models, state that too."
-    ),
-    # The same shape as off_by_threshold: both stages narrate a winner's
-    # exclusive wins over injected points, and the degenerate clause is
-    # load-bearing here for the same reason (see the note below).
-    #
-    # The threshold sentence is NOT boilerplate. Squeezed by an inverted word
-    # budget, this stage wrote "under specific conditions related to generated
-    # point magnitude, gap from the surrounding series, and spread across
-    # channels" — a list of property names with every number dropped, which is
-    # unfalsifiable and tells a reader nothing about where the edge was. The
-    # budget is fixed above; this forbids the phrasing directly, because the
-    # verifier scores an atom as covered from its subject and win count alone
-    # and cannot see a missing threshold.
-    "gan": (
-        " Open with one short sentence naming the highest-ranked model, then "
-        "give each fact about the models it beat as its OWN separate sentence, "
-        "then the importance figures. The rival models named in a sentence must "
-        "be EXACTLY the models that fact lists. State every condition WITH ITS "
-        "NUMBERS, copied exactly as the fact writes them: never replace a "
-        "threshold with 'specific ranges', 'certain conditions', 'specific "
-        "values' or a bare list of property names. A sentence that names a "
-        "property without its number is wrong. If a fact says the "
-        "highest-ranked model never exclusively beat some models, state that too."
-    ),
+    "off_by_threshold": _POINT_INJECTION_HINT,
+    "gan": _POINT_INJECTION_HINT,
 }
-# The hyphenated-range ban in monte_carlo and the degenerate clause in
-# off_by_threshold are NOT model-capability patches and must survive any future
-# trim. The first exists because the verifier's number extraction is sign-aware,
-# so "0.000-0.042" reads as the negative number -0.042 and is flagged
-# unsupported. The second was measured load-bearing: dropping it lost
-# ob.degenerate (omission 0.000 -> 0.200), and that atom is the negation that
-# makes a swapped rival set self-contradictory.
+# Two clauses above must survive any future trim. monte_carlo's hyphenated-range
+# ban: the verifier's number extraction is sign-aware, so "0.000-0.042" reads as
+# -0.042 and is flagged unsupported. The degenerate clause: dropping it lost
+# ob.degenerate (omission 0.000 -> 0.200).
 
 
 def _stage_task_hint(stage: Any) -> str:
@@ -461,8 +418,14 @@ def _stage_task_hint(stage: Any) -> str:
 
 def build_stage_prompt(ir_doc: Dict[str, Any]) -> str:
     n_atoms = len(ir_doc.get("evidence", []))
-    lo, hi = (_stage_word_budget(ir_doc.get("stage", ""), n_atoms)
-              or _word_budget(n_atoms, content_words=_content_words(ir_doc)))
+    # Both paths size to the REQUIRED atoms. `_stage_word_budget` is tried
+    # first, so passing the full count let the two Thompson stages buy room for
+    # every optional regime and never consult `_content_words` at all.
+    n_required = len(set(ir_doc.get("required_atom_ids") or ())
+                     & {a.get("id") for a in ir_doc.get("evidence", [])}) or n_atoms
+    content = _content_words(ir_doc)
+    lo, hi = (_stage_word_budget(ir_doc.get("stage", ""), n_required, content)
+              or _word_budget(n_required, content_words=content))
     question = ir_doc.get("question")
     lines: List[str] = []
     lines.append(f"STAGE: {ir_doc.get('stage')}")
@@ -479,14 +442,19 @@ def build_stage_prompt(ir_doc: Dict[str, Any]) -> str:
     lines.append("")
     task = (f"TASK: Write ONE paragraph of {lo}-{hi} words")
     if question:
-        task += (" that answers the question above, leading with the answer and "
-                 "then presenting the facts in the order given as supporting "
-                 "evidence")
+        # The stage card's short view is built by dropping sentences from this
+        # paragraph, so the opening had been whichever survived the filter.
+        task += (" that answers the question above. Open with ONE sentence that "
+                 "answers it outright, naming the detector or source the answer "
+                 "turns on; then present the facts in the order given as "
+                 "supporting evidence")
     else:
         task += " explaining this stage's result"
-    task += (". Convey every fact marked as required; copy all numbers and names "
-             "verbatim, and keep each number attached to the exact metric name it "
-             "accompanies in the facts.")
+    task += (". Convey every fact marked as required. A fact without that marker "
+             "is optional: include it only where it adds something the required "
+             "facts do not already say, and leave the rest out. Copy all numbers "
+             "and names verbatim, and keep each number attached to the exact "
+             "metric name it accompanies in the facts.")
     task += _stage_task_hint(ir_doc.get("stage", ""))
     lines.append(task)
     return "\n".join(lines)
@@ -524,30 +492,21 @@ def build_global_prompt(global_ir: Dict[str, Any]) -> str:
 
 
 # ── Global narrative: deterministic merge ────────────────────────────────────
-#
-# Two interchangeable ways to produce the global document, selected by
-# `global_mode` on narrate_entity:
-#   "concat" (default) — stitch the already-narrated per-stage prose together.
-#                        Adds no new claims, so it inherits the per-stage
-#                        faithfulness and is not scored again.
-#   "llm"              — narrate the global IR's own atoms (build_global_prompt
-#                        / verify_global), the original path.
-# Both are kept working; switching back is a one-argument change.
+# Selected by `global_mode` on narrate_entity. "concat" stitches the narrated
+# per-stage prose together, adding no new claims, so it inherits the per-stage
+# faithfulness and is not scored again. "llm" narrates the global IR's own
+# atoms — the original path, kept working.
 GLOBAL_MODES = ("concat", "llm")
 
 # The merged document follows the pipeline's order so it reads as the run ran,
 # rather than the alphabetical order the IR files happen to load in.
 _GLOBAL_STAGE_ORDER = (
     "ga_selection", "ga_combination",
-    # The ranking criterion first: it explains the ordering the pipeline goes on
-    # to consume, and the selection dynamics then account for how the run got
-    # there. WebUI.artifacts.STAGES must stay in this order.
+    # The ranking criterion first: it explains the ordering the pipeline goes
+    # on to consume. WebUI.artifacts.STAGES must stay in this order.
     "thompson_ranking", "thompson_sampling",
-    # The robustness block reads from the broadest perturbation to the narrowest:
-    # Monte Carlo sweeps noise over the whole series, off-by moves the decision
-    # boundary at a set of borderline points, GAN generates the points it
-    # injects. This is a reading order, not the execution order — the pipeline
-    # still runs GAN at sub-stage 6.3, ahead of off-by and Monte Carlo.
+    # Robustness reads broadest perturbation to narrowest. A reading order,
+    # not the execution order — GAN still runs first, at sub-stage 6.3.
     # NOTE: no parentheses in this comment — WebUI.test_webui parses this tuple
     # with a non-greedy regex that would stop at the first closing bracket.
     "monte_carlo", "off_by_threshold", "gan",
@@ -555,9 +514,8 @@ _GLOBAL_STAGE_ORDER = (
 )
 
 _GLOBAL_STAGE_TITLES = {
-    # Two stages explain one algorithm, so neither may claim the plain name:
-    # these titles say which question each answers. Duplicated verbatim in
-    # WebUI.artifacts.STAGES.
+    # Two stages explain one algorithm, so neither claims the plain name.
+    # Duplicated verbatim in WebUI.artifacts.STAGES.
     "ga_selection": "Genetic Algorithm: Selection",
     "ga_combination": "Genetic Algorithm: Combination",
     "thompson_ranking": "Thompson Sampling: Ranking",
@@ -573,8 +531,7 @@ _GLOBAL_STAGE_TITLES = {
 def compose_global_narrative(stage_texts: Dict[str, str],
                              global_ir: Optional[Dict[str, Any]] = None,
                              dataset: str = "", entity: str = "",
-                             iteration: int = 0,
-                             stage_footers: Optional[Dict[str, str]] = None) -> str:
+                             iteration: int = 0) -> str:
     """
     Merge the per-stage narratives into one document, deterministically.
 
@@ -582,9 +539,6 @@ def compose_global_narrative(stage_texts: Dict[str, str],
     own atom sentences and each stage contributes the prose already written and
     verified for it. Nothing is paraphrased, so the result cannot introduce a
     claim that was not already checked.
-
-    `stage_footers` is optional; when given, each stage's glossary is appended
-    under its section (the per-stage .txt files always carry their own).
     """
     head = f"RAMSeS model selection — {dataset} / entity {entity} (iteration {iteration})"
     lines: List[str] = [head, "=" * len(head)]
@@ -605,11 +559,6 @@ def compose_global_narrative(stage_texts: Dict[str, str],
     for stage in ordered:
         title = _GLOBAL_STAGE_TITLES.get(stage, stage.replace("_", " ").capitalize())
         lines += ["", title, "-" * len(title)]
-        # Glossary first, matching the per-stage files: the reader meets the
-        # terms before the prose that uses them.
-        footer = (stage_footers or {}).get(stage)
-        if footer:
-            lines += [f"INFO: {footer}", ""]
         lines.append(stage_texts[stage].strip())
 
     # Name the stages the run could not narrate, so a short document is never
@@ -628,10 +577,8 @@ def _violation_count(metrics: Dict[str, Any]) -> int:
     return (len(metrics.get("unsupported_numbers", []))
             + len(metrics.get("unsupported_entities", []))
             + len(metrics.get("misattributed_numbers", []))
-            # A swapped rival set and a wrong utility/stability profile are both
-            # false statements, not style notes. Left out of this count they were
-            # measured and then ignored: repair never ran, so the one place the
-            # model is told what it specifically got wrong stayed silent.
+            # False statements, not style notes: left out of this count they
+            # were measured and then ignored, and repair never ran.
             + len(metrics.get("swapped_rivals", []))
             + len(metrics.get("attribution_warnings", []))
             + len(metrics.get("missing_required_ids", [])))
@@ -697,10 +644,8 @@ def _violation_lines(metrics: Dict[str, Any], ir_doc: Dict[str, Any]) -> List[st
 
 def _repair_prompt(base_prompt: str, draft: str, problems: List[str]) -> str:
     # Repair is where invention spikes: told a statement is wrong, the model
-    # reaches for justifying language and writes a cause the facts never gave
-    # ("left out due to its lower utility compared to other factors"). Such a
-    # sentence carries no number and no new name, so no mechanical check can
-    # see it — the constraint has to be restated at the point of failure.
+    # writes a justifying cause the facts never gave, carrying no number and no
+    # new name for a check to catch. The constraint is restated here.
     return (base_prompt
             + "\n\nYOUR PREVIOUS DRAFT:\n" + draft
             + "\n\nPROBLEMS DETECTED IN THE DRAFT — fix ALL of them:\n"
@@ -771,7 +716,6 @@ def narrate_entity(dataset: str, entity: str, iteration: int, client: LLMClient,
     file_map = _stage_file_map(iteration)
     wanted = set(stages) if stages else set(file_map) | {"global"}
     stage_texts: Dict[str, str] = {}
-    stage_footers: Dict[str, str] = {}
     report: Dict[str, Any] = {"dataset": str(dataset), "entity": str(entity),
                               "iteration": int(iteration), "model": client.model,
                               "stages": {}}
@@ -787,10 +731,8 @@ def narrate_entity(dataset: str, entity: str, iteration: int, client: LLMClient,
             metrics = verify_fn(narrative, ir_doc)
             entry: Dict[str, Any] = {"status": "ok"}
 
-            # Verifier-guided repair: one bounded retry when the draft has
-            # hard violations. The repaired draft is kept only if it is no
-            # worse; both metric sets are recorded (pre-repair as
-            # `verify_initial`).
+            # One bounded retry on hard violations, kept only if no worse;
+            # the pre-repair metrics stay as `verify_initial`.
             problems = _violation_lines(metrics, ir_doc)
             if problems:
                 entry["verify_initial"] = metrics
@@ -804,16 +746,8 @@ def narrate_entity(dataset: str, entity: str, iteration: int, client: LLMClient,
                 else:
                     entry["repair_discarded"] = True
 
-            # The fixed glossary is written verbatim and OUTSIDE the model's
-            # output, so its definitions are never reworded and never counted
-            # as claims by the verifier. It leads the file: the terms it
-            # defines are the ones the narrative is about, so a reader meets
-            # them before the prose that uses them.
-            footer = ir_doc.get("info_footer")
             path = os.path.join(nl_dir, f"{nl_name}.txt")
             with open(path, "w") as f:
-                if footer:
-                    f.write(f"INFO: {footer}\n\n")
                 f.write(narrative + "\n")
             entry.update({"narrative_path": path,
                           "words": len(narrative.split()), "verify": metrics})
@@ -822,8 +756,6 @@ def narrate_entity(dataset: str, entity: str, iteration: int, client: LLMClient,
             # exactly as written here rather than re-narrating it.
             if not is_global:
                 stage_texts[stage_key] = narrative
-                if footer:
-                    stage_footers[stage_key] = footer
         except ConnectionError:
             raise
         except Exception as e:  # non-fatal per stage
@@ -862,8 +794,7 @@ def narrate_entity(dataset: str, entity: str, iteration: int, client: LLMClient,
             try:
                 merged = compose_global_narrative(
                     stage_texts, global_doc, dataset=str(dataset),
-                    entity=str(entity), iteration=int(iteration),
-                    stage_footers=stage_footers)
+                    entity=str(entity), iteration=int(iteration))
                 path = os.path.join(nl_dir, f"nl_global_iter{iteration}.txt")
                 with open(path, "w") as f:
                     f.write(merged)

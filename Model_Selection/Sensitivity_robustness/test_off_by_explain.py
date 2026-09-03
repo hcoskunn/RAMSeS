@@ -37,6 +37,8 @@ sys.modules["Utils"].__path__ = [
         os.path.abspath(__file__)))), "Utils")]
 sys.modules["Metrics.metrics"].range_based_precision_recall_f1_auc = lambda *a, **k: (0, 0, 0.5, 0.5, None)
 sys.modules["Utils.model_selection_utils"].evaluate_model = lambda *a, **k: {}
+sys.modules["Utils.model_selection_utils"].ScoringTimeout = type(
+    "ScoringTimeout", (Exception,), {})
 
 
 class _Logger:

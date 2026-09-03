@@ -507,6 +507,70 @@ class TestVerifierProfileClaims(unittest.TestCase):
         self.assertEqual(v["attribution_warnings"], [])
 
 
+class TestVerifierRoleMixing(unittest.TestCase):
+    """Role mixing (verifier v4).
+
+    Agreement is a property of a SOURCE ranking; a detector only has a
+    position. On SKAB/7 the narrator hung the first on the second — "its
+    first-ranked detector is LOF_3, which aligns more closely with
+    Thompson_Sampling's ranking" — which inverted the finding, LOF_3 leading
+    because the OTHER source ranked it first. It scored 0.000: the sentence
+    carries no numbers, and `_ENTITY_RE` cannot even see a source name.
+    """
+
+    def _ir(self):
+        return {
+            "ir_version": "1.0", "stage": "rank_aggregation_final",
+            "dataset": "DS", "entity": "e1",
+            "output": {"top_pick": "LOF_3",
+                       "consensus_ranking_top_k": ["LOF_3", "CBLOF_1"],
+                       "sources": ["Robust_Aggregated", "Thompson_Sampling"]},
+            "evidence": [
+                {"id": "ra_final.output.top", "type": "stage_output",
+                 "subject": "LOF_3", "value": "LOF_3",
+                 "text": "The final consensus is a ranking of detectors; its "
+                         "first-ranked detector is LOF_3."},
+                {"id": "ra_final.kendall_only.winner", "type": "kendall_only",
+                 "subject": "Thompson_Sampling",
+                 "value": {"winner": "Thompson_Sampling",
+                           "runner_up": "Robust_Aggregated"},
+                 "text": "Thompson_Sampling drove the final consensus most."},
+            ],
+            "caveats": [], "required_atom_ids": [], "confidence": {},
+        }
+
+    def test_relation_hung_on_a_detector_is_caught(self):
+        bad = ("Thompson_Sampling drove the final consensus most. The "
+               "first-ranked detector in the final consensus is LOF_3, which "
+               "aligns more closely with Thompson_Sampling's ranking.")
+        v = verifier.verify_narrative(bad, self._ir())
+        self.assertEqual(v["n_role_mixups"], 1)
+        self.assertEqual(v["role_mixups"][0]["detectors"], ["LOF_3"])
+        self.assertGreater(v["hallucination_rate"], 0.0)
+
+    def test_both_vocabularies_in_one_sentence_is_not_itself_an_error(self):
+        """The relation must ATTACH to the detector. Naming a source and a
+        detector in one true sentence is ordinary prose, and flagging it would
+        make the check noisy enough to ignore."""
+        ok = ("The final consensus is driven most closely by Thompson_Sampling, "
+              "with LOF_3 ranked first.")
+        self.assertEqual(verifier.verify_narrative(ok, self._ir())["n_role_mixups"], 0)
+
+    def test_separate_sentences_are_clean(self):
+        good = ("The final consensus followed Thompson_Sampling more closely "
+                "than Robust_Aggregated. The first-ranked detector in the final "
+                "consensus ranking is LOF_3.")
+        v = verifier.verify_narrative(good, self._ir())
+        self.assertEqual(v["n_role_mixups"], 0)
+        self.assertEqual(v["hallucination_rate"], 0.0)
+
+    def test_stages_declaring_one_vocabulary_are_skipped(self):
+        ir = self._ir()
+        ir["output"].pop("sources")
+        bad = "its first-ranked detector is LOF_3, which aligns more closely."
+        self.assertEqual(verifier.verify_narrative(bad, ir)["n_role_mixups"], 0)
+
+
 class TestVerifierRivalSets(unittest.TestCase):
     """Rival-set attribution (verifier v3).
 
@@ -628,7 +692,7 @@ class TestPrompts(unittest.TestCase):
         doc["stage"] = "rank_aggregation_robust"
         prompt = llm.build_stage_prompt(doc)
         self.assertIn("rank is a position", prompt)
-        self.assertIn("rather than calling it high or low", prompt)
+        self.assertIn("NEVER call a rank", prompt)
         # Other stages get their own hint, not this one.
         doc["stage"] = "monte_carlo"
         self.assertNotIn("rank is a position", llm.build_stage_prompt(doc))
@@ -640,7 +704,14 @@ class TestPrompts(unittest.TestCase):
         doc["question"] = "Why did LOF_1 rank first?"
         prompt = llm.build_stage_prompt(doc)
         self.assertIn("QUESTION THIS STAGE ANSWERS: Why did LOF_1 rank first?", prompt)
-        self.assertIn("answers the question above, leading with the answer", prompt)
+        self.assertIn("answers the question above", prompt)
+        # The opening sentence is the one thing the model decides; the stage
+        # card's short view is built from it.
+        self.assertIn("Open with ONE sentence that answers it outright", prompt)
+        # Optional facts must be offered AS optional, or the budget's headroom
+        # buys nothing: the model states them all and the narrative comes out at
+        # the length of its own facts.
+        self.assertIn("optional", prompt)
 
     def test_word_budget_follows_content_length_not_atom_count(self):
         """The floor must never exceed the material available.
@@ -673,6 +744,32 @@ class TestPrompts(unittest.TestCase):
         ]
         self.assertEqual(llm._word_budget(2, content_words=llm._content_words(merged)),
                          (lo, hi))
+
+    def test_budget_counts_required_atoms_only(self):
+        """Optional atoms must not buy themselves room.
+
+        Sizing the budget to every atom made the optional ones optional in name
+        only: there was space for all of them, so all were stated and the
+        narrative came out at ~1.0x the length of its own facts. The headroom
+        above the required set is what the model spends on the optional facts it
+        judges worth including."""
+        doc = _tiny_ir()
+        doc["evidence"] = [
+            {"id": f"toy.a{i}", "type": "t", "subject": "LOF_1", "value": i,
+             "text": "word " * 20} for i in range(4)
+        ]
+        doc["caveats"] = []
+        doc["required_atom_ids"] = ["toy.a0", "toy.a1"]
+        self.assertEqual(llm._content_words(doc), 40)
+
+    def test_a_required_list_naming_no_present_atom_falls_back(self):
+        """Malformed, not empty — a 0 budget would floor a 500-word stage at 40."""
+        doc = _tiny_ir()
+        doc["evidence"] = [{"id": "toy.a0", "type": "t", "subject": "LOF_1",
+                            "value": 1, "text": "word " * 20}]
+        doc["caveats"] = []
+        doc["required_atom_ids"] = ["nothing.here"]
+        self.assertEqual(llm._content_words(doc), 20)
 
     def test_word_budget_falls_back_to_atom_count(self):
         self.assertEqual(llm._word_budget(2), (65, 120))
@@ -788,10 +885,9 @@ class TestNarrateEntity(unittest.TestCase):
                                         stages=["ga_combination"])
             self.assertEqual(list(report["stages"].keys()), ["ga_combination"])
 
-    def test_info_footer_leads_file_and_is_outside_verification(self):
-        """The glossary heads the .txt — the reader meets the terms before the
-        prose using them — but is written outside the model's output, so it
-        never enters the verified narrative or the metrics."""
+    def test_narrative_file_is_prose_only(self):
+        """The glossary used to lead every .txt. It now lives on the
+        documentation page, so the file is the narrative and nothing else."""
         ra_result = {
             "verdicts": [
                 {"source": "S1", "loo_score": 0.3, "loo_rank": 1, "align_score": 0.6,
@@ -802,11 +898,12 @@ class TestNarrateEntity(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             base = os.path.join(tmp, "explanations_ir")
             out = os.path.join(tmp, "explanations_nl")
-            ir.write_stage_ir(
-                ir.build_rank_aggregation_ir("DS", "e1", "robust", 0, ra_result,
-                                             ["S1", "S2"], {"S1": "A", "S2": "B"},
-                                             ["A", "B"]),
-                "DS", "e1", "ir_rank_aggregation_robust_0", base_dir=base)
+            doc = ir.build_rank_aggregation_ir("DS", "e1", "robust", 0, ra_result,
+                                               ["S1", "S2"], {"S1": "A", "S2": "B"},
+                                               ["A", "B"])
+            self.assertNotIn("info_footer", doc)
+            ir.write_stage_ir(doc, "DS", "e1", "ir_rank_aggregation_robust_0",
+                              base_dir=base)
             report = llm.narrate_entity("DS", "e1", 0, FakeClient(),
                                         base_dir=base, out_dir=out,
                                         stages=["rank_aggregation_robust"])
@@ -814,16 +911,8 @@ class TestNarrateEntity(unittest.TestCase):
             self.assertEqual(info["status"], "ok")
             with open(info["narrative_path"]) as f:
                 content = f.read()
-            # Glossary first, then a blank line, then the narrative.
-            self.assertTrue(content.startswith("INFO: "), content[:40])
-            footer, _, body = content.partition("\n\n")
-            self.assertIn("Influence measures how much a source moved", footer)
-            # The narrative itself carries neither the marker nor the glossary.
-            self.assertTrue(body.strip())
-            self.assertNotIn("INFO:", body)
-            self.assertNotIn("Influence measures", body)
-            # Metrics are computed on the narrative alone.
-            self.assertEqual(info["words"], len(body.split()))
+            self.assertNotIn("INFO:", content)
+            self.assertEqual(info["words"], len(content.split()))
 
     def test_repair_pass_fixes_violating_draft(self):
         """A draft with a hallucinated number triggers ONE verifier-guided
@@ -936,15 +1025,7 @@ class TestGlobalNarrativeModes(unittest.TestCase):
         self.assertEqual(a, b)
         for prose in texts.values():          # reused exactly, never paraphrased
             self.assertIn(prose, a)
-        # Footers are opt-in here; narrate_entity always supplies them.
         self.assertNotIn("INFO:", a)
-        with_footer = llm.compose_global_narrative(
-            texts, self._global_ir(), dataset="DS", entity="e1", iteration=3,
-            stage_footers={"monte_carlo": "Noise is Gaussian."})
-        self.assertIn("INFO: Noise is Gaussian.", with_footer)
-        # Glossary precedes the prose it explains, as in the per-stage files.
-        self.assertLess(with_footer.index("INFO: Noise is Gaussian."),
-                        with_footer.index("MC prose."))
 
     def _run(self, tmp, **kw):
         base = os.path.join(tmp, "explanations_ir")
@@ -967,14 +1048,10 @@ class TestGlobalNarrativeModes(unittest.TestCase):
             # Deterministic merge adds no claims, so it carries no metrics and
             # cannot double-count the stage prose in the micro-average.
             self.assertNotIn("verify", g)
-            # The merged document carries each stage's glossary too.
-            with open(os.path.join(nl_dir, "nl_global_iter3.txt")) as f:
-                merged = f.read()
-            self.assertIn("INFO: ", merged)
             with open(os.path.join(nl_dir, "nl_global_iter3.txt")) as f:
                 doc = f.read()
             with open(os.path.join(nl_dir, "nl_ga_combination.txt")) as f:
-                stage = f.read().split("\nINFO:")[0].strip()
+                stage = f.read().strip()
             self.assertIn(stage, doc)
 
     def test_llm_mode_still_narrates_and_verifies_the_global_ir(self):

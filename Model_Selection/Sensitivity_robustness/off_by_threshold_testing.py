@@ -10,7 +10,7 @@ from loguru import logger
 from Metrics.metrics import range_based_precision_recall_f1_auc
 from Model_Selection.Sensitivity_robustness.plot_retention import (
     prune_superseded, prune_timestamped)
-from Utils.model_selection_utils import evaluate_model
+from Utils.model_selection_utils import evaluate_model, ScoringTimeout
 from Explainability import ir
 from Model_Selection.Sensitivity_robustness import exclusive_win_surrogates as ews
 
@@ -88,7 +88,12 @@ def intersperse_borderline_normal_points(data, labels, factor, min_scale=0.95, m
 
                 # Generate noise
                 noise = np.random.normal(0, local_std * scale_factor)
-                new_data[j] = noise  # Create a new point by adding noise to the base point
+                # ADDED to the point at the injection site, not assigned. Assigned,
+                # every injected point was a zero-centred vector while the series
+                # is MinMax-scaled to [0, 1] — so none of them landed anywhere near
+                # the data, every detector called them the same way, and the stage
+                # produced no exclusive wins to explain.
+                new_data[j] = data[j, i] + noise
 
             # Add new point
             augmented_data.append(new_data)
@@ -161,16 +166,18 @@ def run_off_by_threshold(test_data, trained_models, model_names, dataset, entity
     adjusted_y_pred_dict = {}
     for model_name in model_names:
         model = trained_models.get(model_name)
-        results[model_name] = []
-        adjusted_y_pred_dict[model_name] = []
-        if model:
+        if not model:
+            continue
+        try:
             evaluation = evaluate_model(test_data, model, model_name)  # Assume this function returns a dict
-            y_true = evaluation['anomaly_labels'].flatten()
-            y_scores = evaluation['entity_scores'].flatten()
-            _, _, best_f1, pr_auc, adjusted_y_pred = range_based_precision_recall_f1_auc(y_true, y_scores)
-            adjusted_y_pred_dict[model_name].append(adjusted_y_pred)
-            results[model_name].append({'f1': best_f1, 'pr_auc': pr_auc})
-            logger.info(f"Evaluated {model_name}: F1={best_f1}, PR_AUC={pr_auc}")
+        except ScoringTimeout:
+            continue
+        y_true = evaluation['anomaly_labels'].flatten()
+        y_scores = evaluation['entity_scores'].flatten()
+        _, _, best_f1, pr_auc, adjusted_y_pred = range_based_precision_recall_f1_auc(y_true, y_scores)
+        adjusted_y_pred_dict[model_name] = [adjusted_y_pred]
+        results[model_name] = [{'f1': best_f1, 'pr_auc': pr_auc}]
+        logger.info(f"Evaluated {model_name}: F1={best_f1}, PR_AUC={pr_auc}")
 
     ranked_by_f1 = sorted(results.items(), key=lambda x: x[1][0]['f1'], reverse=True)
     ranked_by_f1_names = [item[0] for item in ranked_by_f1]

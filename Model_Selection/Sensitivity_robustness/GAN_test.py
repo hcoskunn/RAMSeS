@@ -12,7 +12,7 @@ from tensorflow.keras import layers, models
 from Metrics.metrics import range_based_precision_recall_f1_auc, prauc, f1_score
 from Model_Selection.Sensitivity_robustness.plot_retention import (
     prune_superseded, prune_timestamped)
-from Utils.model_selection_utils import evaluate_model
+from Utils.model_selection_utils import evaluate_model, ScoringTimeout
 from Explainability import ir
 from Model_Selection.Sensitivity_robustness import exclusive_win_surrogates as ews
 
@@ -337,16 +337,18 @@ def run_Gan(test_data, trained_models, model_names, dataset, entity, explain=Fal
     adjusted_y_pred_dict = {}
     for model_name in model_names:
         model = trained_models.get(model_name)
-        results[model_name] = []
-        adjusted_y_pred_dict[model_name] = []
-        if model:
+        if not model:
+            continue
+        try:
             evaluation = evaluate_model(test_data, model, model_name)  # Assume this function returns a dict
-            y_true = evaluation['anomaly_labels'].flatten()
-            y_scores = evaluation['entity_scores'].flatten()
-            _, _, best_f1, pr_auc, adjusted_y_pred = range_based_precision_recall_f1_auc(y_true, y_scores)
-            adjusted_y_pred_dict[model_name].append(adjusted_y_pred)
-            results[model_name].append({'f1': best_f1, 'pr_auc': pr_auc})
-            logger.info(f"Evaluated {model_name}: F1={best_f1}, PR_AUC={pr_auc}")
+        except ScoringTimeout:
+            continue
+        y_true = evaluation['anomaly_labels'].flatten()
+        y_scores = evaluation['entity_scores'].flatten()
+        _, _, best_f1, pr_auc, adjusted_y_pred = range_based_precision_recall_f1_auc(y_true, y_scores)
+        adjusted_y_pred_dict[model_name] = [adjusted_y_pred]
+        results[model_name] = [{'f1': best_f1, 'pr_auc': pr_auc}]
+        logger.info(f"Evaluated {model_name}: F1={best_f1}, PR_AUC={pr_auc}")
 
     # Filter out models with no results before sorting
     valid_results = {k: v for k, v in results.items() if len(v) > 0}
@@ -496,7 +498,7 @@ def build_gan_point_table(point_records, adjusted_y_pred_dict, true_labels,
 
     Features (model-independent properties of the generated point), one row per
     injected point: ambiguity (|D(x) - tau|, paper Eq. 7), is_anomaly (the Eq. 9
-    label), signal_magnitude and signal_spread across channels, context_gap and
+    label), signal_magnitude and signal_spread across the injected point's features, context_gap and
     local_volatility at the injection site, and position (index / N).
     `correct[i, m]` = (model m's production prediction at the point's index ==
     the point's label). No model inference is run here.

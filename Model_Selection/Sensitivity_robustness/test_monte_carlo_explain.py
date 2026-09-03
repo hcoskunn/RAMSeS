@@ -37,6 +37,8 @@ sys.modules["Metrics.metrics"].prauc = lambda *a, **k: 0.5
 sys.modules["Metrics.metrics"].f1_score = lambda *a, **k: (0.5,) * 7
 sys.modules["Metrics.metrics"].f1_soft_score = lambda *a, **k: (0.5,) * 7
 sys.modules["Utils.model_selection_utils"].evaluate_model = lambda *a, **k: {}
+sys.modules["Utils.model_selection_utils"].ScoringTimeout = type(
+    "ScoringTimeout", (Exception,), {})
 
 
 class _Logger:
