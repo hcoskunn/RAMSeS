@@ -364,6 +364,12 @@ def vus_score(scores, labels, window):
         return float("nan")
 
 
+def rank_key(value):
+    """Descending-sort key that leaves an uncomputable score last."""
+    v = float(value)
+    return float("-inf") if np.isnan(v) else v
+
+
 def vus_window(series):
     """One sliding window for every candidate, so their VUS values compare."""
     from Utils.vus_utils import find_length

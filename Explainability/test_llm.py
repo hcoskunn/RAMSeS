@@ -76,10 +76,13 @@ def _mc_result():
 
 def _results_dict():
     return {
-        "thompson": {"best_model": "LOF_1"},
-        "gan_robustness": {"best_model": "LOF_1"},
-        "borderline": {"best_model": "NN_3"},
-        "monte_carlo": {"best_model_f1": "LOF_1"},
+        "thompson": {"best_model": "LOF_1", "top_models": ["LOF_1", "NN_3"]},
+        "gan_robustness": {"best_model": "LOF_1", "f1_names": ["LOF_1", "NN_3"],
+                           "pr_auc_names": ["NN_3", "LOF_1"]},
+        "borderline": {"best_model": "NN_3", "f1_names": ["NN_3", "LOF_1"],
+                       "pr_auc_names": ["NN_3", "LOF_1"]},
+        "monte_carlo": {"best_model_f1": "LOF_1", "f1_names": ["LOF_1", "NN_3"],
+                        "pr_auc_names": ["LOF_1", "NN_3"]},
         "aggregation": {"robust_agg": (0.5, ["LOF_1", "NN_3"]),
                         "final_agg": (0.4, ["LOF_1", "NN_3"])},
         "final_decision": {"framework_choice": "single_model",

@@ -78,7 +78,10 @@ if not hasattr(sys.modules["Utils"], "__path__"):
 _set("Metrics.metrics",
      range_based_precision_recall_f1_auc=lambda *a, **k: (0, 0, 0.5, 0.5, None),
      prauc=lambda *a, **k: 0.5,
-     f1_score=lambda *a, **k: 0.5)
+     f1_score=lambda *a, **k: 0.5,
+     rank_key=lambda v: v,
+     vus_score=lambda *a, **k: 0.5,
+     vus_window=lambda *a, **k: 8)
 _set("Utils.model_selection_utils", evaluate_model=lambda *a, **k: {},
      ScoringTimeout=type("ScoringTimeout", (Exception,), {}))
 _set("loguru", logger=_Logger())

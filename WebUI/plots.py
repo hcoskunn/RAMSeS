@@ -373,11 +373,14 @@ def _monte_carlo(ds, ent):
     headline, gallery = [], []
     # Plain is the default: the un-annotated figure is the one that belongs in a
     # thesis, and the annotated version is a click away.
+    # One variant per metric the run swept: a metric its fitness did not name
+    # writes no figure, and `_variants` drops the patterns that match nothing.
     curve_variants = _variants(
         d,
         ["*_MonteCarlo_noise_curves_F1_plain.png",
-         "*_MonteCarlo_noise_curves_PRAUC_plain.png"],
-        ["F1", "PR-AUC"])
+         "*_MonteCarlo_noise_curves_PRAUC_plain.png",
+         "*_MonteCarlo_noise_curves_VUS_plain.png"],
+        ["F1", "PR-AUC", "VUS"])
     if curve_variants:
         headline.append({"title": "Score against noise level",
                          "caption": "Each detector's score as injected noise grows.",
@@ -396,7 +399,8 @@ def _monte_carlo(ds, ent):
              "F1 at a fixed threshold"),
             ("*_MonteCarlo_ranking_stability.png", "Ranking stability"),
             ("*_MonteCarlo_surrogate_tree_F1.png", "Surrogate tree (F1)"),
-            ("*_MonteCarlo_surrogate_tree_PRAUC.png", "Surrogate tree (PR-AUC)")):
+            ("*_MonteCarlo_surrogate_tree_PRAUC.png", "Surrogate tree (PR-AUC)"),
+            ("*_MonteCarlo_surrogate_tree_VUS.png", "Surrogate tree (VUS)")):
         for path in _ls(d, pattern):
             gallery.append(_fig(path, title))
     # The per-detector *_MonteCarloResults.png set is not listed. One figure per

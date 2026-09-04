@@ -871,14 +871,24 @@ th[aria-sort="descending"]::after { content: " ↓"; opacity: 1; }
   .prose { max-width: none; }
 }
 
-/* Per-source orderings under the agreement strip. Laid out in columns so five
-   detector lists read side by side instead of as one long scroll. */
+/* The ordering of whichever agreement chip is open. */
 .ranking-list { margin: var(--sp-2) 0 0; padding-left: 3ch; }
 .ranking-list li { line-height: 1.5; }
-/* Narrow enough that five sources fit on one line — detector names are short,
-   so the old 14rem minimum was reserving space nothing used and wrapping the
-   fifth column onto a row of its own. The left padding is what keeps the first
-   column's list markers off the card edge. */
-.ranking-grid { display: grid; gap: var(--sp-3);
-                padding-left: var(--sp-2);
-                grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr)); }
+/* Five columns: the three robustness tests, then the two sources that have no
+   metric of their own. A stage keeps its column on every metric row, so
+   GAN_PR-AUC sits directly under GAN_F1. */
+.agreement-grid { display: grid; gap: var(--sp-2);
+                  grid-template-columns: repeat(5, max-content); }
+.badge-button { font: inherit; font-size: var(--fs-xs); font-weight: 550;
+                border: 1px solid transparent; cursor: pointer; text-align: left; }
+.badge-button:hover { filter: brightness(1.06); }
+.badge-button[aria-expanded="true"] { border-color: currentColor; }
+/* The open rankings, side by side so two sources can be read against each
+   other. Five fixed columns matching the chip grid above: a source's ranking
+   sits under its own chip's column whatever else is toggled on. */
+.agreement-rankings { display: grid; gap: var(--sp-3);
+                      padding-left: var(--sp-2);
+                      grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+  .agreement-grid { grid-template-columns: repeat(3, max-content); }
+}

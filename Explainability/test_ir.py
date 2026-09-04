@@ -198,10 +198,13 @@ def _thompson_ranking_kwargs():
 
 def _results_dict():
     return {
-        "thompson": {"best_model": "A"},
-        "gan_robustness": {"best_model": "A"},
-        "borderline": {"best_model": "B"},
-        "monte_carlo": {"best_model_f1": "A"},
+        "thompson": {"best_model": "A", "top_models": ["A", "B"]},
+        "gan_robustness": {"best_model": "A", "f1_names": ["A", "B"],
+                           "pr_auc_names": ["B", "A"], "vus_names": ["A", "B"]},
+        "borderline": {"best_model": "B", "f1_names": ["B", "A"],
+                       "pr_auc_names": ["B", "A"], "vus_names": ["B", "A"]},
+        "monte_carlo": {"best_model_f1": "A", "f1_names": ["A", "B"],
+                        "pr_auc_names": ["A", "B"], "vus_names": ["A", "B"]},
         "aggregation": {"robust_agg": (0.5, ["A", "B"]), "final_agg": (0.4, ["A", "B"])},
         "final_decision": {"framework_choice": "ensemble", "chosen_model": ["A", "B"],
                            "ensemble": ["A", "B"], "ensemble_f1": 0.9,
@@ -642,11 +645,63 @@ class TestBuilders(unittest.TestCase):
         — so counting the new one would double-weight Thompson in the
         consensus."""
         self.assertIn("thompson_ranking", ir._STAGE_FILES)
-        with open(os.path.join(_THIS, "ir.py"), encoding="utf-8") as f:
-            source = f.read()
-        picks = re.search(r"stage_picks = \{(.*?)\n    \}", source, re.S)
-        self.assertIsNotNone(picks)
-        self.assertNotIn("thompson_ranking", picks.group(1))
+        with tempfile.TemporaryDirectory() as base:
+            path = ir.assemble_global_ir(_results_dict(), "DS", "e1", 0, base_dir=base)
+            with open(path) as f:
+                g = json.load(f)
+        self.assertIn("thompson", g["stage_agreement"])
+        self.assertNotIn("thompson_ranking", g["stage_agreement"])
+
+    def _agreement_order(self, metric):
+        results = _results_dict()
+        results["final_decision"]["decision_metric"] = metric
+        with tempfile.TemporaryDirectory() as base:
+            path = ir.assemble_global_ir(results, "DS", "e1", 0, base_dir=base)
+            with open(path) as f:
+                g = json.load(f)
+        rows = sorted(g["stage_agreement"].items(), key=lambda kv: kv[1]["order"])
+        return [name for name, _ in rows]
+
+    def test_agreement_carries_one_source_per_aggregated_ranking(self):
+        """The strip shows the rankings that actually voted, and no others."""
+        self.assertEqual(self._agreement_order(("f1",)),
+                         ["gan_f1", "borderline_f1", "monte_carlo_f1",
+                          "robust_consensus", "thompson"])
+        self.assertEqual(self._agreement_order(("pr_auc",)),
+                         ["gan_pr_auc", "borderline_pr_auc", "monte_carlo_pr_auc",
+                          "robust_consensus", "thompson"])
+
+    def test_agreement_order_puts_each_stage_in_one_column(self):
+        """Five per row, so gan_pr_auc lands directly under gan_f1 and the two
+        sources with no metric of their own stay last in the first row."""
+        order = self._agreement_order(("f1", "pr_auc"))
+        self.assertEqual(order[:5], ["gan_f1", "borderline_f1", "monte_carlo_f1",
+                                     "robust_consensus", "thompson"])
+        self.assertEqual(order[5:], ["gan_pr_auc", "borderline_pr_auc",
+                                     "monte_carlo_pr_auc"])
+        for i in (0, 1, 2):
+            self.assertEqual(order[i].rsplit("_f1", 1)[0],
+                             order[i + 5].rsplit("_pr_auc", 1)[0])
+
+    def test_agreement_carries_a_vus_row_when_the_fitness_asks_for_one(self):
+        order = self._agreement_order(("f1", "pr_auc", "vus"))
+        self.assertEqual(order[8:], ["gan_vus", "borderline_vus", "monte_carlo_vus"])
+        # Each stage keeps one column across all three metric rows.
+        for column, stage in enumerate(("gan", "borderline", "monte_carlo")):
+            self.assertEqual([order[column], order[column + 5], order[column + 8]],
+                             [f"{stage}_f1", f"{stage}_pr_auc", f"{stage}_vus"])
+
+    def test_agreement_metric_is_carried_for_the_split_sources(self):
+        results = _results_dict()
+        results["final_decision"]["decision_metric"] = ("f1", "pr_auc")
+        with tempfile.TemporaryDirectory() as base:
+            path = ir.assemble_global_ir(results, "DS", "e1", 0, base_dir=base)
+            with open(path) as f:
+                g = json.load(f)
+        a = g["stage_agreement"]
+        self.assertEqual(a["monte_carlo_pr_auc"]["metric"], "pr_auc")
+        self.assertEqual(a["monte_carlo_pr_auc"]["stage"], "monte_carlo")
+        self.assertEqual(a["thompson"]["metric"], ir.NOT_AVAILABLE)
 
     def test_ga_combination_reports_a_thinly_supported_sign_and_qualifies_it(self):
         """A detector whose effect changes sign across its range still ends
@@ -1490,7 +1545,7 @@ class TestWriterAndAssembler(unittest.TestCase):
             self.assertEqual(g["stages"]["gan"]["status"], ir.NOT_AVAILABLE)
             # Agreement facts computed in code.
             self.assertTrue(g["stage_agreement"]["thompson"]["agrees_with_final_single"])
-            self.assertFalse(g["stage_agreement"]["borderline"]["agrees_with_final_single"])
+            self.assertFalse(g["stage_agreement"]["borderline_f1"]["agrees_with_final_single"])
             # The global IR carries its own sentence atoms + required ids.
             ids = {a["id"] for a in g["evidence"]}
             self.assertIn("global.decision", ids)

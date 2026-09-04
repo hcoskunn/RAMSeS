@@ -146,12 +146,12 @@ class TestDecisionMetric(unittest.TestCase):
         self.assertEqual(spec.combine_metrics(spec_, partial), 0.5)
 
     def test_robustness_rankings_follow_the_fitness(self):
-        """Only F1 or only PR-AUC when the fitness is exactly that metric."""
-        self.assertEqual(spec.ranking_metrics_for(("f1",)), ("f1",))
-        self.assertEqual(spec.ranking_metrics_for(("pr_auc",)), ("pr_auc",))
-        for mixed in (("f1", "pr_auc"), ("f1", "vus"), ("vus",),
-                      ("f1", "pr_auc", "vus")):
-            self.assertEqual(spec.ranking_metrics_for(mixed), ("f1", "pr_auc"))
+        """One published ranking per chosen metric, and no others."""
+        for chosen in (("f1",), ("pr_auc",), ("vus",), ("f1", "pr_auc"),
+                       ("f1", "vus"), ("f1", "pr_auc", "vus")):
+            self.assertEqual(spec.ranking_metrics_for(chosen), chosen)
+        self.assertEqual(spec.ranking_metrics_for({"f1": 0.7, "vus": 0.3}),
+                         ("f1", "vus"))
 
 
 class TestDecisionMetricWeights(unittest.TestCase):

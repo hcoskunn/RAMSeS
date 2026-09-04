@@ -38,7 +38,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from Utils.pipeline_spec import decision_metric_label
+from Utils.pipeline_spec import decision_metric_label, ranking_metrics_for
 
 import numpy as np
 
@@ -288,6 +288,14 @@ def write_stage_ir(ir: Dict[str, Any], dataset: str, entity: str, filename: str,
     with open(path, "w") as f:
         json.dump(ir, f, sort_keys=True, indent=2)
     return path
+
+
+def _join_and(items: Sequence[str]) -> str:
+    """['a'] -> 'a'; ['a','b'] -> 'a and b'; ['a','b','c'] -> 'a, b and c'."""
+    parts = [str(i) for i in items]
+    if len(parts) < 3:
+        return " and ".join(parts)
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def _top_k(seq: Sequence[Any], k: int = TOP_K) -> List[Any]:
@@ -1674,9 +1682,11 @@ def _mc_region_phrase(regions: Sequence[Any]) -> str:
 
 def build_monte_carlo_ir(dataset: str, entity: str, result: Dict[str, Any],
                          ranked_f1: Optional[List[str]] = None,
-                         ranked_pr: Optional[List[str]] = None) -> Dict[str, Any]:
+                         ranked_pr: Optional[List[str]] = None,
+                         ranked_vus: Optional[List[str]] = None) -> Dict[str, Any]:
     curves_f1 = result.get("curves_f1", {})
     curves_pr = result.get("curves_pr", {})
+    curves_vus = result.get("curves_vus", {})
     winner_f1 = result.get("winner_f1", {})
     permodel_f1 = result.get("permodel_f1", {})
 
@@ -1685,25 +1695,30 @@ def build_monte_carlo_ir(dataset: str, entity: str, result: Dict[str, Any],
     output = {
         "production_ranking_f1_top_k": _top_k(ranked_f1 or []),
         "production_ranking_pr_top_k": _top_k(ranked_pr or []),
+        "production_ranking_vus_top_k": _top_k(ranked_vus or []),
         "top_pick_f1": (ranked_f1[0] if ranked_f1 else NOT_AVAILABLE),
         "top_pick_pr": (ranked_pr[0] if ranked_pr else NOT_AVAILABLE),
+        "top_pick_vus": (ranked_vus[0] if ranked_vus else NOT_AVAILABLE),
     }
     top_f1 = ranked_f1[0] if ranked_f1 else None
     top_pr = ranked_pr[0] if ranked_pr else None
-    if top_f1 or top_pr:
-        if top_f1 and top_pr and top_f1 == top_pr:
-            lead = (f"In the production Monte Carlo test, {top_f1} ranked first "
-                    f"both by F1 score and by PR-AUC.")
-        elif top_f1 and top_pr:
-            lead = (f"In the production Monte Carlo test, {top_f1} ranked first "
-                    f"by F1 score and {top_pr} ranked first by PR-AUC.")
-        else:
-            only, metric = (top_f1, "F1 score") if top_f1 else (top_pr, "PR-AUC")
-            lead = (f"In the production Monte Carlo test, {only} ranked first "
-                    f"by {metric}.")
+    top_vus = ranked_vus[0] if ranked_vus else None
+    # One clause per metric the run actually ranked by; metrics that agree on a
+    # winner share a clause rather than repeating the name.
+    tops = [(label, ranking[0]) for label, ranking in
+            (("F1 score", ranked_f1), ("PR-AUC", ranked_pr), ("VUS", ranked_vus))
+            if ranking]
+    if tops:
+        by_winner: Dict[str, List[str]] = {}
+        for label, winner in tops:
+            by_winner.setdefault(winner, []).append(label)
+        clauses = [f"{winner} ranked first by {_join_and(labels)}"
+                   for winner, labels in by_winner.items()]
+        lead = f"In the production Monte Carlo test, {_join_and(clauses)}."
         evidence.append(make_atom(
-            "mc.output.top", "stage_output", str(top_f1 or top_pr),
-            {"top_f1": top_f1 or NOT_AVAILABLE, "top_pr": top_pr or NOT_AVAILABLE},
+            "mc.output.top", "stage_output", str(tops[0][1]),
+            {"top_f1": top_f1 or NOT_AVAILABLE, "top_pr": top_pr or NOT_AVAILABLE,
+             "top_vus": top_vus or NOT_AVAILABLE},
             lead, order=1))
         required.append("mc.output.top")
 
@@ -1714,7 +1729,8 @@ def build_monte_carlo_ir(dataset: str, entity: str, result: Dict[str, Any],
     # both floods the prose with "at 0.042 ... at 0.053 ..." without adding a
     # single fact the regions do not already carry.
     regions_by_model: Dict[str, Dict[str, Any]] = {}
-    for metric, curves in (("F1", curves_f1), ("PR-AUC", curves_pr)):
+    for metric, curves in (("F1", curves_f1), ("PR-AUC", curves_pr),
+                           ("VUS", curves_vus)):
         for m, regions in sorted((curves.get("win_regions") or {}).items()):
             if regions:
                 regions_by_model.setdefault(m, {})[metric] = regions
@@ -1731,7 +1747,7 @@ def build_monte_carlo_ir(dataset: str, entity: str, result: Dict[str, Any],
         # metric clauses visibly distinct (the narrator otherwise copies one
         # metric's ranges into the other) and avoids repeating the preamble.
         clauses = [f"by {metric} {_mc_region_phrase(per[metric])}"
-                   for metric in ("F1", "PR-AUC") if metric in per]
+                   for metric in ("F1", "PR-AUC", "VUS") if metric in per]
         wid = f"mc.win_region.{m}"
         evidence.append(make_atom(
             wid, "win_region", m,
@@ -2306,35 +2322,40 @@ def assemble_global_ir(results_dict: Dict[str, Any], dataset: str, entity: str,
     }
 
     # Cross-stage top-pick agreement (single-branch stages vs the final single pick).
+    # One entry per ranking that actually entered the robustness consensus, so
+    # the strip shows the sources the run voted with and no others.
     single_pick = fd.get("single_model", NOT_AVAILABLE)
-    stage_picks = {
-        "thompson": (results_dict.get("thompson", {}) or {}).get("best_model", NOT_AVAILABLE),
-        "gan": (results_dict.get("gan_robustness", {}) or {}).get("best_model", NOT_AVAILABLE),
-        "borderline": (results_dict.get("borderline", {}) or {}).get("best_model", NOT_AVAILABLE),
-        "monte_carlo": (results_dict.get("monte_carlo", {}) or {}).get("best_model_f1", NOT_AVAILABLE),
-    }
     agg = results_dict.get("aggregation", {}) or {}
-    # Only the robust consensus is compared. The final consensus IS the source
-    # of the single-model pick, so asking whether they agree is tautological —
-    # it would always report agreement and tell the reader nothing.
-    stage_picks["robust_consensus"] = _top_of_ranking(agg.get("robust_agg"))
-    # Each source's WHOLE ordering, not just its winner: a source that disagrees
-    # on first place may still have the consensus pick second, and the strip
-    # alone cannot tell that from having it last.
-    stage_rankings = {
-        "thompson": _full_ranking((results_dict.get("thompson", {}) or {}).get("top_models")),
-        "gan": _full_ranking((results_dict.get("gan_robustness", {}) or {}).get("f1_names")),
-        "borderline": _full_ranking((results_dict.get("borderline", {}) or {}).get("f1_names")),
-        "monte_carlo": _full_ranking((results_dict.get("monte_carlo", {}) or {}).get("f1_names")),
-        "robust_consensus": _full_ranking(agg.get("robust_agg")),
-    }
-    agreement = {
-        name: {"top_pick": _py(pick),
-               "ranking": stage_rankings.get(name) or [],
-               "agrees_with_final_single": (pick == single_pick)
-               if pick not in (NOT_AVAILABLE, "N/A") else NOT_AVAILABLE}
-        for name, pick in sorted(stage_picks.items())
-    }
+    _robust_stages = (("gan", "gan_robustness"), ("borderline", "borderline"),
+                      ("monte_carlo", "monte_carlo"))
+    sources = []
+    for i, m in enumerate(ranking_metrics_for(metric)):
+        for key, slot in _robust_stages:
+            sources.append((f"{key}_{m}", key, m, _full_ranking(
+                (results_dict.get(slot, {}) or {}).get(f"{m}_names"))))
+        if i == 0:
+            # Only the robust consensus is compared. The final consensus IS the
+            # source of the single-model pick, so asking whether they agree is
+            # tautological — it would always report agreement and say nothing.
+            sources.append(("robust_consensus", "robust_consensus", NOT_AVAILABLE,
+                            _full_ranking(agg.get("robust_agg"))))
+            sources.append(("thompson", "thompson", NOT_AVAILABLE, _full_ranking(
+                (results_dict.get("thompson", {}) or {}).get("top_models"))))
+    agreement = {}
+    for position, (name, stage, m, ranking) in enumerate(sources):
+        pick = ranking[0] if ranking else NOT_AVAILABLE
+        agreement[name] = {
+            "top_pick": _py(pick),
+            "ranking": ranking or [],
+            "stage": stage,
+            "metric": m,
+            # The document is written with sort_keys=True, so display order has
+            # to travel as a value: one row per metric, each stage in the same
+            # column on every row.
+            "order": position,
+            "agrees_with_final_single": (pick == single_pick)
+            if pick not in (NOT_AVAILABLE, "N/A") else NOT_AVAILABLE,
+        }
 
     seen = set()
     caveats = []

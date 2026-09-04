@@ -520,15 +520,8 @@ def combine_metrics(spec, scores: Dict[str, float]) -> float:
 
 
 def ranking_metrics_for(spec) -> Tuple[str, ...]:
-    """Which rankings the robustness stages publish.
-
-    Only F1 or only PR-AUC when the fitness is exactly that one metric;
-    otherwise both, which is what those stages have always produced.
-    """
-    chosen = metrics_required(spec)
-    if chosen in (("f1",), ("pr_auc",)):
-        return chosen
-    return ("f1", "pr_auc")
+    """Which rankings the robustness stages publish: one per chosen metric."""
+    return metrics_required(spec)
 
 
 def parse_stages(text: Optional[str]) -> Set[str]:

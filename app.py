@@ -609,10 +609,12 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
     ensemble_scores = None
     thompson_model_names = []
     Gan_ranked_by_f1 = Gan_ranked_by_pr_auc = []
-    Gan_ranked_by_f1_names = Gan_ranked_by_pr_auc_names = []
+    Gan_ranked_by_f1_names = Gan_ranked_by_pr_auc_names = Gan_ranked_by_vus_names = []
     ranked_by_f1 = ranked_by_pr_auc = []
     ranked_by_f1_names_sensitivity = ranked_by_pr_auc_names_sensitivity = []
+    ranked_by_vus_names_sensitivity = []
     monte_carlo_ranked_models_F1 = monte_carlo_ranked_models_PR = []
+    monte_carlo_ranked_models_VUS = []
     robust_agg = [None, []]
     full_aggregated = [None, []]
 
@@ -697,7 +699,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         test_data_for_gan = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
         gan_results = run_Gan(
             test_data_for_gan, trained_models, still_usable(), dataset, entity,
-            explain=explain
+            explain=explain, metrics=decision_metric
         )
         timing_dict['3_GAN_Robustness'] = time.time() - start_time
         mem_after = get_memory_usage_mb()
@@ -708,8 +710,8 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
             'peak': _MEM_TRACE.peak_between(start_time, time.time()),
         }
         Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
-        Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = (
-            gan_results[0], gan_results[1], gan_results[2], gan_results[3]
+        Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names, Gan_ranked_by_vus_names = (
+            gan_results[0], gan_results[1], gan_results[2], gan_results[3], gan_results[4]
         )
         logger.info("  ✓ [GAN] F1 names top-5: %s | Time=%.4fs", Gan_ranked_by_f1_names[:5],
                     timing_dict['3_GAN_Robustness'])
@@ -729,9 +731,10 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         start_time = time.time()
         # Use original un-injected data so synthetic spike labels don't cause single-class skips
         test_data_for_borderline = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
-        ranked_by_f1, ranked_by_pr_auc, \
-        ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = run_off_by_threshold(
-            test_data_for_borderline, trained_models, still_usable(), dataset, entity, explain=explain
+        ranked_by_f1, ranked_by_pr_auc, ranked_by_f1_names_sensitivity, \
+        ranked_by_pr_auc_names_sensitivity, ranked_by_vus_names_sensitivity = run_off_by_threshold(
+            test_data_for_borderline, trained_models, still_usable(), dataset, entity,
+            explain=explain, metrics=decision_metric
         )
         timing_dict['4_Borderline_Sensitivity'] = time.time() - start_time
         mem_after = get_memory_usage_mb()
@@ -754,9 +757,10 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         start_time = time.time()
         # Use original un-injected data for the same reason
         test_data_for_mc = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
-        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = run_monte_carlo_simulation(
+        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR, \
+        monte_carlo_ranked_models_VUS = run_monte_carlo_simulation(
             test_data_for_mc, trained_models, still_usable(), dataset, entity,
-            n_simulations=2, noise_level=0.1, explain=explain,
+            n_simulations=2, noise_level=0.1, explain=explain, metrics=decision_metric,
         )
         timing_dict['5_Monte_Carlo'] = time.time() - start_time
         mem_after = get_memory_usage_mb()
@@ -791,6 +795,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                 'gan': {
                     'f1_names': Gan_ranked_by_f1_names,
                     'pr_auc_names': Gan_ranked_by_pr_auc_names,
+                    'vus_names': Gan_ranked_by_vus_names,
                     'f1_scores': Gan_ranked_by_f1,
                     'pr_auc_scores': Gan_ranked_by_pr_auc,
                     'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
@@ -800,6 +805,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                 'borderline': {
                     'f1_names': ranked_by_f1_names_sensitivity,
                     'pr_auc_names': ranked_by_pr_auc_names_sensitivity,
+                    'vus_names': ranked_by_vus_names_sensitivity,
                     'f1_scores': ranked_by_f1,
                     'pr_auc_scores': ranked_by_pr_auc,
                     'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
@@ -809,6 +815,7 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
                 'monte_carlo': {
                     'f1_names': monte_carlo_ranked_models_F1,
                     'pr_auc_names': monte_carlo_ranked_models_PR,
+                    'vus_names': monte_carlo_ranked_models_VUS,
                     'best_model_f1': monte_carlo_ranked_models_F1[0] if len(monte_carlo_ranked_models_F1) > 0 else 'N/A',
                     'best_model_pr_auc': monte_carlo_ranked_models_PR[0] if len(monte_carlo_ranked_models_PR) > 0 else 'N/A'
                 },
@@ -842,6 +849,9 @@ def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, ite
         "pr_auc": [("GAN_PR_AUC", Gan_ranked_by_pr_auc_names),
                    ("Borderline_PR_AUC", ranked_by_pr_auc_names_sensitivity),
                    ("MonteCarlo_PR_AUC", monte_carlo_ranked_models_PR)],
+        "vus": [("GAN_VUS", Gan_ranked_by_vus_names),
+                ("Borderline_VUS", ranked_by_vus_names_sensitivity),
+                ("MonteCarlo_VUS", monte_carlo_ranked_models_VUS)],
     }
     _sources = []
     for _stage in range(3):
@@ -999,18 +1009,18 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             gan_future = executor.submit(
                 run_Gan,
                 test_data_gan_copy, trained_models, models_to_use,
-                dataset, entity, explain=explain
+                dataset, entity, explain=explain, metrics=decision_metric
             )
         
         borderline_future = executor.submit(
             run_off_by_threshold,
             test_data_borderline, trained_models, models_to_use,
-            dataset, entity, explain=explain
+            dataset, entity, explain=explain, metrics=decision_metric
         )
         monte_carlo_future = executor.submit(
             run_monte_carlo_simulation,
             test_data_montecarlo, trained_models, models_to_use,
-            dataset, entity, 2, 0.1, explain=explain
+            dataset, entity, 2, 0.1, explain=explain, metrics=decision_metric
         )
 
         # Collect results
@@ -1045,8 +1055,8 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         logger.info("     ✓ Thompson: top-5=%s", thompson_model_names[:5])
         
         if not skip_gan:
-            Gan_ranked_by_f1, Gan_ranked_by_pr_auc, \
-            Gan_ranked_by_f1_names, Gan_ranked_by_pr_auc_names = gan_future.result()
+            Gan_ranked_by_f1, Gan_ranked_by_pr_auc, Gan_ranked_by_f1_names, \
+            Gan_ranked_by_pr_auc_names, Gan_ranked_by_vus_names = gan_future.result()
             timing_dict['3_GAN'] = time.time() - overall_start
             mem_gan = get_memory_usage_mb()
             memory_dict['modules']['3_GAN'] = {
@@ -1063,10 +1073,12 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             Gan_ranked_by_pr_auc = []
             Gan_ranked_by_f1_names = []
             Gan_ranked_by_pr_auc_names = []
+            Gan_ranked_by_vus_names = []
             timing_dict['3_GAN'] = 0.0
         
         ranked_by_f1, ranked_by_pr_auc, \
-        ranked_by_f1_names_sensitivity, ranked_by_pr_auc_names_sensitivity = borderline_future.result()
+        ranked_by_f1, ranked_by_pr_auc, ranked_by_f1_names_sensitivity, \
+        ranked_by_pr_auc_names_sensitivity, ranked_by_vus_names_sensitivity = borderline_future.result()
         timing_dict['4_Borderline'] = time.time() - overall_start
         mem_borderline = get_memory_usage_mb()
         memory_dict['modules']['4_Borderline'] = {
@@ -1078,7 +1090,8 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
         }
         logger.info("     ✓ Borderline: F1 top-5=%s", ranked_by_f1_names_sensitivity[:5])
         
-        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR = monte_carlo_future.result()
+        monte_carlo_ranked_models_F1, monte_carlo_ranked_models_PR, \
+        monte_carlo_ranked_models_VUS = monte_carlo_future.result()
         timing_dict['5_MonteCarlo'] = time.time() - overall_start
         mem_mc = get_memory_usage_mb()
         memory_dict['modules']['5_MonteCarlo'] = {
@@ -1178,6 +1191,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             'gan': {
                 'f1_names': Gan_ranked_by_f1_names, 
                 'pr_auc_names': Gan_ranked_by_pr_auc_names,
+                'vus_names': Gan_ranked_by_vus_names,
                 'f1_scores': Gan_ranked_by_f1,
                 'pr_auc_scores': Gan_ranked_by_pr_auc,
                 'best_model': Gan_ranked_by_f1_names[0] if len(Gan_ranked_by_f1_names) > 0 else 'N/A',
@@ -1187,6 +1201,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             'borderline': {
                 'f1_names': ranked_by_f1_names_sensitivity, 
                 'pr_auc_names': ranked_by_pr_auc_names_sensitivity,
+                'vus_names': ranked_by_vus_names_sensitivity,
                 'f1_scores': ranked_by_f1,
                 'pr_auc_scores': ranked_by_pr_auc,
                 'best_model': ranked_by_f1_names_sensitivity[0] if len(ranked_by_f1_names_sensitivity) > 0 else 'N/A',
@@ -1196,6 +1211,7 @@ def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, ite
             'monte_carlo': {
                 'f1_names': monte_carlo_ranked_models_F1, 
                 'pr_auc_names': monte_carlo_ranked_models_PR,
+                'vus_names': monte_carlo_ranked_models_VUS,
                 'best_model_f1': monte_carlo_ranked_models_F1[0] if len(monte_carlo_ranked_models_F1) > 0 else 'N/A',
                 'best_model_pr_auc': monte_carlo_ranked_models_PR[0] if len(monte_carlo_ranked_models_PR) > 0 else 'N/A'
             },

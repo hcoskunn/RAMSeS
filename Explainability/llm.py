@@ -303,8 +303,11 @@ _STAGE_TASK_HINTS: Dict[str, str] = {
     # replaced three defensive ones and scored better.
     "rank_aggregation_robust": (
         " Open by naming the source ranking that shaped the consensus most — "
-        "all of them, if several are tied at that rank — then the consensus's "
-        "own top-ranked detector and the source rankings being aggregated. Then describe each source in the order "
+        "all of them, if several are tied at that rank — and the source "
+        "rankings being aggregated. Then, in a sentence of its own, name the "
+        "consensus's own top-ranked detector. That detector is the consensus's "
+        "pick, never a source's: do not attach it to any source's own ranking. "
+        "Then describe each source in the order "
         "given; for each one, state its overall standing rank, its influence "
         "rank, and its agreement rank. A rank is a position — rank "
         "1 is best — so give the rank number itself. NEVER call a rank "

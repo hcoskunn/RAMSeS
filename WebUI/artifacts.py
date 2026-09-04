@@ -98,22 +98,20 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
     ), "subsections": (
         {"id": "overview-pool", "title": "The base detector pool", "blocks": (
             {"text": "The detector pool is chosen from 107 detector instances "
-                     "across 34 families, including statistical models through "
-                     "neural networks and foundation models to graph-based "
+                     "across 34 families, consisting of statistical models, "
+                     "neural networks, foundation models and graph-based "
                      "detectors. Each is trained beforehand and, for every "
                      "window of the series, emits an anomaly score. Every stage "
                      "below consumes those scores, and none of them retrains a "
                      "base detector."},
             {"text": "Not every detector fits every series. POLY, TimesFM and "
-                     "Series2Graph are univariate only. They either refuse a "
-                     "multi-channel series outright or cost minutes per scoring "
-                     "call on one, so they are dropped on SKAB (9 channels) and "
-                     "SMD (38). ABOD is the mirror case: angles need more than "
-                     "one dimension, so it is dropped on the single-channel UCR "
+                     "Series2Graph are univariate only, so they are dropped on SKAB (9 channels) and "
+                     "SMD (38). ABOD is the mirror case. Since angles need more than "
+                     "one dimension, it is dropped on the single-channel UCR "
                      "entities. The run configuration hides what the chosen "
                      "entity cannot use, and a detector named on the command "
                      "line anyway is skipped with a warning rather than failing "
-                     "the run. Separately, any detector that needs more than 120 "
+                     "the run. Additionally, any detector that needs more than 120 "
                      "seconds for a single scoring call is killed and excluded "
                      "from the rest of that run."},
         )},
@@ -1308,8 +1306,15 @@ def build_payload(dataset: str, entity: str) -> Optional[Dict[str, Any]]:
          # Absent on result trees written before rankings were carried; the
          # frontend simply renders no disclosure for those.
          "ranking": list(info.get("ranking") or []),
+         "stage": info.get("stage") or name,
+         "metric": info.get("metric"),
          "agrees": info.get("agrees_with_final_single")}
-        for name, info in sorted(((global_ir or {}).get("stage_agreement") or {}).items())
+        # `order` is the display order the IR laid out: one row per metric, the
+        # robustness stages in the same columns on every row. Trees written
+        # before it existed have none, and fall back to their key order.
+        for name, info in sorted(
+            ((global_ir or {}).get("stage_agreement") or {}).items(),
+            key=lambda kv: (kv[1].get("order") is None, kv[1].get("order"), kv[0]))
         if name != "final_consensus"
     ]
     decision_atom = next(

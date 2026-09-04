@@ -473,34 +473,72 @@ const SOURCE_LABEL = {
   robust_consensus: "Robustness Aggregated",
 };
 
+const METRIC_LABEL = { f1: "F1", pr_auc: "PR-AUC", vus: "VUS" };
+
 const sourceLabel = (source) => SOURCE_LABEL[source] || source.replace(/_/g, " ");
+
+/* "GAN_F1" for a per-metric ranking, plain "Thompson" for the two that have
+ * no metric of their own. `stage` and `metric` are absent on result trees
+ * written before the strip was split per metric, hence the fallback. */
+function agreementLabel(a) {
+  const stage = sourceLabel(a.stage || a.source);
+  const metric = METRIC_LABEL[a.metric];
+  return metric ? `${stage}_${metric}` : stage;
+}
 
 function consensusStrip(payload) {
   if (!payload.agreement || !payload.agreement.length) return null;
+  const panel = el("div", { class: "agreement-rankings", hidden: true });
+  // Each chip toggles its own ranking, so several can stand open side by side
+  // and be read against one another.
+  const open = new Set();
+
+  // Each stage owns a column, in order of first appearance, so every metric row
+  // lines up under the first one and a ranking never moves when another opens.
+  const stageColumn = new Map();
+  payload.agreement.forEach((a) => {
+    const stage = a.stage || a.source;
+    if (!stageColumn.has(stage)) stageColumn.set(stage, stageColumn.size + 1);
+  });
+  const columnOf = (a) => stageColumn.get(a.stage || a.source);
+
+  const renderPanel = () => {
+    const shown = payload.agreement.filter((a) => open.has(a.source));
+    panel.replaceChildren(...shown.map((a) => el("div",
+      { style: `grid-column: ${columnOf(a)};` },
+      el("h3", { class: "small", text: agreementLabel(a) }),
+      el("ol", { class: "small mono ranking-list" },
+        ...a.ranking.map((name) => el("li", { text: name }))))));
+    panel.hidden = !shown.length;
+  };
+
   const chips = payload.agreement.map((a) => {
     const glyph = a.agrees === true ? "✓" : a.agrees === false ? "≠" : "–";
     const cls = a.agrees === true ? "badge badge-ok"
       : a.agrees === false ? "badge badge-warn" : "badge badge-muted";
-    return el("span", { class: cls, title: `${sourceLabel(a.source)}: ${a.top_pick}` },
-      `${glyph} ${sourceLabel(a.source)}: ${a.top_pick || "—"}`);
+    const label = `${glyph} ${agreementLabel(a)}: ${a.top_pick || "—"}`;
+    const column = `grid-column: ${columnOf(a)};`;
+    if (!(a.ranking || []).length) {
+      return el("span", { class: cls, style: column,
+                          title: `${agreementLabel(a)}: ${a.top_pick}` }, label);
+    }
+    const chip = el("button", {
+      type: "button", class: `${cls} badge-button`, style: column,
+      "aria-expanded": "false",
+      title: `Show or hide the full ${agreementLabel(a)} ranking`,
+    }, label);
+    chip.addEventListener("click", () => {
+      if (open.has(a.source)) open.delete(a.source); else open.add(a.source);
+      chip.setAttribute("aria-expanded", open.has(a.source) ? "true" : "false");
+      renderPanel();
+    });
+    return chip;
   });
-  // The chips carry only each source's winner, which cannot say whether a
-  // disagreeing source put the consensus pick second or last. The orderings
-  // answer that, behind a click so the strip stays a strip.
-  const ranked = payload.agreement.filter((a) => (a.ranking || []).length);
-  const lists = ranked.length ? el("details", { class: "stack" },
-    el("summary", { text: `Full ranking from each of the ${ranked.length} methods` }),
-    el("div", { class: "ranking-grid", style: "margin-top: var(--sp-3);" },
-      ...ranked.map((a) => el("div", {},
-        el("h3", { class: "small", text: sourceLabel(a.source) }),
-        el("ol", { class: "small mono ranking-list" },
-          ...a.ranking.map((name) => el("li", { text: name })))))),
-  ) : null;
 
   return el("section", { class: "card card-tight stack" },
     el("h2", { class: "small muted", text: "Where the stages agreed" }),
-    el("div", { class: "row" }, chips),
-    lists);
+    el("div", { class: "agreement-grid" }, chips),
+    panel);
 }
 
 function missingSection(payload) {
