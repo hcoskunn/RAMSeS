@@ -38,7 +38,8 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from Utils.pipeline_spec import decision_metric_label, ranking_metrics_for
+from Utils.pipeline_spec import (decision_metric_formula, decision_metric_label,
+                                 metric_weights, ranking_metrics_for)
 
 import numpy as np
 
@@ -2289,16 +2290,22 @@ def assemble_global_ir(results_dict: Dict[str, Any], dataset: str, entity: str,
     # was selectable have no score_*, so these fall back to F1.
     metric = fd.get("decision_metric", ("f1",))
     label = decision_metric_label(metric)
+    # The weighted formula, not just the metric names: a reader of the decision
+    # needs to know what each metric contributed. The weights also travel in the
+    # atom's value, which is what grounds those numbers for the verifier.
+    formula = decision_metric_formula(metric)
+    weights = {m: round(w, 4) for m, w in metric_weights(metric).items()}
     ens_score = fd.get("ensemble_score", ens_f1)
     sng_score = fd.get("single_model_score", sng_f1)
     score_margin = ((ens_score - sng_score)
                     if not (_is_nan(ens_score) or _is_nan(sng_score)) else float("nan"))
     if choice == "ensemble":
-        reason = (f"The ensemble was chosen because its {label} ({_fmt(ens_score, 4)}) is greater "
-                  f"than or equal to the best single model's {label} ({_fmt(sng_score, 4)}).")
+        reason = (f"The ensemble was chosen because its fitness ({formula}, {_fmt(ens_score, 4)}) "
+                  f"is greater than or equal to the best single model's fitness "
+                  f"({_fmt(sng_score, 4)}).")
     elif choice == "single_model":
-        reason = (f"The single model was chosen because its {label} ({_fmt(sng_score, 4)}) exceeds "
-                  f"the ensemble's {label} ({_fmt(ens_score, 4)}).")
+        reason = (f"The single model was chosen because its fitness ({formula}, {_fmt(sng_score, 4)}) "
+                  f"exceeds the ensemble's fitness ({_fmt(ens_score, 4)}).")
     else:
         reason = NOT_AVAILABLE
     decision = {
@@ -2315,6 +2322,8 @@ def assemble_global_ir(results_dict: Dict[str, Any], dataset: str, entity: str,
         "f1_margin_ensemble_minus_single": _val(margin, 4),
         "decision_metric": metric,
         "decision_metric_label": label,
+        "decision_metric_formula": formula,
+        "decision_metric_weights": weights,
         "ensemble_score": _val(ens_score, 4),
         "single_model_score": _val(sng_score, 4),
         "score_margin_ensemble_minus_single": _val(score_margin, 4),
@@ -2370,18 +2379,19 @@ def assemble_global_ir(results_dict: Dict[str, Any], dataset: str, entity: str,
     ens = list(fd.get("ensemble", []) or [])
     single = fd.get("single_model", NOT_AVAILABLE)
     if choice == "ensemble":
-        dec_text = (f"The final decision is the ensemble {{{', '.join(ens)}}} "
-                    f"({label} {_fmt(ens_score, 4)}), chosen over the best single model "
-                    f"{single} ({label} {_fmt(sng_score, 4)}).")
+        dec_text = (f"The final decision is the ensemble {{{', '.join(ens)}}}, whose fitness "
+                    f"({formula}) is {_fmt(ens_score, 4)}, chosen over the best single model "
+                    f"{single} at {_fmt(sng_score, 4)}.")
     elif choice == "single_model":
-        dec_text = (f"The final decision is the single model {single} "
-                    f"({label} {_fmt(sng_score, 4)}), chosen over the GA ensemble "
-                    f"({label} {_fmt(ens_score, 4)}).")
+        dec_text = (f"The final decision is the single model {single}, whose fitness "
+                    f"({formula}) is {_fmt(sng_score, 4)}, chosen over the GA ensemble "
+                    f"at {_fmt(ens_score, 4)}.")
     else:
         dec_text = "The final framework decision is not available."
     evidence.append(make_atom("global.decision", "decision", str(choice),
                               {"framework_choice": choice,
                                "decision_metric": metric,
+                               "decision_metric_weights": weights,
                                "ensemble_score": _val(ens_score, 4),
                                "single_model_score": _val(sng_score, 4)},
                               dec_text))

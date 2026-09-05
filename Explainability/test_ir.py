@@ -1582,8 +1582,44 @@ class TestWriterAndAssembler(unittest.TestCase):
         self.assertIn("PR-AUC", d["reason"])
         self.assertNotIn("its F1", d["reason"])
         dec = next(a for a in g["evidence"] if a["id"] == "global.decision")
-        self.assertIn("(PR-AUC 0.9500)", dec["text"])
+        self.assertIn("fitness (PR-AUC) is 0.9500", dec["text"])
         self.assertEqual(list(dec["value"]["decision_metric"]), ["pr_auc"])
+
+    def test_the_decision_states_the_weighted_fitness_formula(self):
+        """A reader needs what each metric contributed, not just its name."""
+        results = _results_dict()
+        results["final_decision"].update(
+            {"decision_metric": {"f1": 0.5, "pr_auc": 0.3, "vus": 0.2},
+             "ensemble_score": 0.8, "single_model_score": 0.95,
+             "framework_choice": "single_model"})
+        with tempfile.TemporaryDirectory() as base:
+            path = ir.assemble_global_ir(results, "DS", "e1", 5, base_dir=base)
+            with open(path) as f:
+                g = json.load(f)
+        formula = "0.5 * F1 + 0.3 * PR-AUC + 0.2 * VUS"
+        self.assertEqual(g["decision"]["decision_metric_formula"], formula)
+        self.assertIn(formula, g["decision"]["reason"])
+        dec = next(a for a in g["evidence"] if a["id"] == "global.decision")
+        self.assertIn(formula, dec["text"])
+        # The weights travel in the value, so the verifier can ground them.
+        self.assertEqual(dec["value"]["decision_metric_weights"],
+                         {"f1": 0.5, "pr_auc": 0.3, "vus": 0.2})
+
+    def test_equal_weights_are_spelled_out_too(self):
+        """A plain two-metric spec carries no weights of its own; the formula
+        still has to say what they are, and they still have to be grounded."""
+        results = _results_dict()
+        results["final_decision"].update(
+            {"decision_metric": ["f1", "pr_auc"], "ensemble_score": 0.8,
+             "single_model_score": 0.95, "framework_choice": "single_model"})
+        with tempfile.TemporaryDirectory() as base:
+            path = ir.assemble_global_ir(results, "DS", "e1", 5, base_dir=base)
+            with open(path) as f:
+                g = json.load(f)
+        dec = next(a for a in g["evidence"] if a["id"] == "global.decision")
+        self.assertIn("0.5 * F1 + 0.5 * PR-AUC", dec["text"])
+        self.assertEqual(dec["value"]["decision_metric_weights"],
+                         {"f1": 0.5, "pr_auc": 0.5})
 
     def test_decision_defaults_to_f1_for_trees_written_before_the_metric_existed(self):
         """An older result_dict carries no decision_metric or score_* keys."""
