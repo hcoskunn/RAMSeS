@@ -289,28 +289,32 @@ function summaryTable(spec) {
 }
 
 /* One regime's figure. Several sets for the same regime become a variant
- * toggle; the server orders them, so the default is whatever it put first. */
-function regimeFigure(regime) {
+ * toggle; the server orders them, so the default is whatever it put first.
+ * `noun` is the server's name for the structure — Selection segments the
+ * expected reward into regimes, Ranking segments ‖μ‖² into streaks. */
+function regimeFigure(regime, noun) {
   const figures = regime.plots || (regime.plot
-    ? [{ src: regime.plot, title: `Regime ${regime.index}`,
+    ? [{ src: regime.plot, title: `${noun} ${regime.index}`,
          caption: regime.plot_caption }]
     : []);
   if (!figures.length) {
-    return el("p", { class: "muted small", text: "No plot for this regime." });
+    return el("p", { class: "muted small",
+                     text: `No plot for this ${noun.toLowerCase()}.` });
   }
   const fallback = `Windows ${regime.start}–${regime.end}, led by ${regime.leader}.`;
   const prepared = figures.map((f) => ({
     ...f,
-    title: f.title || `Regime ${regime.index}`,
+    title: f.title || `${noun} ${regime.index}`,
     caption: f.caption || fallback,
   }));
   if (prepared.length === 1) return figureNode(prepared[0]);
-  return figureNode({ title: `Regime ${regime.index}`,
+  return figureNode({ title: `${noun} ${regime.index}`,
                       variants: prepared, default: 0 });
 }
 
 function regimeSection(stage) {
   if (!stage.regimes || !stage.regimes.length) return null;
+  const noun = stage.regime_noun || "Regime";
   const rows = stage.regimes.map((regime) => el("div", { class: "regime" },
     // The narrated sentence when the model wrote one; the IR's own text is the
     // fallback so a regime is never blank.
@@ -320,12 +324,12 @@ function regimeSection(stage) {
     // away. Titles and captions come from the server: these sets show different
     // quantities over the same window range, so a generic "windows X–Y" here
     // would under-describe all of them.
-    regimeFigure(regime)));
+    regimeFigure(regime, noun)));
   // Printable: this disclosure is the only place the per-regime prose appears
   // now that the stage has no full-text disclosure, and the print stylesheet
   // forces every <details> open.
   return el("details", {},
-    el("summary", { text: `Each regime with its context feature attribution (${stage.regimes.length})` }),
+    el("summary", { text: `Each ${noun.toLowerCase()} with its context feature attribution (${stage.regimes.length})` }),
     el("div", { class: "stack" }, rows));
 }
 
@@ -347,7 +351,8 @@ function stageCard(stage, payload) {
     // rather than the title, which is in the heading directly above it.
     (stage.terms || []).length
       ? el("p", { class: "muted small", text:
-          "The following terms and metrics are used to explain this stage:" })
+          "The following terms and metrics are used to explain this stage"
+          + (stage.terms_note ? ` (${stage.terms_note})` : "") + ":" })
       : null);
 
   const body = el("div", { class: "stack" });
@@ -477,9 +482,9 @@ const METRIC_LABEL = { f1: "F1", pr_auc: "PR-AUC", vus: "VUS" };
 
 const sourceLabel = (source) => SOURCE_LABEL[source] || source.replace(/_/g, " ");
 
-/* "GAN_F1" for a per-metric ranking, plain "Thompson" for the two that have
- * no metric of their own. `stage` and `metric` are absent on result trees
- * written before the strip was split per metric, hence the fallback. */
+/* Plain "GAN", "Thompson" and so on: every source ranks by the run's whole
+ * fitness now. `metric` survives only on result trees written while each stage
+ * published one ranking per metric, where it read "GAN_F1". */
 function agreementLabel(a) {
   const stage = sourceLabel(a.stage || a.source);
   const metric = METRIC_LABEL[a.metric];

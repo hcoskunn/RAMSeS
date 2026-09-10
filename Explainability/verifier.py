@@ -486,22 +486,25 @@ def _required_names(atom: Dict[str, Any]) -> Set[str]:
 
       * `value` carries names that are not the atom's topic at all — a source
         atom's `top_pick` is a detector, not the source — so a narrative that
-        never mentioned GAN_PR_AUC still "conveyed" its atom because "LOF_1"
-        appears elsewhere in the text.
+        never mentioned Off-by-threshold still "conveyed" its atom because
+        "LOF_1" appears elsewhere in the text.
       * A grouped atom names a SET ("NN_2, CBLOF_4, CBLOF_3, and CBLOF_1 were
         left out"), and one member stood in for all four, so dropping NN_2
         cost nothing.
 
     The subject is added only when it is identifier-shaped (an uppercase letter
-    somewhere: GAN_PR_AUC, LOF_1) and actually appears in the atom's text —
-    bucket labels like "sources", "plain" or "both" are prompt-internal names a
-    narrative has no reason to repeat.
+    somewhere: Off-by-threshold, LOF_1) and actually appears in the atom's text
+    — bucket labels like "sources", "plain" or "both" are prompt-internal names
+    a narrative has no reason to repeat. Spaces are allowed because a ranking
+    source is named for display ("Monte Carlo"); without them its subject failed
+    the shape test, `names` came back empty, and `all()` over nothing passed the
+    atom unconditionally — the very omission this rule exists to catch.
     """
     text = str(atom.get("text", ""))
     names = set(_ENTITY_RE.findall(text))
     subj = str(atom.get("subject", ""))
     if (subj and any(ch.isupper() for ch in subj)
-            and re.fullmatch(r"[A-Za-z][\w\-]*", subj)
+            and re.fullmatch(r"[A-Za-z][\w\- ]*", subj)
             and _word_present(text.lower(), subj)):
         names.add(subj)
     return names

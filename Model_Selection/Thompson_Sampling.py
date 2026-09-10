@@ -579,24 +579,27 @@ def reconstruct_regime_segments(
 
 def leadership_regimes(
     means_history: List[Dict[str, np.ndarray]],
-    warmup: int = 10,
+    warmup: Optional[int] = None,
 ) -> Tuple[List[Tuple[int, int, str, int]], int]:
     """
     Segment the run by whichever detector leads on the ranking score ||mu||^2.
 
     Deliberately simpler than detect_regime_shifts(), which smooths expected
-    rewards and imposes a minimum length: here a regime is just a maximal run of
+    rewards and imposes a minimum length: here a segment is just a maximal run of
     consecutive windows with the same argmax_k ||mu_k||^2 — no smoothing, no
     minimum length. ||mu||^2 leadership is far stickier than expected-reward
     leadership (it only moves in the windows where that arm was selected), so
-    plain run-length encoding already yields a handful of regimes rather than
-    one per handful of windows.
+    plain run-length encoding already yields a handful of segments rather than
+    one per handful of windows. Because they claim nothing about the environment
+    having changed, the reports and the UI call them STREAKS, not regimes.
 
     The first `warmup` windows are excluded: until every arm has been sampled at
     least once most scores are still exactly zero, so leadership there is an
-    artefact of sampling order rather than a finding. The warm-up collapses to 0
-    on runs too short to spare it, and the value actually used is returned so
-    the explanation can state it instead of asserting a constant.
+    artefact of sampling order rather than a finding. `None` sizes it to the
+    pool — one window per arm is the fewest that can give every arm a sample, so
+    a 12-detector run needs a longer warm-up than a 3-detector one. The warm-up
+    collapses to 0 on runs too short to spare it, and the value actually used is
+    returned so the explanation can state it instead of asserting a constant.
 
     Reads the PRE-update means, keeping this stage on the single vintage the fit
     loop snapshots (see _pre_means_hist) — every quantity here describes the
@@ -610,8 +613,8 @@ def leadership_regimes(
     ----------
     means_history : List[Dict[str, np.ndarray]]
         Per-window posterior means, one dict of {model: mu} per window.
-    warmup : int
-        Number of leading windows to exclude.
+    warmup : Optional[int]
+        Leading windows to exclude; None means one per arm in the pool.
 
     Returns
     -------
@@ -622,6 +625,8 @@ def leadership_regimes(
     T = len(means_history)
     if T <= 0:
         return [], 0
+    if warmup is None:
+        warmup = len(means_history[0]) if means_history[0] else 0
     warmup_used = warmup if (warmup > 0 and T > warmup + 2) else 0
 
     segments: List[Tuple[int, int, str, int]] = []
@@ -2451,8 +2456,8 @@ def plot_ranking_per_regime(means_history: List[Dict[str, np.ndarray]],
                             n_context_features: int, dataset: str, entity: str,
                             iterations: int, top_n_context_features: int = 9) -> None:
     """
-    One figure per leadership regime: the leader's per-context-feature score beside that
-    regime's runner-up, read at the regime's last window.
+    One figure per leadership streak: the leader's per-context-feature score beside that
+    streak's runner-up, read at the streak's last window.
 
     Filenames mirror shap_per_regime_{it}/ exactly — 0-based index, window range,
     leader — so the same WebUI joiner pairs each figure with its own sentence.
@@ -2479,7 +2484,7 @@ def plot_ranking_per_regime(means_history: List[Dict[str, np.ndarray]],
         rng = f'{fact["start"]}-{end}'
         _render_shap_comparison(
             per_context_feature, models, top_n_context_features,
-            title=(f'Ranking score by context feature — regime {fact["index"]} '
+            title=(f'Ranking score by context feature — streak {fact["index"]} '
                    f'({leader}, windows {rng}), as at window {end}'),
             save_path=os.path.join(
                 directory,
@@ -2493,8 +2498,8 @@ def plot_ranking_per_regime(means_history: List[Dict[str, np.ndarray]],
             # never resets, so the bars carry everything the detector had
             # accumulated by then, not what this regime contributed.
             note=(f'Weights as they stood at window {end}, the last of this '
-                  f'regime. The score is cumulative, so this is the state '
-                  f'reached by the end of the regime, not the regime\'s own '
+                  f'streak. The score is cumulative, so this is the state '
+                  f'reached by the end of the streak, not the streak\'s own '
                   f'contribution.'),
         )
 
@@ -2574,18 +2579,18 @@ def explain_thompson_ranking(
                 f.write(f"  context feature {c:>3}  {v:>+12.6f}  favours {side}\n")
             f.write(f"  {'gap':>11}  {sum(v for _c, v in gap_context_features):>+12.6f}\n")
 
-        f.write("\n--- Leadership Regimes ---\n")
+        f.write("\n--- Leadership Streaks ---\n")
         f.write(f"  Warm-up windows excluded: {warmup_used}\n")
         if not regimes_data:
-            f.write("  No regime could be formed.\n")
+            f.write("  No streak could be formed.\n")
         for r in regimes_data:
-            f.write(f"  Regime {r['index']:>2}  windows {r['start']:>4}-{r['end']:<4} "
+            f.write(f"  Streak {r['index']:>2}  windows {r['start']:>4}-{r['end']:<4} "
                     f"({r['duration']:>3} windows)  leader {r['leader']:>12}"
                     f"  runner-up {str(r['runner_up']):>12}\n")
 
-        f.write("\n--- Per-Regime Context-Feature Decomposition ---\n")
+        f.write("\n--- Per-Streak Context-Feature Decomposition ---\n")
         for r in regimes_data:
-            f.write(f"  Regime {r['index']} ({r['leader']}, windows "
+            f.write(f"  Streak {r['index']} ({r['leader']}, windows "
                     f"{r['start']}-{r['end']}):\n")
             for c, v in r["top_channels"]:
                 f.write(f"      context feature {c:>3}  {v:>12.6f}\n")

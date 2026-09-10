@@ -179,12 +179,14 @@ class TestbedRunner:
         if borderline_prauc_match:
             metrics['borderline']['pr_auc'] = float(borderline_prauc_match.group(1))
         
-        # Extract Monte Carlo metrics
-        mc_f1_match = re.search(r'Monte Carlo Simulation:.*?Best F1 Score\s*:\s*([\d.]+)', content, re.DOTALL)
+        # Extract Monte Carlo metrics. The three robustness blocks share one
+        # writer since each publishes a single fitness ranking, so Monte Carlo's
+        # labels match GAN's and Borderline's rather than reading "Best F1".
+        mc_f1_match = re.search(r'Monte Carlo Simulation:.*?F1 Score\s*:\s*([\d.]+)', content, re.DOTALL)
         if mc_f1_match:
             metrics['monte_carlo']['f1'] = float(mc_f1_match.group(1))
         
-        mc_prauc_match = re.search(r'Monte Carlo Simulation:.*?Best PR-AUC Score\s*:\s*([\d.]+)', content, re.DOTALL)
+        mc_prauc_match = re.search(r'Monte Carlo Simulation:.*?PR-AUC\s*:\s*([\d.]+)', content, re.DOTALL)
         if mc_prauc_match:
             metrics['monte_carlo']['pr_auc'] = float(mc_prauc_match.group(1))
         

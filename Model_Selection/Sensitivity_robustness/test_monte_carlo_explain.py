@@ -312,27 +312,32 @@ class TestExplainMonteCarloIntegration(unittest.TestCase):
                     explain=True, evaluate_fn=self._flip_eval,
                 )
                 self.assertIsInstance(res, dict)
-                for k in ("sweep", "curves_f1", "curves_f1_fixed", "stability_f1",
-                          "winner_f1", "permodel_f1", "n_trials"):
+                for k in ("sweep", "curves", "curves_fixed", "stability",
+                          "winner", "permodel", "n_trials"):
                     self.assertIn(k, res)
-                # F1_fixed must be present in the sweep output.
-                self.assertIn("F1_fixed", res["sweep"])
-                self.assertEqual(res["sweep"]["F1_fixed"].shape, res["sweep"]["F1"].shape)
-                # A→B crossover should be detected on the F1 curves.
-                self.assertGreaterEqual(len(res["curves_f1"]["crossovers"]), 1)
+                # The components stay in the sweep; the fitness is what the
+                # views read.
+                for k in ("F1", "F1_fixed", "PR", "VUS", "FIT", "FIT_fixed"):
+                    self.assertIn(k, res["sweep"])
+                    self.assertEqual(res["sweep"][k].shape, res["sweep"]["F1"].shape)
+                # A→B crossover should be detected on the fitness curves.
+                self.assertGreaterEqual(len(res["curves"]["crossovers"]), 1)
                 out = os.path.join("myresults", "robustness", "MonteCarlo", "TEST", "e1")
                 for fname in (
                     "TEST_e1_MonteCarlo_explainability.txt",
-                    "TEST_e1_MonteCarlo_noise_curves_F1.png",
-                    "TEST_e1_MonteCarlo_noise_curves_PRAUC.png",
-                    "TEST_e1_MonteCarlo_noise_curves_F1_fixed.png",
-                    "TEST_e1_MonteCarlo_noise_curves_F1_plain.png",
-                    "TEST_e1_MonteCarlo_noise_curves_PRAUC_plain.png",
-                    "TEST_e1_MonteCarlo_noise_curves_F1_fixed_plain.png",
+                    "TEST_e1_MonteCarlo_noise_curves_Fitness.png",
+                    "TEST_e1_MonteCarlo_noise_curves_Fitness_plain.png",
+                    "TEST_e1_MonteCarlo_noise_curves_Fitness_fixed.png",
+                    "TEST_e1_MonteCarlo_noise_curves_Fitness_fixed_plain.png",
                     "TEST_e1_MonteCarlo_ranking_stability.png",
-                    "TEST_e1_MonteCarlo_surrogate_tree_F1.png",
+                    "TEST_e1_MonteCarlo_surrogate_tree_Fitness.png",
                 ):
                     self.assertTrue(os.path.exists(os.path.join(out, fname)), fname)
+                # One set, not one per metric.
+                for gone in ("TEST_e1_MonteCarlo_noise_curves_F1.png",
+                             "TEST_e1_MonteCarlo_noise_curves_PRAUC.png",
+                             "TEST_e1_MonteCarlo_surrogate_tree_F1.png"):
+                    self.assertFalse(os.path.exists(os.path.join(out, gone)), gone)
                 # Intermediate Representation JSON is emitted alongside.
                 import json
                 ir_path = os.path.join("myresults", "explanations_ir", "TEST", "e1",
@@ -360,8 +365,8 @@ if __name__ == "__main__":
     unittest.main(verbosity=2)
 
 
-class TestVusRanking(unittest.TestCase):
-    """The production summary publishes a VUS ranking only when one was asked for."""
+class TestProductionRanking(unittest.TestCase):
+    """The production summary publishes ONE ranking, by the run's own fitness."""
 
     @staticmethod
     def _results(vus):
@@ -370,24 +375,37 @@ class TestVusRanking(unittest.TestCase):
             "B": {"f1_scores": [0.5], "pr_auc_scores": [0.9], "vus_scores": vus and [0.8]},
         }
 
-    def test_vus_ranking_orders_by_mean_vus(self):
-        s = mc.summarize_results(self._results(True))
-        self.assertEqual(s["ranked_by_vus"], ["B", "A"])
-        self.assertEqual(s["ranked_by_f1"], ["A", "B"])
+    def test_the_fitness_decides_the_order(self):
+        """A and B tie on 0.5*F1 + 0.5*PR-AUC, and VUS is what separates them,
+        so a fitness that names VUS must reorder them."""
+        by_f1 = mc.summarize_results(self._results(True), metrics=("f1",))
+        self.assertEqual(by_f1["ranked"], ["A", "B"])
+        by_vus = mc.summarize_results(self._results(True), metrics=("vus",))
+        self.assertEqual(by_vus["ranked"], ["B", "A"])
 
-    def test_no_vus_scores_means_no_vus_ranking(self):
-        s = mc.summarize_results(self._results(False))
-        self.assertEqual(s["ranked_by_vus"], [])
-        self.assertEqual(s["ranked_by_f1"], ["A", "B"])
+    def test_weights_move_the_order(self):
+        """The whole point of the collapse: a weighted fitness ranks by those
+        weights instead of publishing one ranking per metric."""
+        r = self._results(False)
+        self.assertEqual(
+            mc.summarize_results(r, metrics={"f1": 0.9, "pr_auc": 0.1})["ranked"],
+            ["A", "B"])
+        self.assertEqual(
+            mc.summarize_results(r, metrics={"f1": 0.1, "pr_auc": 0.9})["ranked"],
+            ["B", "A"])
 
-    def test_an_uncomputable_vus_sorts_last(self):
+    def test_an_uncomputable_term_sorts_last(self):
+        """renormalise=False: C is not scored on F1 and PR-AUC alone and then
+        compared against detectors that also carried a VUS term."""
         results = self._results(True)
-        results["C"] = {"f1_scores": [0.7], "pr_auc_scores": [0.7],
+        results["C"] = {"f1_scores": [0.99], "pr_auc_scores": [0.99],
                         "vus_scores": [float("nan")]}
-        self.assertEqual(mc.summarize_results(results)["ranked_by_vus"][-1], "C")
+        s = mc.summarize_results(results, metrics=("f1", "pr_auc", "vus"))
+        self.assertEqual(s["ranked"][-1], "C")
+        self.assertTrue(np.isnan(s["C"]["fitness"]))
 
     def test_ranking_keys_cover_every_ranking_the_summary_adds(self):
-        """Whatever walks the summary must skip all of them, not two of three."""
+        """Whatever walks the summary must skip all of them."""
         s = mc.summarize_results(self._results(True))
         added = [k for k, v in s.items() if isinstance(v, list)]
         self.assertEqual(set(added), set(mc.RANKING_KEYS))
@@ -409,8 +427,25 @@ class TestSweepMetricGating(unittest.TestCase):
     def test_every_column_is_present_whatever_was_asked_for(self):
         """Shapes stay rectangular so nothing downstream has to branch."""
         out = self._sweep(("f1",))
-        for key in ("F1", "F1_fixed", "PR", "VUS"):
+        for key in ("F1", "F1_fixed", "PR", "VUS", "FIT", "FIT_fixed"):
             self.assertEqual(out[key].shape, (3 * 2, 2), key)
+
+    def test_the_fitness_column_weights_the_components(self):
+        out = self._sweep({"f1": 0.75, "pr_auc": 0.25})
+        self.assertTrue(np.allclose(out["FIT"], 0.75 * 0.8 + 0.25 * 0.6))
+        # F1's frozen threshold feeds FIT_fixed in place of the adaptive F1.
+        self.assertTrue(np.allclose(out["FIT_fixed"], 0.75 * 0.7 + 0.25 * 0.6))
+
+    def test_an_uncomputable_component_voids_the_fitness_cell(self):
+        """Not renormalised: one detector scored on two metrics and another on
+        three cannot be ordered against each other."""
+        out = mc.monte_carlo_noise_sweep(
+            _fake_data(), {}, ["A", "B"], noise_levels=np.linspace(0.0, 0.2, 3),
+            repeats=2, metrics=("f1", "vus"),
+            evaluate_fn=lambda m, l: (0.8, 0.6, 0.7,
+                                      float("nan") if m == "A" else 0.5))
+        self.assertTrue(np.all(np.isnan(out["FIT"][:, 0])))
+        self.assertTrue(np.all(np.isfinite(out["FIT"][:, 1])))
 
     def test_an_injected_evaluator_can_supply_a_vus_column(self):
         out = self._sweep(("f1", "pr_auc", "vus"))
@@ -433,39 +468,79 @@ class TestExplainMetricGating(unittest.TestCase):
         finally:
             os.chdir(cwd)
 
-    def test_f1_only_computes_no_pr_auc_structures(self):
+    def test_one_set_of_structures_whatever_the_fitness_names(self):
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._run(("f1",), tmp)
-            self.assertTrue(res["curves_f1"])
-            self.assertEqual(res["curves_pr"], {})
-            self.assertEqual(res["curves_vus"], {})
-            self.assertEqual(res["stability_pr"], {})
+            res = self._run(("f1", "pr_auc", "vus"), tmp)
+            self.assertTrue(res["curves"])
+            self.assertTrue(res["stability"])
+            self.assertEqual(res["fitness_formula"],
+                             "0.333 * F1 + 0.333 * PR-AUC + 0.333 * VUS")
             report = _read_report(tmp)
-        self.assertIn("Method A · F1 curves", report)
-        self.assertNotIn("PR-AUC curves", report)
-        self.assertNotIn("VUS curves", report)
+        self.assertIn("Method A · fitness curves", report)
+        self.assertIn("0.333 * F1 + 0.333 * PR-AUC + 0.333 * VUS", report)
+        for gone in ("Method A · F1 curves", "Method A · PR-AUC curves",
+                     "Method A · VUS curves"):
+            self.assertNotIn(gone, report)
 
-    def test_vus_only_computes_no_f1_structures(self):
+    def test_each_component_of_the_fitness_gets_its_own_curve(self):
+        """The sweep already holds the component matrices, so the terms the
+        fitness combines are drawn beside it for browsing. Only those the
+        fitness names: an unchosen metric was never computed."""
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._run(("vus",), tmp)
-            self.assertTrue(res["curves_vus"])
-            self.assertEqual(res["curves_f1"], {})
-            self.assertEqual(res["curves_f1_fixed"], {})
-            report = _read_report(tmp)
-        self.assertIn("Method A · VUS curves", report)
-        self.assertNotIn("Method A · F1 curves", report)
-
-    def test_only_the_chosen_metrics_write_curve_figures(self):
-        """The result page's metric switcher is built from what is on disk."""
-        with tempfile.TemporaryDirectory() as tmp:
-            self._run(("f1", "vus"), tmp)
+            res = self._run(("f1", "vus"), tmp)
+            self.assertEqual(sorted(res["component_curves"]), ["F1", "VUS"])
             figs = os.listdir(os.path.join(tmp, "myresults", "robustness",
                                            "MonteCarlo", "DS", "e1"))
         names = " ".join(figs)
         self.assertIn("noise_curves_F1_plain.png", names)
         self.assertIn("noise_curves_VUS_plain.png", names)
         self.assertNotIn("noise_curves_PRAUC", names)
-        self.assertNotIn("surrogate_tree_PRAUC", names)
+        # Plain only: the annotated version of a component is the same data
+        # with win-regions over it, and nothing offers it.
+        self.assertNotIn("noise_curves_F1.png", names)
+        self.assertNotIn("noise_curves_VUS.png", names)
+
+    def test_a_one_term_fitness_draws_no_component_curve(self):
+        """The fitness IS that metric there, so a component curve would be the
+        same data under a second name: one figure in the headline and its twin
+        in the gallery, captioned as one of several terms."""
+        with tempfile.TemporaryDirectory() as tmp:
+            res = self._run(("f1",), tmp)
+            self.assertEqual(res["component_curves"], {})
+            sweep = res["sweep"]
+            figs = os.listdir(os.path.join(tmp, "myresults", "robustness",
+                                           "MonteCarlo", "DS", "e1"))
+        self.assertTrue(np.allclose(sweep["FIT"], sweep["F1"], equal_nan=True))
+        names = " ".join(figs)
+        self.assertIn("noise_curves_Fitness_plain.png", names)
+        self.assertNotIn("noise_curves_F1_plain.png", names)
+
+    def test_a_thresholdless_fitness_skips_the_frozen_view(self):
+        """Only F1 carries a threshold, so there is nothing to freeze."""
+        with tempfile.TemporaryDirectory() as tmp:
+            res = self._run(("vus",), tmp)
+            self.assertTrue(res["curves"])
+            self.assertEqual(res["curves_fixed"], {})
+            report = _read_report(tmp)
+        self.assertNotIn("Fixed-operating-point degradation", report)
+
+    def test_the_figures_are_named_for_the_fitness_not_the_metrics(self):
+        """The result page globs these, so the names must not move when the
+        run configuration changes which metrics the fitness names."""
+        for metrics in (("f1", "vus"), ("f1", "pr_auc")):
+            with tempfile.TemporaryDirectory() as tmp:
+                self._run(metrics, tmp)
+                figs = os.listdir(os.path.join(tmp, "myresults", "robustness",
+                                               "MonteCarlo", "DS", "e1"))
+            names = " ".join(figs)
+            self.assertIn("noise_curves_Fitness_plain.png", names, metrics)
+            # No surrogate-tree assertion: this grid never reaches the
+            # crossover, so the sweep has one winner and no tree is fitted.
+            # The per-metric names still appear as the fitness components, but
+            # nothing the stage RANKS on carries a metric name any more.
+            for gone in ("surrogate_tree_F1", "surrogate_tree_PRAUC",
+                         "surrogate_tree_VUS", "ranking_stability_F1"):
+                self.assertNotIn(gone, names, metrics)
 
 
 def _read_report(tmp):

@@ -108,8 +108,7 @@ def get_args_from_cmdline():
                         default=None,
                         help="Target fraction of timesteps to label anomalous, in (0, 1]. "
                              "For 'spikes' this is the per-timestep injection probability; "
-                             "for the other types it sizes the injected segment. Omit to "
-                             "keep the per-type defaults.")
+                             "for the other types it sizes the injected segment. Default 0.2.")
 
     parser.add_argument('--decision_metric',
                         type=str,

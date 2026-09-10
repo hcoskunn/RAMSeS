@@ -31,7 +31,9 @@ The contract that keeps this swappable:
 import re
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-# Detector- and source-shaped tokens: LOF_1, CBLOF_4, GAN_PR_AUC, MonteCarlo_F1.
+# Detector-shaped tokens: LOF_1, CBLOF_4. Source names are display names
+# ("GAN", "Off-by-threshold", "Monte Carlo") and carry no underscore, so
+# `_subject_pattern` matches those literally instead.
 # Broader than the verifier's pattern, which requires a numeric suffix and so
 # would miss every rank-aggregation source name.
 _NAME_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b")
@@ -42,7 +44,11 @@ _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 # would satisfy equally. The index is one anchor; a regime's window range is the
 # other, and accepting both is what frees the narrator from opening all of them
 # the same way.
-_REGIME_RE = re.compile(r"\bregime\s+(\d+)\b", re.IGNORECASE)
+#
+# Both nouns, because the two Thompson stages name the same structure
+# differently in prose: Selection writes "Regime N", Ranking writes "Streak N".
+# The atom ids this also runs over are `*.regime.N` in both stages.
+_REGIME_RE = re.compile(r"\b(?:regime|streak)\s+(\d+)\b", re.IGNORECASE)
 # How much of a non-regime atom a sentence must account for to break out of the
 # regime it follows. Below this it is read as that regime's second sentence.
 _CARRY_MIN_COVERAGE = 0.5
@@ -100,10 +106,34 @@ _STAGE_SUMMARY: Dict[str, Dict[str, Any]] = {
 }
 
 
-def _tokens(text: str) -> Tuple[frozenset, frozenset]:
-    names = frozenset(t.lower() for t in _NAME_RE.findall(text or ""))
+# Atom types whose `subject` IS a ranking source's display name.
+_SOURCE_SUBJECT_TYPES = ("source_role", "kendall_only", "source_verdict")
+
+
+def _subject_pattern(atoms: List[dict]) -> Optional[re.Pattern]:
+    """Literal matcher for source names `_NAME_RE` cannot see.
+
+    Only the atom types that carry a source name as their subject, so an
+    ordinary-word subject ("regimes", "sources") never becomes a match token.
+    Longest first, so a name containing another still wins.
+    """
+    literal = {str(a.get("subject", "")) for a in atoms
+               if a.get("type") in _SOURCE_SUBJECT_TYPES and a.get("subject")}
+    literal = sorted((n for n in literal if not _NAME_RE.fullmatch(n)),
+                     key=len, reverse=True)
+    if not literal:
+        return None
+    return re.compile(r"\b(?:" + "|".join(re.escape(n) for n in literal) + r")\b",
+                      re.IGNORECASE)
+
+
+def _tokens(text: str,
+            subject_re: Optional[re.Pattern] = None) -> Tuple[frozenset, frozenset]:
+    names = {t.lower() for t in _NAME_RE.findall(text or "")}
+    if subject_re is not None:
+        names |= {m.group(0).lower() for m in subject_re.finditer(text or "")}
     numbers = frozenset(m.group(0).rstrip("%") for m in _NUM_RE.finditer(text or ""))
-    return names, numbers
+    return frozenset(names), numbers
 
 
 def split_sentences(text: str) -> List[str]:
@@ -154,7 +184,8 @@ def attribute_sentences(narrative: str,
     anchor, which is what lets a regime run to two sentences and refer back.
     """
     atoms = list(ir_doc.get("evidence", []) or [])
-    scored = [(a, *_tokens(str(a.get("text", "")))) for a in atoms]
+    subject_re = _subject_pattern(atoms)
+    scored = [(a, *_tokens(str(a.get("text", "")), subject_re)) for a in atoms]
     # `ts.regime.3` and its `ts.regime.3.supply` sibling both carry index 3. The
     # canonical one wins, because the disclosure files sentences by that id.
     regimes: Dict[str, dict] = {}
@@ -171,7 +202,7 @@ def attribute_sentences(narrative: str,
     out: List[Tuple[str, Optional[dict]]] = []
     current: Optional[dict] = None
     for sentence in split_sentences(narrative):
-        s_names, s_numbers = _tokens(sentence)
+        s_names, s_numbers = _tokens(sentence, subject_re)
 
         hit = _REGIME_RE.search(sentence)
         anchor = regimes.get(hit.group(1)) if hit else None
@@ -370,7 +401,7 @@ def _ga_combination_table(ir_doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     rows.sort(key=lambda r: r["_sort"])
     return {
         "columns": ["Weight rank", "Detector", "|SHAP| rank", "PFI rank",
-                    "ALE rank", "Sign"],
+                    "|ALE| rank", "Sign"],
         "align": ["num", "name", "num", "num", "num", "text"],
         "rows": [r["cells"] for r in rows],
     }

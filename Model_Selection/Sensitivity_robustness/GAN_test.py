@@ -14,7 +14,8 @@ from Metrics.metrics import (range_based_precision_recall_f1_auc, prauc, f1_scor
 from Model_Selection.Sensitivity_robustness.plot_retention import (
     prune_superseded, prune_timestamped)
 from Utils.model_selection_utils import evaluate_model, ScoringTimeout
-from Utils.pipeline_spec import DEFAULT_DECISION_METRICS, metrics_required
+from Utils.pipeline_spec import (DEFAULT_DECISION_METRICS, combine_metrics,
+                                 metrics_required)
 from Explainability import ir
 from Model_Selection.Sensitivity_robustness import exclusive_win_surrogates as ews
 
@@ -310,13 +311,13 @@ def run_Gan(test_data, trained_models, model_names, dataset, entity, explain=Fal
     
     if data_size < min_data_size:
         logger.warning(f"GAN test skipped: data size {data_size} < minimum {min_data_size}")
-        return [], [], [], [], []
+        return [], []
     
     # Check if we have both classes (anomalies and normal points)
     unique_labels = np.unique(labels)
     if len(unique_labels) < 2:
         logger.warning(f"GAN test skipped: only one class present in labels (unique values: {unique_labels})")
-        return [], [], [], [], []
+        return [], []
     
     # Get the current date and time
     now = datetime.now()
@@ -355,26 +356,28 @@ def run_Gan(test_data, trained_models, model_names, dataset, entity, explain=Fal
         _, _, best_f1, pr_auc, adjusted_y_pred = range_based_precision_recall_f1_auc(y_true, y_scores)
         vus = vus_score(y_scores, y_true, vus_win) if want_vus else float('nan')
         adjusted_y_pred_dict[model_name] = [adjusted_y_pred]
-        results[model_name] = [{'f1': best_f1, 'pr_auc': pr_auc, 'vus': vus}]
-        logger.info(f"Evaluated {model_name}: F1={best_f1}, PR_AUC={pr_auc}, VUS={vus}")
+        scores = {'f1': best_f1, 'pr_auc': pr_auc, 'vus': vus}
+        # renormalise=False: a detector missing a term must not be scored on a
+        # narrower fitness than the ones it is ranked against.
+        scores['fitness'] = combine_metrics(metrics, scores, renormalise=False)
+        results[model_name] = [scores]
+        logger.info(f"Evaluated {model_name}: F1={best_f1}, PR_AUC={pr_auc}, VUS={vus}, "
+                    f"fitness={scores['fitness']}")
 
     # Filter out models with no results before sorting
     valid_results = {k: v for k, v in results.items() if len(v) > 0}
     
     if not valid_results:
         logger.warning("No valid GAN test results found, skipping ranking")
-        return [], [], [], [], []
-    
-    ranked_by_f1 = sorted(valid_results.items(), key=lambda x: x[1][0]['f1'], reverse=True)
-    ranked_by_f1_names = [item[0] for item in ranked_by_f1]
-    ranked_by_pr_auc = sorted(valid_results.items(), key=lambda x: x[1][0]['pr_auc'], reverse=True)
-    ranked_by_pr_auc_names = [item[0] for item in ranked_by_pr_auc]
-    ranked_by_vus_names = [item[0] for item in sorted(
-        valid_results.items(), key=lambda x: rank_key(x[1][0]['vus']), reverse=True)] if want_vus else []
+        return [], []
+
+    ranked = sorted(valid_results.items(), key=lambda x: rank_key(x[1][0]['fitness']),
+                    reverse=True)
+    ranked_names = [item[0] for item in ranked]
 
     true_values = np.array(test_data.entities[0].labels).flatten()  # 1 for anomaly, 0 for normal, FLATTEN to 1D
     print(10 * '=')
-    predicted_values = np.array(adjusted_y_pred_dict[ranked_by_f1_names[0]]).flatten()  # Flatten the list of arrays
+    predicted_values = np.array(adjusted_y_pred_dict[ranked_names[0]]).flatten()  # Flatten the list of arrays
 
     # Converting boolean predictions to integer for easy plotting (True to 1, False to 0)
     predicted_int = predicted_values.astype(int)
@@ -419,12 +422,11 @@ def run_Gan(test_data, trained_models, model_names, dataset, entity, explain=Fal
     if explain:
         try:
             explain_gan_robustness(point_records, adjusted_y_pred_dict, true_values,
-                                   ranked_by_f1_names, model_names, dataset, entity, explain=True)
+                                   ranked_names, model_names, dataset, entity, explain=True)
         except Exception as e:
             logger.error(f"GAN robustness explainability failed (non-fatal): {e}")
 
-    return (ranked_by_f1, ranked_by_pr_auc, ranked_by_f1_names,
-            ranked_by_pr_auc_names, ranked_by_vus_names)
+    return ranked, ranked_names
 
 def plot_data_with_injected_points(original_data, augmented_data, injected_normal_indices, injected_anomaly_indices,
                                    dataset, entity, feature_index=0):
@@ -574,11 +576,11 @@ def plot_gan_point_importance(per_competitor, dataset, entity, feature_names) ->
         title="GAN perturbations: which point property most explains the winner's edge")
 
 
-def explain_gan_robustness(point_records, adjusted_y_pred_dict, true_labels, ranked_f1_names,
+def explain_gan_robustness(point_records, adjusted_y_pred_dict, true_labels, ranked_names,
                            model_names, dataset, entity, explain: bool = False) -> Optional[Dict[str, Any]]:
     """
     GAN robustness explainability orchestrator (explain-only). Builds the per-point
-    table from the production run, picks the F1 winner, fits per-competitor exclusive-win
+    table from the production run, picks the fitness winner, fits per-competitor exclusive-win
     surrogates, writes a report + two plots under myresults/robustness/GAN/{ds}/{ent}/,
     and returns the structures. explain=False → None; infeasible table → None.
 
@@ -587,7 +589,7 @@ def explain_gan_robustness(point_records, adjusted_y_pred_dict, true_labels, ran
     stage's own.
     """
     return ews.explain_exclusive_win_stage(
-        point_records, adjusted_y_pred_dict, true_labels, ranked_f1_names,
+        point_records, adjusted_y_pred_dict, true_labels, ranked_names,
         model_names, dataset, entity, explain,
         stage_label="GAN",
         build_table=build_gan_point_table,

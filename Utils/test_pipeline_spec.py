@@ -64,9 +64,11 @@ class TestAnomalies(unittest.TestCase):
             spec.parse_anomaly_type("spike")
         self.assertIn("unknown type 'spike'", str(cm.exception))
 
-    def test_rate_none_keeps_the_per_type_defaults(self):
-        self.assertIsNone(spec.parse_anomaly_rate(None))
-        self.assertIsNone(spec.parse_anomaly_rate(""))
+    def test_rate_defaults_to_the_safe_scattered_rate(self):
+        """Above ~0.2 the point-adjusted metrics saturate; see DEFAULT_ANOMALY_RATE."""
+        self.assertEqual(spec.DEFAULT_ANOMALY_RATE, 0.2)
+        self.assertEqual(spec.parse_anomaly_rate(None), 0.2)
+        self.assertEqual(spec.parse_anomaly_rate(""), 0.2)
 
     def test_rate_bounds(self):
         self.assertEqual(spec.parse_anomaly_rate("0.25"), 0.25)
@@ -112,10 +114,6 @@ class TestDecisionMetric(unittest.TestCase):
         self.assertEqual(spec.decision_metric_formula(spec.DEFAULT_DECISION_METRICS),
                          "0.5 * F1 + 0.5 * PR-AUC")
 
-    def test_the_default_publishes_both_robustness_rankings(self):
-        self.assertEqual(spec.ranking_metrics_for(spec.DEFAULT_DECISION_METRICS),
-                         ("f1", "pr_auc"))
-
     def test_a_single_metric_is_its_own_fitness(self):
         scores = {"f1": 0.9, "pr_auc": 0.2, "vus": 0.99}
         for token, want in scores.items():
@@ -145,13 +143,24 @@ class TestDecisionMetric(unittest.TestCase):
         partial = {k: 0.5 for k in spec.metrics_required(spec_)}
         self.assertEqual(spec.combine_metrics(spec_, partial), 0.5)
 
-    def test_robustness_rankings_follow_the_fitness(self):
-        """One published ranking per chosen metric, and no others."""
-        for chosen in (("f1",), ("pr_auc",), ("vus",), ("f1", "pr_auc"),
-                       ("f1", "vus"), ("f1", "pr_auc", "vus")):
-            self.assertEqual(spec.ranking_metrics_for(chosen), chosen)
-        self.assertEqual(spec.ranking_metrics_for({"f1": 0.7, "vus": 0.3}),
-                         ("f1", "vus"))
+    def test_a_missing_metric_narrows_the_fitness_when_renormalising(self):
+        """The ensemble-vs-single comparison: both sides lose the same term, so
+        deciding on what is left beats deciding on nothing."""
+        scores = {"f1": 0.8, "pr_auc": 0.4, "vus": float("nan")}
+        self.assertAlmostEqual(
+            spec.combine_metrics({"f1": 0.5, "pr_auc": 0.25, "vus": 0.25}, scores),
+            (0.5 * 0.8 + 0.25 * 0.4) / 0.75)
+
+    def test_a_missing_metric_voids_the_fitness_when_ranking(self):
+        """Ranking is the other case. Renormalising here would score one
+        detector on two metrics and its rival on three, then order them as
+        though the numbers meant the same thing."""
+        scores = {"f1": 0.8, "pr_auc": 0.4, "vus": float("nan")}
+        self.assertTrue(math.isnan(spec.combine_metrics(
+            {"f1": 0.5, "pr_auc": 0.25, "vus": 0.25}, scores, renormalise=False)))
+        # A metric the fitness never named is not missing, it is irrelevant.
+        self.assertAlmostEqual(
+            spec.combine_metrics(("f1", "pr_auc"), scores, renormalise=False), 0.6)
 
 
 class TestDecisionMetricWeights(unittest.TestCase):
@@ -176,10 +185,9 @@ class TestDecisionMetricWeights(unittest.TestCase):
                          {"f1": 0.75, "pr_auc": 0.25})
 
     def test_a_zero_weight_drops_its_metric(self):
-        """Otherwise ranking_metrics_for publishes both rankings for a fitness
-        that is purely F1."""
+        """Otherwise a fitness that is purely F1 still pays to compute PR-AUC,
+        and a nan there would void the ranking fitness of every detector."""
         self.assertEqual(spec.parse_decision_metrics("f1:1,pr_auc:0"), ("f1",))
-        self.assertEqual(spec.ranking_metrics_for({"f1": 1.0, "pr_auc": 0.0}), ("f1",))
         self.assertEqual(spec.metrics_required({"f1": 1.0, "pr_auc": 0.0}), ("f1",))
 
     def test_all_weights_zero_is_no_selection(self):

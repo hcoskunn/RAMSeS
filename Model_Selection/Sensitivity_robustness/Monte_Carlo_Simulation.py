@@ -5,16 +5,18 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from Metrics.metrics import (range_based_precision_recall_f1_auc, prauc, f1_score,
                              f1_soft_score, rank_key, vus_score, vus_window)
 from Utils.model_selection_utils import evaluate_model, ScoringTimeout
-from Utils.pipeline_spec import DEFAULT_DECISION_METRICS, metrics_required
+from Utils.pipeline_spec import (DEFAULT_DECISION_METRICS, combine_metrics,
+                                 decision_metric_formula, metric_weights,
+                                 metrics_required)
 from loguru import logger
 import matplotlib.pyplot as plt
 from Explainability import ir
 from Model_Selection.Sensitivity_robustness import surrogate_fidelity
 
 # Keys `summarize_results` adds beside the per-model entries. Everything that
-# walks the summary skips these, so a new ranking cannot leak into a loop that
+# walks the summary skips these, so a ranking cannot leak into a loop that
 # expects model names.
-RANKING_KEYS = ("ranked_by_f1", "ranked_by_pr_auc", "ranked_by_vus")
+RANKING_KEYS = ("ranked",)
 
 
 def add_noise_to_data(data, noise_level=0.1):
@@ -104,15 +106,15 @@ def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, 
     # Handle empty results (when data is too small or invalid)
     if not results:
         logger.warning("Monte Carlo simulation returned empty results")
-        return [], [], []
+        return [], []
 
     # Summarize results
-    summary = summarize_results(results)
+    summary = summarize_results(results, metrics=metrics)
 
     # Handle empty summary
-    if not summary or 'ranked_by_f1' not in summary or 'ranked_by_pr_auc' not in summary:
+    if not summary or 'ranked' not in summary:
         logger.warning("Monte Carlo summary is empty or incomplete")
-        return [], [], []
+        return [], []
 
     # Print summary and rankings
     print("Summary of Monte Carlo Simulation:")
@@ -123,24 +125,14 @@ def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, 
             print(f"  PR AUC Mean: {model_metrics['pr_auc_mean']:.4f}, "
                   f"PR AUC Std: {model_metrics['pr_auc_std']:.4f}")
 
-    print("\nModels ranked by F1 score:")
-    ranked_models_F1 = []
-    for rank, model_name in enumerate(summary['ranked_by_f1'], 1):
+    print(f"\nModels ranked by fitness ({decision_metric_formula(metrics)}):")
+    ranked_models = []
+    for rank, model_name in enumerate(summary['ranked'], 1):
         print(f"{rank}. {model_name}")
-        ranked_models_F1.append(model_name)
-    ranked_models_PR = []
-    print("\nModels ranked by PR AUC score:")
-    for rank, model_name in enumerate(summary['ranked_by_pr_auc'], 1):
-        print(f"{rank}. {model_name}")
-        ranked_models_PR.append(model_name)
-    ranked_models_VUS = list(summary.get('ranked_by_vus') or [])
-    if ranked_models_VUS:
-        print("\nModels ranked by VUS score:")
-        for rank, model_name in enumerate(ranked_models_VUS, 1):
-            print(f"{rank}. {model_name}")
+        ranked_models.append(model_name)
 
     # Save summary
-    save_summary(summary, dataset, entity)
+    save_summary(summary, dataset, entity, metrics=metrics)
 
     # One F1/PR-AUC histogram pair per detector, no longer drawn. Eleven figures
     # per entity that say separately what the noise curves say together, and the
@@ -154,26 +146,30 @@ def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, 
         try:
             explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
                                 explain=True, metrics=metrics,
-                                production_rankings=(ranked_models_F1, ranked_models_PR,
-                                                     ranked_models_VUS))
+                                production_ranking=ranked_models)
         except Exception as e:
             logger.error(f"Monte Carlo explainability failed (non-fatal): {e}")
 
-    return ranked_models_F1, ranked_models_PR, ranked_models_VUS
+    return ranked_models
 
 
 
 
-def summarize_results(results):
-    """Summarize the results of Monte Carlo simulation and rank models."""
+def summarize_results(results, metrics=DEFAULT_DECISION_METRICS):
+    """Summarize the results of Monte Carlo simulation and rank models.
+
+    One ranking, by the run's own fitness over the per-model means. Ranking each
+    metric separately let a three-metric fitness publish three winners, none of
+    them weighted as the run configuration asked for.
+    """
     summary = {}
-    for model_name, metrics in results.items():
-        f1_mean = np.mean(metrics['f1_scores'])
-        f1_std = np.std(metrics['f1_scores'])
-        pr_auc_mean = np.mean(metrics['pr_auc_scores'])
-        pr_auc_std = np.std(metrics['pr_auc_scores'])
-        vus = [v for v in (metrics.get('vus_scores') or []) if not np.isnan(v)]
-        summary[model_name] = {
+    for model_name, model_metrics in results.items():
+        f1_mean = np.mean(model_metrics['f1_scores'])
+        f1_std = np.std(model_metrics['f1_scores'])
+        pr_auc_mean = np.mean(model_metrics['pr_auc_scores'])
+        pr_auc_std = np.std(model_metrics['pr_auc_scores'])
+        vus = [v for v in (model_metrics.get('vus_scores') or []) if not np.isnan(v)]
+        entry = {
             'f1_mean': f1_mean,
             'f1_std': f1_std,
             'pr_auc_mean': pr_auc_mean,
@@ -181,17 +177,16 @@ def summarize_results(results):
             'vus_mean': float(np.mean(vus)) if vus else float('nan'),
             'vus_std': float(np.std(vus)) if vus else float('nan'),
         }
+        # renormalise=False: a detector missing a term must not be scored on a
+        # narrower fitness than the ones it is ranked against.
+        entry['fitness'] = combine_metrics(
+            metrics, {'f1': f1_mean, 'pr_auc': pr_auc_mean,
+                      'vus': entry['vus_mean']}, renormalise=False)
+        summary[model_name] = entry
 
-    has_vus = any(not np.isnan(s['vus_mean']) for s in summary.values())
-
-    # Rank models by F1 score
-    ranked_by_f1 = sorted(summary.items(), key=lambda x: x[1]['f1_mean'], reverse=True)
-    ranked_by_pr_auc = sorted(summary.items(), key=lambda x: x[1]['pr_auc_mean'], reverse=True)
-    ranked_by_vus = sorted(summary.items(), key=lambda x: rank_key(x[1]['vus_mean']), reverse=True)
-
-    summary['ranked_by_f1'] = [item[0] for item in ranked_by_f1]
-    summary['ranked_by_pr_auc'] = [item[0] for item in ranked_by_pr_auc]
-    summary['ranked_by_vus'] = [item[0] for item in ranked_by_vus] if has_vus else []
+    ranked = sorted(summary.items(), key=lambda x: rank_key(x[1]['fitness']),
+                    reverse=True)
+    summary['ranked'] = [item[0] for item in ranked]
 
     return summary
 
@@ -235,7 +230,7 @@ def plot_monte_carlo_results(results, summary, model_names, dataset, entity):
         # plt.show()
 
 
-def save_summary(summary, dataset, entity):
+def save_summary(summary, dataset, entity, metrics=DEFAULT_DECISION_METRICS):
     """Save the summary of Monte Carlo simulation to a file."""
     directory = f'myresults/robustness/MonteCarlo/{dataset}/{entity}/'
     os.makedirs(directory, exist_ok=True)
@@ -253,19 +248,11 @@ def save_summary(summary, dataset, entity):
                 if not np.isnan(model_metrics.get('vus_mean', float('nan'))):
                     f.write(f"  VUS Mean: {model_metrics['vus_mean']:.4f}, "
                             f"VUS Std: {model_metrics['vus_std']:.4f}\n")
+                f.write(f"  Fitness  : {model_metrics['fitness']:.4f}\n")
 
-        f.write("\nModels ranked by F1 score:\n")
-        for rank, model_name in enumerate(summary['ranked_by_f1'], 1):
+        f.write(f"\nModels ranked by fitness ({decision_metric_formula(metrics)}):\n")
+        for rank, model_name in enumerate(summary['ranked'], 1):
             f.write(f"{rank}. {model_name}\n")
-
-        f.write("\nModels ranked by PR AUC score:\n")
-        for rank, model_name in enumerate(summary['ranked_by_pr_auc'], 1):
-            f.write(f"{rank}. {model_name}\n")
-
-        if summary.get('ranked_by_vus'):
-            f.write("\nModels ranked by VUS score:\n")
-            for rank, model_name in enumerate(summary['ranked_by_vus'], 1):
-                f.write(f"{rank}. {model_name}\n")
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -288,6 +275,14 @@ def save_summary(summary, dataset, entity):
 # was an artefact of the point count. 21 gives an exact 0.01 step — 0.00, 0.01,
 # … 0.20 — which is readable and quotable.
 DEFAULT_NOISE_LEVELS = np.linspace(0.0, 0.2, 21)
+
+# (fitness token, sweep matrix, figure label) for the components the fitness is
+# built from. Their curves are drawn beside the fitness curve, which is what the
+# stage actually ranks on: the sweep has already computed the matrices, so this
+# costs one pass of numpy per metric and answers "which term moved the fitness".
+_FITNESS_COMPONENTS = (("f1", "F1", "F1"),
+                       ("pr_auc", "PR", "PR-AUC"),
+                       ("vus", "VUS", "VUS"))
 
 
 def _mc_data_feasible(test_data) -> bool:
@@ -349,6 +344,10 @@ def monte_carlo_noise_sweep(
 
     Only the metrics the run's fitness names are computed; the others come back as
     NaN columns, so the arrays stay rectangular and nothing downstream has to branch.
+
+    FIT and FIT_fixed combine those components into the run's own fitness, which is
+    what everything downstream explains: one ranking per stage, weighted as the run
+    configuration asked for.
 
     evaluate_fn(model_name, level) -> (f1, pr[, f1_fixed[, vus]]) is injectable for
     tests; when given, real noising/evaluation is skipped (a 2-tuple sets
@@ -434,16 +433,36 @@ def monte_carlo_noise_sweep(
             noise_col.append(float(level)); F1.append(row_f1)
             F1_fixed.append(row_f1_fixed); PR.append(row_pr); VUS.append(row_vus)
 
+    F1 = np.asarray(F1, dtype=float)
+    F1_fixed = np.asarray(F1_fixed, dtype=float)
+    PR = np.asarray(PR, dtype=float)
+    VUS = np.asarray(VUS, dtype=float)
     return {
         "noise": np.asarray(noise_col, dtype=float),
         "grid_levels": grid,
-        "F1": np.asarray(F1, dtype=float),
-        "F1_fixed": np.asarray(F1_fixed, dtype=float),
-        "PR": np.asarray(PR, dtype=float),
-        "VUS": np.asarray(VUS, dtype=float),
+        "F1": F1,
+        "F1_fixed": F1_fixed,
+        "PR": PR,
+        "VUS": VUS,
+        "FIT": _combine_matrix(metrics, {"f1": F1, "pr_auc": PR, "vus": VUS}),
+        "FIT_fixed": _combine_matrix(metrics, {"f1": F1_fixed, "pr_auc": PR, "vus": VUS}),
         "metrics": want,
         "model_names": list(model_names),
     }
+
+
+def _combine_matrix(metrics, parts: Dict[str, np.ndarray]) -> np.ndarray:
+    """Per-trial component matrices -> the run's fitness, same shape.
+
+    The weights are already normalised, so this is `combine_metrics` with
+    `renormalise=False`: a NaN component propagates rather than narrowing that
+    one cell's fitness to the terms that happened to survive.
+    """
+    out = None
+    for m, w in metric_weights(metrics).items():
+        term = w * parts[m]
+        out = term if out is None else out + term
+    return out
 
 
 # ── Method A: curves, crossover, breakdown, ranking stability (pure) ─────────
@@ -710,20 +729,14 @@ def plot_noise_curves(curves, model_names, metric_name, dataset, entity, plain: 
     plt.close()
 
 
-def plot_ranking_stability(stab_f1, stab_pr, dataset, entity, stab_vus=None) -> None:
-    """Kendall-τ of each noise level's ranking vs the aggregate ranking.
-
-    One line per metric the run swept; a metric it did not sweep passes None.
-    """
+def plot_ranking_stability(stab, dataset, entity, fitness_label: str = "fitness") -> None:
+    """Kendall-τ of each noise level's fitness ranking vs the aggregate ranking."""
     _mc_explain_rcparams()
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    for stab, label, marker, colour in (
-            (stab_f1, "F1 ranking", "o", "#1f77b4"),
-            (stab_pr, "PR-AUC ranking", "s", "#2ca02c"),
-            (stab_vus, "VUS ranking", "^", "#d62728")):
-        if stab:
-            ax.plot(stab["grid_levels"], stab["tau_per_level"], marker=marker,
-                    markersize=3, label=label, color=colour, linewidth=1.4)
+    if stab:
+        ax.plot(stab["grid_levels"], stab["tau_per_level"], marker="o",
+                markersize=3, label=f"{fitness_label} ranking", color="#1f77b4",
+                linewidth=1.4)
     ax.axhline(1.0, color="grey", linestyle=":", linewidth=0.8)
     ax.set_xlabel("noise_level (Gaussian std)")
     ax.set_ylabel("Kendall τ vs aggregate ranking")
@@ -764,15 +777,15 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
                         noise_levels=None, repeats: int = 5, random_state: int = 0,
                         explain: bool = False,
                         evaluate_fn: Optional[Callable[[str, float], Tuple[float, float]]] = None,
-                        production_rankings: Optional[Tuple[List[str], ...]] = None,
+                        production_ranking: Optional[List[str]] = None,
                         metrics=DEFAULT_DECISION_METRICS,
                         ) -> Optional[Dict[str, Any]]:
     """
     Monte Carlo robustness explainability: sweep the test's `noise_level`, then
     explain with performance-vs-noise curves + ranking stability (Method A) and a
-    1-D decision-tree surrogate (Method B), for each metric the run's fitness
-    names. Writes a report + plots under
-    myresults/robustness/MonteCarlo/{dataset}/{entity}/.
+    1-D decision-tree surrogate (Method B). Both read the run's own fitness, so
+    the stage has one winner rather than one per metric. Writes a report + plots
+    under myresults/robustness/MonteCarlo/{dataset}/{entity}/.
 
     Returns the computed structures when explain=True; None otherwise (and None,
     with a logged note, when the sweep is infeasible).
@@ -788,48 +801,48 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
         return None
 
     noise = sweep["noise"]; grid = sweep["grid_levels"]
-    F1 = sweep["F1"]; PR = sweep["PR"]; models = sweep["model_names"]
-    F1_fixed = sweep["F1_fixed"]; VUS = sweep["VUS"]
+    models = sweep["model_names"]
+    FIT = sweep["FIT"]; FIT_fixed = sweep["FIT_fixed"]
     want = metrics_required(metrics)
-    want_f1, want_pr, want_vus = 'f1' in want, 'pr_auc' in want, 'vus' in want
+    want_f1 = 'f1' in want
+    fitness_formula = decision_metric_formula(metrics)
 
-    curves_f1 = compute_noise_curves(noise, grid, F1, models) if want_f1 else {}
-    curves_pr = compute_noise_curves(noise, grid, PR, models) if want_pr else {}
-    curves_vus = compute_noise_curves(noise, grid, VUS, models) if want_vus else {}
-    curves_f1_fixed = compute_noise_curves(noise, grid, F1_fixed, models) if want_f1 else {}
-    stab_f1 = compute_ranking_stability(noise, grid, F1, models) if want_f1 else {}
-    stab_pr = compute_ranking_stability(noise, grid, PR, models) if want_pr else {}
-    stab_vus = compute_ranking_stability(noise, grid, VUS, models) if want_vus else {}
+    curves = compute_noise_curves(noise, grid, FIT, models)
+    # Only F1 carries a threshold, so freezing one is meaningful only when the
+    # fitness names it.
+    curves_fixed = compute_noise_curves(noise, grid, FIT_fixed, models) if want_f1 else {}
+    stab = compute_ranking_stability(noise, grid, FIT, models)
+    # A one-term fitness IS that metric, so its component curve would be the
+    # same data drawn a second time under another name.
+    component_curves = {} if len(want) < 2 else {
+        label: compute_noise_curves(noise, grid, sweep[key], models)
+        for token, key, label in _FITNESS_COMPONENTS if token in want}
 
     # Surrogates (need sklearn). Degrade gracefully if unavailable.
-    clf_f1 = clf_pr = clf_vus = None
-    winner_f1 = winner_pr = winner_vus = {"feasible": False}
-    permodel_f1 = permodel_pr = permodel_vus = {}
+    clf = None
+    winner = {"feasible": False}
+    permodel = {}
     surrogate_note = ""
     try:
-        if want_f1:
-            clf_f1, winner_f1 = _fit_noise_winner(noise, F1, models)
-            permodel_f1 = train_noise_permodel_surrogates(noise, F1, models)
-        if want_pr:
-            clf_pr, winner_pr = _fit_noise_winner(noise, PR, models)
-            permodel_pr = train_noise_permodel_surrogates(noise, PR, models)
-        if want_vus:
-            clf_vus, winner_vus = _fit_noise_winner(noise, VUS, models)
-            permodel_vus = train_noise_permodel_surrogates(noise, VUS, models)
+        clf, winner = _fit_noise_winner(noise, FIT, models)
+        permodel = train_noise_permodel_surrogates(noise, FIT, models)
     except ImportError:
         surrogate_note = "scikit-learn unavailable — surrogate (Method B) skipped."
         logger.warning(f"MC explainability: {surrogate_note}")
 
-    # Plots, one set per swept metric.
-    for curves, label in ((curves_f1, "F1"), (curves_pr, "PR-AUC"),
-                          (curves_vus, "VUS"), (curves_f1_fixed, "F1_fixed")):
-        if curves:
-            plot_noise_curves(curves, models, label, dataset, entity)
-            plot_noise_curves(curves, models, label, dataset, entity, plain=True)
-    plot_ranking_stability(stab_f1, stab_pr, dataset, entity, stab_vus=stab_vus)
-    for clf, label in ((clf_f1, "F1"), (clf_pr, "PR-AUC"), (clf_vus, "VUS")):
-        if clf is not None:
-            plot_surrogate_tree(clf, label, dataset, entity)
+    # Filenames carry "Fitness", not the metric names, so they stay stable
+    # whatever the run configuration chose.
+    for _curves, _label in ((curves, "Fitness"), (curves_fixed, "Fitness_fixed")):
+        if _curves:
+            plot_noise_curves(_curves, models, _label, dataset, entity)
+            plot_noise_curves(_curves, models, _label, dataset, entity, plain=True)
+    # Components are plain only: they browse beside the fitness curve rather
+    # than leading, and the annotated version of each is the same data with
+    # win-regions drawn over it.
+    for _label, _curves in component_curves.items():
+        plot_noise_curves(_curves, models, _label, dataset, entity, plain=True)
+    plot_ranking_stability(stab, dataset, entity, fitness_label="fitness")
+    plot_surrogate_tree(clf, "Fitness", dataset, entity)
 
     directory = f"myresults/robustness/MonteCarlo/{dataset}/{entity}/"
     os.makedirs(directory, exist_ok=True)
@@ -841,6 +854,7 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
         f.write(f"Models ({len(models)}): {', '.join(models)}\n")
         f.write(f"Noise sweep: {len(grid)} levels in "
                 f"[{grid.min():.3f}, {grid.max():.3f}] × {repeats} repeats = {n_trials} trials\n")
+        f.write(f"Fitness: {fitness_formula}\n")
         f.write("(Explain-only sweep over the test's own noise_level; the production MC "
                 "ranking at fixed noise is unchanged.)\n\n")
 
@@ -871,11 +885,7 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
                 worst_band = "N/A"
             f.write(f"Ranking stability: mean τ={mean_tau:+.3f}; most volatile at noise {worst_band}\n\n")
 
-        for _curves, _stab, _label in ((curves_f1, stab_f1, "F1"),
-                                       (curves_pr, stab_pr, "PR-AUC"),
-                                       (curves_vus, stab_vus, "VUS")):
-            if _curves:
-                _methodA(_curves, _stab, _label)
+        _methodA(curves, stab, "fitness")
 
         def _methodB(winner, permodel, metric):
             f.write(f"--- Method B · winner surrogate ({metric}) ---\n")
@@ -937,12 +947,7 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
                     "      estimates are flagged N/A — kept visible but not to be trusted.\n")
             f.write("\n")
 
-        for _winner, _permodel, _label, _token in (
-                (winner_f1, permodel_f1, "F1", "f1"),
-                (winner_pr, permodel_pr, "PR-AUC", "pr_auc"),
-                (winner_vus, permodel_vus, "VUS", "vus")):
-            if _token in want:
-                _methodB(_winner, _permodel, _label)
+        _methodB(winner, permodel, "fitness")
 
         # ── Fixed-operating-point degradation ──────────────────────────────
         # The F1 above (Methods A/B) RE-OPTIMIZES each model's threshold at every
@@ -950,13 +955,13 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
         # once at the lowest noise level and held fixed across the sweep — how a
         # committed operating point actually degrades as noise shifts the scores.
         if want_f1:
-            f.write("--- Fixed-operating-point degradation (F1, threshold frozen at lowest noise) ---\n")
-            f.write("Contrast with the adaptive F1 above (threshold re-optimized at every level).\n")
-            f.write(f"      {'model':<12} {'f1@low':>8} {'f1@high(adapt)':>15} "
-                    f"{'f1@high(fixed)':>15} {'masked drop':>12}\n")
-            f.write("      " + "-" * 64 + "\n")
-            ad_mean = curves_f1["per_model_mean"]
-            fx_mean = curves_f1_fixed["per_model_mean"]
+            f.write("--- Fixed-operating-point degradation (F1 term frozen at lowest noise) ---\n")
+            f.write("Contrast with the adaptive fitness above (F1's threshold re-optimized at every level).\n")
+            f.write(f"      {'model':<12} {'fit@low':>8} {'fit@high(adapt)':>16} "
+                    f"{'fit@high(fixed)':>16} {'masked drop':>12}\n")
+            f.write("      " + "-" * 66 + "\n")
+            ad_mean = curves["per_model_mean"]
+            fx_mean = curves_fixed["per_model_mean"]
 
             def _fnum(v):
                 return f"{v:.3f}" if not np.isnan(v) else "N/A"
@@ -966,9 +971,9 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
                 f_hi_ad = ad_mean[mi, -1]
                 f_hi_fx = fx_mean[mi, -1]
                 masked = (f_hi_ad - f_hi_fx) if not (np.isnan(f_hi_ad) or np.isnan(f_hi_fx)) else float('nan')
-                f.write(f"      {m:<12} {_fnum(f_low):>8} {_fnum(f_hi_ad):>15} "
-                        f"{_fnum(f_hi_fx):>15} {_fnum(masked):>12}\n")
-            f.write("'masked drop' = adaptive F1 − fixed F1 at the highest noise: the "
+                f.write(f"      {m:<12} {_fnum(f_low):>8} {_fnum(f_hi_ad):>16} "
+                        f"{_fnum(f_hi_fx):>16} {_fnum(masked):>12}\n")
+            f.write("'masked drop' = adaptive fitness − fixed fitness at the highest noise: the "
                     "operating-point degradation the adaptive (re-optimized) view hides.\n\n")
 
         f.write("Note: Method A relates the noise level to which model leads (curves, "
@@ -980,25 +985,21 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
 
     result = {
         "sweep": sweep,
-        "curves_f1": curves_f1, "curves_pr": curves_pr, "curves_vus": curves_vus,
-        "curves_f1_fixed": curves_f1_fixed,
-        "stability_f1": stab_f1, "stability_pr": stab_pr, "stability_vus": stab_vus,
-        "winner_f1": winner_f1, "winner_pr": winner_pr, "winner_vus": winner_vus,
-        "permodel_f1": permodel_f1, "permodel_pr": permodel_pr,
-        "permodel_vus": permodel_vus,
+        "curves": curves, "curves_fixed": curves_fixed,
+        "component_curves": component_curves,
+        "stability": stab,
+        "winner": winner,
+        "permodel": permodel,
         "metrics": want,
+        "fitness_formula": fitness_formula,
         "n_trials": n_trials,
     }
 
     # ── Intermediate Representation (grounded LLM input; non-fatal) ─────────
     try:
-        ranks = list(production_rankings or ()) + [None, None, None]
         ir.write_stage_ir(
-            ir.build_monte_carlo_ir(
-                dataset, entity, result,
-                ranks[0] if want_f1 else None,
-                ranks[1] if want_pr else None,
-                ranks[2] if want_vus else None),
+            ir.build_monte_carlo_ir(dataset, entity, result,
+                                    list(production_ranking or [])),
             dataset, entity, "ir_monte_carlo")
     except Exception as e:
         logger.error(f"Monte Carlo IR emission failed (non-fatal): {e}")

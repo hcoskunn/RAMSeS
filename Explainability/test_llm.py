@@ -60,16 +60,16 @@ def _mc_result():
         "breakdown_points": {},
     }
     return {
-        "curves_f1": curves, "curves_pr": curves, "curves_f1_fixed": curves,
-        "winner_f1": {"feasible": True, "train_accuracy": 0.95, "cv_accuracy": 0.85,
-                      "win_rates": {"LOF_1": 0.6, "NN_3": 0.4},
-                      "rules": [{"conditions": [{"feature": "noise_level", "op": "<=",
-                                                 "threshold": 0.15}],
-                                 "outcome": "LOF_1", "n_samples": 10}],
-                      "rules_text": "", "classes": ["LOF_1", "NN_3"],
-                      "root_threshold": 0.15},
-        "winner_pr": {"feasible": False},
-        "permodel_f1": {"LOF_1": {"cv_r2": 0.7}}, "permodel_pr": {},
+        "curves": curves, "curves_fixed": curves,
+        "winner": {"feasible": True, "train_accuracy": 0.95, "cv_accuracy": 0.85,
+                   "win_rates": {"LOF_1": 0.6, "NN_3": 0.4},
+                   "rules": [{"conditions": [{"feature": "noise_level", "op": "<=",
+                                              "threshold": 0.15}],
+                              "outcome": "LOF_1", "n_samples": 10}],
+                   "rules_text": "", "classes": ["LOF_1", "NN_3"],
+                   "root_threshold": 0.15},
+        "permodel": {"LOF_1": {"cv_r2": 0.7}},
+        "fitness_formula": "0.5 * F1 + 0.5 * PR-AUC",
         "n_trials": 30,
     }
 
@@ -77,12 +77,9 @@ def _mc_result():
 def _results_dict():
     return {
         "thompson": {"best_model": "LOF_1", "top_models": ["LOF_1", "NN_3"]},
-        "gan_robustness": {"best_model": "LOF_1", "f1_names": ["LOF_1", "NN_3"],
-                           "pr_auc_names": ["NN_3", "LOF_1"]},
-        "borderline": {"best_model": "NN_3", "f1_names": ["NN_3", "LOF_1"],
-                       "pr_auc_names": ["NN_3", "LOF_1"]},
-        "monte_carlo": {"best_model_f1": "LOF_1", "f1_names": ["LOF_1", "NN_3"],
-                        "pr_auc_names": ["LOF_1", "NN_3"]},
+        "gan_robustness": {"best_model": "LOF_1", "ranking": ["LOF_1", "NN_3"]},
+        "borderline": {"best_model": "NN_3", "ranking": ["NN_3", "LOF_1"]},
+        "monte_carlo": {"best_model": "LOF_1", "ranking": ["LOF_1", "NN_3"]},
         "aggregation": {"robust_agg": (0.5, ["LOF_1", "NN_3"]),
                         "final_agg": (0.4, ["LOF_1", "NN_3"])},
         "final_decision": {"framework_choice": "single_model",
@@ -405,24 +402,24 @@ class TestVerifierCoverageIsConjunctive(unittest.TestCase):
 
     A source atom's `value` carries a `top_pick`, which is a detector rather
     than the source the atom is about. Harvesting it as a coverage candidate and
-    accepting any ONE meant a narrative that never mentioned GAN_PR_AUC still
-    "conveyed" its atom, because LOF_1 appears elsewhere in the text.
+    accepting any ONE meant a narrative that never mentioned Off-by-threshold
+    still "conveyed" its atom, because LOF_1 appears elsewhere in the text.
     """
 
-    def _source_ir(self):
+    def _source_ir(self, source="Off-by-threshold"):
         return {
             "ir_version": "1.0", "stage": "rank_aggregation_robust",
             "dataset": "DS", "entity": "e1", "output": {},
             "evidence": [
-                {"id": "ra.source.GAN_PR_AUC.role", "type": "source_role",
-                 "subject": "GAN_PR_AUC",
+                {"id": f"ra.source.{source}.role", "type": "source_role",
+                 "subject": source,
                  "value": {"influence_rank": 5, "agreement_rank": 2,
                            "borda_rank": 2, "top_pick": "LOF_1"},
-                 "text": "GAN_PR_AUC shaped the consensus second most (overall "
-                         "rank 2 of 6), ranking 5 for influence and 2 "
-                         "for agreement."},
+                 "text": f"{source} shaped the consensus second most (overall "
+                         f"rank 2 of 3), ranking 5 for influence and 2 "
+                         f"for agreement."},
             ],
-            "caveats": [], "required_atom_ids": ["ra.source.GAN_PR_AUC.role"],
+            "caveats": [], "required_atom_ids": [f"ra.source.{source}.role"],
             "confidence": {},
         }
 
@@ -430,14 +427,30 @@ class TestVerifierCoverageIsConjunctive(unittest.TestCase):
         narrative = ("LOF_1 leads the consensus. One source ranked 2 "
                      "for agreement.")
         v = verifier.verify_narrative(narrative, self._source_ir())
-        self.assertEqual(v["missing_required_ids"], ["ra.source.GAN_PR_AUC.role"])
+        self.assertEqual(v["missing_required_ids"],
+                         ["ra.source.Off-by-threshold.role"])
         self.assertEqual(v["omission_rate"], 1.0)
 
     def test_naming_the_subject_conveys_it(self):
-        narrative = ("GAN_PR_AUC shaped the consensus second most, ranking 5 "
-                     "for influence and 2 for agreement.")
+        narrative = ("Off-by-threshold shaped the consensus second most, "
+                     "ranking 5 for influence and 2 for agreement.")
         v = verifier.verify_narrative(narrative, self._source_ir())
         self.assertEqual(v["missing_required_ids"], [])
+
+    def test_a_source_named_with_a_space_is_still_required(self):
+        """"Monte Carlo" failed the identifier shape test, so its atom carried
+        no required names at all and `all()` over an empty set passed it
+        whatever the narrative said."""
+        ir_doc = self._source_ir("Monte Carlo")
+        omits = verifier.verify_narrative(
+            "LOF_1 leads the consensus. One source ranked 2 for agreement.",
+            ir_doc)
+        self.assertEqual(omits["missing_required_ids"],
+                         ["ra.source.Monte Carlo.role"])
+        names = verifier.verify_narrative(
+            "Monte Carlo shaped the consensus second most, ranking 5 for "
+            "influence and 2 for agreement.", ir_doc)
+        self.assertEqual(names["missing_required_ids"], [])
 
     def test_every_member_of_a_named_group_is_required(self):
         doc = {
@@ -856,7 +869,7 @@ class TestNarrateEntity(unittest.TestCase):
                 "DS", "e1", "ir_ga_combination", base_dir=base)
             ir.write_stage_ir(
                 ir.build_monte_carlo_ir("DS", "e1", _mc_result(),
-                                        ["LOF_1", "NN_3"], ["NN_3", "LOF_1"]),
+                                        ["LOF_1", "NN_3"]),
                 "DS", "e1", "ir_monte_carlo", base_dir=base)
             ir.assemble_global_ir(_results_dict(), "DS", "e1", 3, base_dir=base)
 

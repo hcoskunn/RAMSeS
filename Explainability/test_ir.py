@@ -89,17 +89,17 @@ def _mc_result():
         "breakdown_points": {"A": None, "B": 0.0},
     }
     return {
-        "curves_f1": curves, "curves_pr": curves, "curves_f1_fixed": curves,
-        "winner_f1": {"feasible": True, "train_accuracy": 0.95, "cv_accuracy": 0.85,
-                      "win_rates": {"A": 0.6, "B": 0.4},
-                      "rules": [{"conditions": [{"feature": "noise_level", "op": "<=",
-                                                 "threshold": 0.15}],
-                                 "outcome": "A", "n_samples": 10}],
-                      "rules_text": "", "classes": ["A", "B"], "root_threshold": 0.15},
-        "winner_pr": {"feasible": False},
-        "permodel_f1": {"A": {"cv_r2": 0.7, "trend": "robust"},
-                        "B": {"cv_r2": float("nan"), "trend": "fragile"}},
-        "permodel_pr": {}, "n_trials": 30,
+        "curves": curves, "curves_fixed": curves,
+        "winner": {"feasible": True, "train_accuracy": 0.95, "cv_accuracy": 0.85,
+                   "win_rates": {"A": 0.6, "B": 0.4},
+                   "rules": [{"conditions": [{"feature": "noise_level", "op": "<=",
+                                              "threshold": 0.15}],
+                              "outcome": "A", "n_samples": 10}],
+                   "rules_text": "", "classes": ["A", "B"], "root_threshold": 0.15},
+        "permodel": {"A": {"cv_r2": 0.7, "trend": "robust"},
+                     "B": {"cv_r2": float("nan"), "trend": "fragile"}},
+        "fitness_formula": "0.5 * F1 + 0.5 * PR-AUC",
+        "n_trials": 30,
     }
 
 
@@ -199,12 +199,9 @@ def _thompson_ranking_kwargs():
 def _results_dict():
     return {
         "thompson": {"best_model": "A", "top_models": ["A", "B"]},
-        "gan_robustness": {"best_model": "A", "f1_names": ["A", "B"],
-                           "pr_auc_names": ["B", "A"], "vus_names": ["A", "B"]},
-        "borderline": {"best_model": "B", "f1_names": ["B", "A"],
-                       "pr_auc_names": ["B", "A"], "vus_names": ["B", "A"]},
-        "monte_carlo": {"best_model_f1": "A", "f1_names": ["A", "B"],
-                        "pr_auc_names": ["A", "B"], "vus_names": ["A", "B"]},
+        "gan_robustness": {"best_model": "A", "ranking": ["A", "B"]},
+        "borderline": {"best_model": "B", "ranking": ["B", "A"]},
+        "monte_carlo": {"best_model": "A", "ranking": ["A", "B"]},
         "aggregation": {"robust_agg": (0.5, ["A", "B"]), "final_agg": (0.4, ["A", "B"])},
         "final_decision": {"framework_choice": "ensemble", "chosen_model": ["A", "B"],
                            "ensemble": ["A", "B"], "ensemble_f1": 0.9,
@@ -517,13 +514,15 @@ class TestBuilders(unittest.TestCase):
             "A was selected in 22 of the 40 windows, against 12 for B.")
         self.assertEqual(by_id["tsr.support"]["value"]["runner_up"], "B")
 
-        # Each leader's regime count AND the windows it held: four short spells
+        # Each leader's streak count AND the windows it held: four short streaks
         # are not more of the run than one long one, so the count alone misleads.
+        # The prose says "streak" where the sibling stage says "regime" — the
+        # atom ids stay `tsr.regime.N` either way.
         self.assertEqual(
             by_id["tsr.regimes.summary"]["text"],
             "Leadership on this score changed hands over the run: it splits "
-            "into 2 regimes led by 2 different detectors: A led 1 regime, "
-            "spanning 15 windows and B led 1 regime, spanning 15 windows. "
+            "into 2 streaks led by 2 different detectors: A led 1 streak, "
+            "spanning 15 windows and B led 1 streak, spanning 15 windows. "
             "The first 10 windows are left out, because all detectors start "
             "with score zero.")
         self.assertEqual(by_id["tsr.regimes.summary"]["value"]["windows_led"],
@@ -534,7 +533,7 @@ class TestBuilders(unittest.TestCase):
         # on which detector placed second. It stays in `value` and on the plot.
         self.assertEqual(
             by_id["tsr.regime.0"]["text"],
-            "Regime 0 (windows 10 to 24, 15 windows) was led by B, with "
+            "Streak 0 (windows 10 to 24, 15 windows) was led by B, with "
             "context feature 2 and context feature 0 raising its score the most.")
         self.assertEqual(by_id["tsr.regime.0"]["value"]["runner_up"], "A")
         for atom in doc["evidence"]:
@@ -614,8 +613,8 @@ class TestBuilders(unittest.TestCase):
 
     def test_thompson_ranking_degenerate_runs(self):
         kwargs = _thompson_ranking_kwargs()
-        # A single regime must not claim leadership "changed hands", and a
-        # one-window regime must not read "1 windows".
+        # A single streak must not claim leadership "changed hands", and a
+        # one-window streak must not read "1 windows".
         kwargs["regimes"] = [{"index": 0, "start": 10, "end": 10, "duration": 1,
                               "leader": "A", "runner_up": "B",
                               "top_channels": [(0, 0.9)], "gap_channels": [],
@@ -663,35 +662,20 @@ class TestBuilders(unittest.TestCase):
         return [name for name, _ in rows]
 
     def test_agreement_carries_one_source_per_aggregated_ranking(self):
-        """The strip shows the rankings that actually voted, and no others."""
-        self.assertEqual(self._agreement_order(("f1",)),
-                         ["gan_f1", "borderline_f1", "monte_carlo_f1",
-                          "robust_consensus", "thompson"])
-        self.assertEqual(self._agreement_order(("pr_auc",)),
-                         ["gan_pr_auc", "borderline_pr_auc", "monte_carlo_pr_auc",
-                          "robust_consensus", "thompson"])
+        """The strip shows the rankings that actually voted, and no others.
 
-    def test_agreement_order_puts_each_stage_in_one_column(self):
-        """Five per row, so gan_pr_auc lands directly under gan_f1 and the two
-        sources with no metric of their own stay last in the first row."""
-        order = self._agreement_order(("f1", "pr_auc"))
-        self.assertEqual(order[:5], ["gan_f1", "borderline_f1", "monte_carlo_f1",
-                                     "robust_consensus", "thompson"])
-        self.assertEqual(order[5:], ["gan_pr_auc", "borderline_pr_auc",
-                                     "monte_carlo_pr_auc"])
-        for i in (0, 1, 2):
-            self.assertEqual(order[i].rsplit("_f1", 1)[0],
-                             order[i + 5].rsplit("_pr_auc", 1)[0])
+        Each robustness test publishes exactly one ranking whatever the fitness
+        names, so the strip is the same five sources every time — it used to be
+        up to eleven, three of them per stage."""
+        expected = ["gan", "borderline", "monte_carlo",
+                    "robust_consensus", "thompson"]
+        for metric in (("f1",), ("pr_auc",), ("f1", "pr_auc"),
+                       ("f1", "pr_auc", "vus"), {"f1": 0.5, "pr_auc": 0.3, "vus": 0.2}):
+            self.assertEqual(self._agreement_order(metric), expected, metric)
 
-    def test_agreement_carries_a_vus_row_when_the_fitness_asks_for_one(self):
-        order = self._agreement_order(("f1", "pr_auc", "vus"))
-        self.assertEqual(order[8:], ["gan_vus", "borderline_vus", "monte_carlo_vus"])
-        # Each stage keeps one column across all three metric rows.
-        for column, stage in enumerate(("gan", "borderline", "monte_carlo")):
-            self.assertEqual([order[column], order[column + 5], order[column + 8]],
-                             [f"{stage}_f1", f"{stage}_pr_auc", f"{stage}_vus"])
-
-    def test_agreement_metric_is_carried_for_the_split_sources(self):
+    def test_agreement_carries_no_metric_of_its_own(self):
+        """A stage ranks by the whole fitness now, so naming one metric beside
+        it would say the ranking was that metric's."""
         results = _results_dict()
         results["final_decision"]["decision_metric"] = ("f1", "pr_auc")
         with tempfile.TemporaryDirectory() as base:
@@ -699,9 +683,10 @@ class TestBuilders(unittest.TestCase):
             with open(path) as f:
                 g = json.load(f)
         a = g["stage_agreement"]
-        self.assertEqual(a["monte_carlo_pr_auc"]["metric"], "pr_auc")
-        self.assertEqual(a["monte_carlo_pr_auc"]["stage"], "monte_carlo")
-        self.assertEqual(a["thompson"]["metric"], ir.NOT_AVAILABLE)
+        self.assertEqual(a["monte_carlo"]["stage"], "monte_carlo")
+        self.assertEqual(a["monte_carlo"]["ranking"], ["A", "B"])
+        for name in ("gan", "borderline", "monte_carlo", "thompson"):
+            self.assertEqual(a[name]["metric"], ir.NOT_AVAILABLE, name)
 
     def test_ga_combination_reports_a_thinly_supported_sign_and_qualifies_it(self):
         """A detector whose effect changes sign across its range still ends
@@ -956,20 +941,20 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(
             a["text"],
             "A carries the most weight in the ensemble (overall weight rank 1 of "
-            "3), ranking 1 on absolute SHAP, PFI, and total ALE.")
+            "3), ranking 1 on absolute SHAP, PFI, and total |ALE|.")
         # Two rank groups where one holds two measures: the comma before the
         # final "and" is what separates the groups. Without it this reads
-        # "...absolute SHAP and total ALE and 3 on PFI".
+        # "...absolute SHAP and total |ALE| and 3 on PFI".
         b = next(x for x in doc["evidence"] if x["id"] == "ga_comb.detector.B.role")
         self.assertEqual(
             b["text"],
             "B carries the second-most weight in the ensemble (overall weight "
-            "rank 2 of 3), ranking 2 on absolute SHAP and total ALE, and 3 on PFI.")
+            "rank 2 of 3), ranking 2 on absolute SHAP and total |ALE|, and 3 on PFI.")
         c = next(x for x in doc["evidence"] if x["id"] == "ga_comb.detector.C.role")
         self.assertEqual(
             c["text"],
             "C carries the third-most weight in the ensemble (overall weight "
-            "rank 3 of 3), ranking 3 on absolute SHAP and total ALE, and 2 on PFI.")
+            "rank 3 of 3), ranking 3 on absolute SHAP and total |ALE|, and 2 on PFI.")
         prose = " ".join(x["text"] for x in doc["evidence"])
         self.assertNotIn("signed SHAP", prose)
         # Signed SHAP is gone from the machine-readable block too: the verifier
@@ -1146,7 +1131,7 @@ class TestBuilders(unittest.TestCase):
                       lead["text"])
 
     def test_monte_carlo_lean(self):
-        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B"], ["B", "A"])
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B"])
         _check_envelope(self, doc, "monte_carlo")
         blob = json.dumps(doc)
         # Lean IR: no breakdown / trend / tau content.
@@ -1154,29 +1139,28 @@ class TestBuilders(unittest.TestCase):
         self.assertNotIn("robust\"", blob)
         self.assertNotIn("fragile", blob)
         ids = {a["id"] for a in doc["evidence"]}
-        # One win-region atom per DETECTOR (both metrics in one sentence); the
-        # crossover and surrogate-rule atoms are gone — a crossover is the
-        # derivative of the regions and the rules restate them in fitted form.
+        # One win-region atom per DETECTOR; the crossover and surrogate-rule
+        # atoms are gone — a crossover is the derivative of the regions and the
+        # rules restate them in fitted form.
         self.assertIn("mc.win_region.A", ids)
         self.assertNotIn("mc.win_region.f1.A", ids)
         self.assertNotIn("mc.crossover.f1.0", ids)
         self.assertNotIn("mc.surrogate.rule.0", ids)
-        # Lead names BOTH production winners (they differ in this fixture).
+        # One production winner, named with the fitness it won on.
         lead = next(a for a in doc["evidence"] if a["id"] == "mc.output.top")
         self.assertEqual(
             lead["text"],
-            "In the production Monte Carlo test, A ranked first by F1 score "
-            "and B ranked first by PR-AUC.")
+            "In the production Monte Carlo test, A ranked first by fitness "
+            "(0.5 * F1 + 0.5 * PR-AUC).")
         self.assertIn("mc.surrogate.win_rates", doc["required_atom_ids"])
         # All winners fit inside the top-K cut here, so there is no tail clause.
         wr = next(a for a in doc["evidence"] if a["id"] == "mc.surrogate.win_rates")
-        f1 = wr["value"]["by_metric"][0]
         self.assertEqual(
             wr["text"],
-            "Measured by F1, the noise-sweep trials were won by: A 60.0%, B 40.0%.")
-        self.assertEqual(f1["n_other"], 0)
+            "The noise-sweep trials were won by: A 60.0%, B 40.0%.")
+        self.assertEqual(wr["value"]["n_other"], 0)
         conf = doc["confidence"]
-        self.assertEqual(conf["winner_surrogate_f1"]["grade"], "high")
+        self.assertEqual(conf["winner_surrogate"]["grade"], "high")
         # Per-model cv R² is graded confidence data, number kept visible.
         self.assertEqual(conf["permodel_cv_r2"]["B"]["cv_r2"], ir.NOT_AVAILABLE)
         self.assertEqual(conf["permodel_cv_r2"]["A"]["cv_r2"], 0.7)
@@ -1186,11 +1170,11 @@ class TestBuilders(unittest.TestCase):
         result = _mc_result()
         # A: 4 of 5 folds degenerate → number kept, graded not_available.
         # B: 1 of 5 → graded normally.
-        result["permodel_f1"] = {
+        result["permodel"] = {
             "A": {"cv_r2": 0.6, "cv_n_splits": 5, "cv_degenerate_folds": 4},
             "B": {"cv_r2": 0.9, "cv_n_splits": 5, "cv_degenerate_folds": 1},
         }
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"], ["B", "A"])
+        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
         conf = doc["confidence"]["permodel_cv_r2"]
         self.assertEqual(conf["A"]["cv_r2"], 0.6)          # number stays visible
         self.assertEqual(conf["A"]["grade"], ir.NOT_AVAILABLE)
@@ -1396,132 +1380,83 @@ class TestBuilders(unittest.TestCase):
         winners. Listing only the top few left a reader adding up 96% and
         hunting for the bug, so the tail is stated rather than simply absent."""
         result = _mc_result()
-        result["winner_f1"]["win_rates"] = {
+        result["winner"]["win_rates"] = {
             "A": 0.39, "B": 0.20, "C": 0.13, "D": 0.12, "E": 0.12,   # top 5
             "F": 0.03, "G": 0.01,                                    # cut
         }
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"], ["B", "A"])
+        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
         wr = next(a for a in doc["evidence"] if a["id"] == "mc.surrogate.win_rates")
-        f1 = wr["value"]["by_metric"][0]
         self.assertIn("the remaining 4.0% went to 2 further detectors", wr["text"])
-        self.assertEqual(f1["n_other"], 2)
-        self.assertEqual(f1["other_share"], 0.04)
+        self.assertEqual(wr["value"]["n_other"], 2)
+        self.assertEqual(wr["value"]["other_share"], 0.04)
         # The cut detectors are still not named — that is what the cut is for.
-        self.assertNotIn("F", [m for m, _ in f1["listed"]])
+        self.assertNotIn("F", [m for m, _ in wr["value"]["listed"]])
         # Listed shares plus the tail reach 100%.
         self.assertAlmostEqual(
-            sum(r for _, r in f1["listed"]) + f1["other_share"],
+            sum(r for _, r in wr["value"]["listed"]) + wr["value"]["other_share"],
             1.0, places=6)
 
-    def test_mc_sweep_is_reported_and_compared_per_metric(self):
-        """A metric's sweep winner is only ever set against that same metric's
-        production winner: across metrics there is nothing to disagree about."""
+    def test_mc_sweep_verdict_is_one_atom(self):
+        """The sweep and the production run both rank by the same fitness, so
+        there is exactly one comparison to make. Three metrics meant three
+        verdicts, and a reader had to work out which of them was the finding."""
         result = _mc_result()
-        result["curves_vus"] = result["curves_f1"]
-        result["winner_pr"] = {"feasible": True, "train_accuracy": 0.9,
-                               "cv_accuracy": 0.8,
-                               "win_rates": {"B": 0.7, "A": 0.3}}
-        result["winner_vus"] = {"feasible": True, "train_accuracy": 0.9,
-                                "cv_accuracy": 0.8,
-                                "win_rates": {"A": 0.8, "B": 0.2}}
-        # F1 ranks A first, PR-AUC ranks B first, VUS ranks B first.
-        doc = ir.build_monte_carlo_ir("DS", "e1", result,
-                                      ["A", "B"], ["B", "A"], ["B", "A"])
+        # Sweep picks A (60%); production ranks B first.
+        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["B", "A"])
         atoms = {a["id"]: a for a in doc["evidence"]}
-        # ONE sweep atom covering every metric, not one apiece: a sentence each
-        # restated the same finding three times over.
-        wr = atoms["mc.surrogate.win_rates"]
-        self.assertIn("mc.surrogate.win_rates", doc["required_atom_ids"])
-        self.assertEqual([b["metric"] for b in wr["value"]["by_metric"]],
-                         ["F1", "PR-AUC", "VUS"])
-        self.assertEqual(
-            wr["text"],
-            "Measured by F1, the noise-sweep trials were won by: A 60.0%, "
-            "B 40.0%; while by PR-AUC, the noise-sweep trials were won by: "
-            "B 70.0%, A 30.0%; while by VUS, the noise-sweep trials were won "
-            "by: A 80.0%, B 20.0%.")
-        # F1 and PR-AUC each agree with their own production winner; only VUS
-        # disagrees (sweep A, production B), so only VUS gets a tension atom.
-        # A verdict per metric whether or not it agrees: who won the sweep is
-        # the answer either way. F1 and PR-AUC agree with their own production
-        # winner; only VUS (sweep A, production B) does not.
         self.assertEqual([i for i in atoms if "sweep_verdict" in i],
-                         ["mc.sweep_verdict.f1", "mc.sweep_verdict.pr",
-                          "mc.sweep_verdict.vus"])
-        self.assertTrue(atoms["mc.sweep_verdict.f1"]["value"]["agree"])
-        self.assertTrue(atoms["mc.sweep_verdict.pr"]["value"]["agree"])
-        verdict = atoms["mc.sweep_verdict.vus"]
+                         ["mc.sweep_verdict"])
+        verdict = atoms["mc.sweep_verdict"]
         self.assertEqual(verdict["value"],
-                         {"metrics": ["VUS"], "agree": False,
-                          "production_top": "B", "sweep_top": "A",
-                          "sweep_top_win_rate": {"VUS": 0.8},
-                          "production_top_win_rate": {"VUS": 0.2}})
+                         {"agree": False, "production_top": "B", "sweep_top": "A",
+                          "sweep_top_win_rate": 0.6,
+                          "production_top_win_rate": 0.4})
         self.assertEqual(
             verdict["text"],
-            "Measured by VUS, the sweep and the production run do not agree: A "
-            "won most of the noise trials, while it was B that the production "
-            "run ranked first.")
-        self.assertEqual(
-            atoms["mc.sweep_verdict.f1"]["text"],
-            "Measured by F1, the sweep and the production run agree: A won most "
-            "of the noise trials and the production run ranked it first too.")
-        self.assertEqual(doc["confidence"]["winner_surrogate_vus"]["grade"],
-                         doc["confidence"]["winner_surrogate_pr"]["grade"])
+            "The sweep and the production run do not agree: A won most of the "
+            "noise trials, while it was B that the production run ranked first.")
+        self.assertIn("mc.sweep_verdict", doc["required_atom_ids"])
 
-    def test_mc_metrics_that_disagree_the_same_way_share_one_atom(self):
-        """Same sweep winner against the same production winner is one fact,
-        however many metrics reach it."""
-        result = _mc_result()
-        result["curves_vus"] = result["curves_f1"]
-        for k, rates in (("winner_pr", {"A": 0.7, "B": 0.3}),
-                         ("winner_vus", {"A": 0.6, "B": 0.4})):
-            result[k] = {"feasible": True, "train_accuracy": 0.9,
-                         "cv_accuracy": 0.8, "win_rates": rates}
-        # Every metric's sweep picks A; production ranks B first throughout.
-        doc = ir.build_monte_carlo_ir("DS", "e1", result,
-                                      ["B", "A"], ["B", "A"], ["B", "A"])
-        atoms = {a["id"]: a for a in doc["evidence"]}
-        self.assertEqual([i for i in atoms if "sweep_verdict" in i],
-                         ["mc.sweep_verdict.f1_pr_vus"])
-        verdict = atoms["mc.sweep_verdict.f1_pr_vus"]
-        self.assertEqual(verdict["value"]["metrics"], ["F1", "PR-AUC", "VUS"])
-        self.assertFalse(verdict["value"]["agree"])
+    def test_mc_sweep_verdict_states_agreement_too(self):
+        """Who won the sweep is the answer either way, so the atom is emitted
+        whether or not it matches production."""
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B"])
+        verdict = next(a for a in doc["evidence"] if a["id"] == "mc.sweep_verdict")
+        self.assertTrue(verdict["value"]["agree"])
         self.assertEqual(
             verdict["text"],
-            "Measured by F1, PR-AUC and VUS, the sweep and the production run "
-            "do not agree: A won most of the noise trials, while it was B that "
-            "the production run ranked first.")
+            "The sweep and the production run agree: A won most of the noise "
+            "trials and the production run ranked it first too.")
 
     def test_mc_win_rates_names_the_sixth_rather_than_summarising_it(self):
         """A tail of one spends a clause withholding a name it has room for."""
         result = _mc_result()
-        result["winner_f1"]["win_rates"] = {
+        result["winner"]["win_rates"] = {
             "A": 0.39, "B": 0.20, "C": 0.13, "D": 0.12, "E": 0.12, "F": 0.04}
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"], ["B", "A"])
+        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
         wr = next(a for a in doc["evidence"] if a["id"] == "mc.surrogate.win_rates")
-        f1 = wr["value"]["by_metric"][0]
         self.assertIn("F 4.0%", wr["text"])
         self.assertNotIn("further detector", wr["text"])
-        self.assertEqual(f1["n_other"], 0)
-        self.assertEqual([m for m, _ in f1["listed"]],
+        self.assertEqual(wr["value"]["n_other"], 0)
+        self.assertEqual([m for m, _ in wr["value"]["listed"]],
                          ["A", "B", "C", "D", "E", "F"])
 
     def test_mc_winner_surrogate_rules_not_emitted_but_fidelity_kept(self):
         # The winner-surrogate tree restates the win regions in fitted form, so
         # its rules are no longer evidence — but its held-out fidelity stays.
         result = _mc_result()
-        result["winner_f1"]["rules"] = [
+        result["winner"]["rules"] = [
             {"conditions": [{"feature": "noise_level", "op": "<=", "threshold": 0.05}],
              "outcome": "A", "n_samples": 50},
             {"conditions": [{"feature": "noise_level", "op": ">", "threshold": 0.15}],
              "outcome": "B", "n_samples": 30},
         ]
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"], ["B", "A"])
+        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
         self.assertEqual(
             [a for a in doc["evidence"] if a["type"] == "surrogate_rule"], [])
-        self.assertNotIn("noise-sweep F1 winner is", json.dumps(doc))
-        self.assertEqual(doc["confidence"]["winner_surrogate_f1"]["grade"], "high")
-        self.assertEqual(doc["confidence"]["winner_surrogate_f1"]["cv_accuracy"], 0.85)
+        self.assertNotIn("noise-sweep winner is", json.dumps(doc))
+        self.assertEqual(doc["confidence"]["winner_surrogate"]["grade"], "high")
+        self.assertEqual(doc["confidence"]["winner_surrogate"]["cv_accuracy"], 0.85)
 
     def test_simplify_conditions_tightest_bounds(self):
         conds = [
@@ -1564,20 +1499,18 @@ class TestBuilders(unittest.TestCase):
         # NOTE: the fixture shares one curves dict across F1 and PR-AUC, so
         # each detector reports the same ranges under both metrics.
         result = _mc_result()
-        result["curves_f1"]["win_regions"] = {"A": [(0.0, 0.1), (0.15, 0.15)],
-                                              "B": [(0.2, 0.2)]}
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"], [])
+        result["curves"]["win_regions"] = {"A": [(0.0, 0.1), (0.15, 0.15)],
+                                           "B": [(0.2, 0.2)]}
+        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
         a_atom = next(x for x in doc["evidence"] if x["id"] == "mc.win_region.A")
         # Spans read "from A to B" — never "A-B", which the sign-aware number
         # extractor would parse as the negative number -B.
-        self.assertIn("A won by F1 at noise levels from 0.000 to 0.100, and at 0.150",
+        self.assertIn("A won at noise levels from 0.000 to 0.100, and at 0.150",
                       a_atom["text"])
         self.assertNotIn("0.000-0.100", a_atom["text"])
-        # Both metrics live in ONE atom, metric-first, split by a semicolon.
-        self.assertIn("; by PR-AUC at noise levels", a_atom["text"])
         # Points-only reads as bare levels, with no dangling "at ... at".
         b_atom = next(x for x in doc["evidence"] if x["id"] == "mc.win_region.B")
-        self.assertIn("B won by F1 at noise levels 0.200", b_atom["text"])
+        self.assertIn("B won at noise levels 0.200", b_atom["text"])
         self.assertNotIn("from", b_atom["text"])
 
     def test_determinism(self):
@@ -1637,7 +1570,7 @@ class TestWriterAndAssembler(unittest.TestCase):
             base = os.path.join(tmp, "explanations_ir")
             ir.write_stage_ir(ir.build_ga_combination_ir("DS", "e1", _ga_combination_result()),
                               "DS", "e1", "ir_ga_combination", base_dir=base)
-            ir.write_stage_ir(ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A"], ["A"]),
+            ir.write_stage_ir(ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A"]),
                               "DS", "e1", "ir_monte_carlo", base_dir=base)
             path = ir.assemble_global_ir(_results_dict(), "DS", "e1", 5, base_dir=base)
             with open(path) as f:
@@ -1651,7 +1584,7 @@ class TestWriterAndAssembler(unittest.TestCase):
             self.assertEqual(g["stages"]["gan"]["status"], ir.NOT_AVAILABLE)
             # Agreement facts computed in code.
             self.assertTrue(g["stage_agreement"]["thompson"]["agrees_with_final_single"])
-            self.assertFalse(g["stage_agreement"]["borderline_f1"]["agrees_with_final_single"])
+            self.assertFalse(g["stage_agreement"]["borderline"]["agrees_with_final_single"])
             # The global IR carries its own sentence atoms + required ids.
             ids = {a["id"] for a in g["evidence"]}
             self.assertIn("global.decision", ids)

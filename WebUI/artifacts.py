@@ -47,14 +47,16 @@ STAGES: Tuple[Dict[str, Any], ...] = (
     # galleries. `regimes` names the plot subdirectory whose per-regime figures
     # pair with this stage's regime atoms; its presence is what makes a stage
     # regime-bearing, replacing a hardcoded stage-key check here and in server.py.
+    # `regime_noun` is what the page calls one: the two stages segment different
+    # quantities, so Ranking says "Streak" where Selection says "Regime".
     {"key": "thompson_ranking", "title": "Thompson Sampling: Ranking",
      "cli": "thompson", "ir": "ir_thompson_ranking", "nl": "nl_thompson_ranking",
      "plot_group": "ts_ranking", "order": 3,
-     "regimes": ["ranking_per_regime"]},
+     "regimes": ["ranking_per_regime"], "regime_noun": "Streak"},
     {"key": "thompson_sampling", "title": "Thompson Sampling: Selection",
      "cli": "thompson", "ir": "ir_thompson", "nl": "nl_thompson",
      "plot_group": "thompson", "order": 4,
-     "regimes": ["reward_per_regime", "shap_per_regime"]},
+     "regimes": ["reward_per_regime", "shap_per_regime"], "regime_noun": "Regime"},
     {"key": "monte_carlo", "title": "Robustness: Monte Carlo",
      "cli": "montecarlo", "ir": "ir_monte_carlo", "nl": "nl_monte_carlo",
      "plot_group": "monte_carlo", "order": 5},
@@ -154,10 +156,10 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
          "title": "Two aggregations and the final decision", "blocks": (
             {"text": "Rank aggregation runs twice. First it merges the rankings "
                      "the robustness tests produce into a robustness consensus. "
-                     "Each of the three tests ranks the detectors by F1 and by "
-                     "PR-AUC, giving six rankings. When the fitness is F1 alone, "
-                     "or PR-AUC alone, each test ranks by that metric only and "
-                     "there are three. Then it merges that consensus with the "
+                     "Each of the three tests ranks the detectors by the run's "
+                     "own fitness, giving three rankings, so the weights the run "
+                     "configuration set are what the consensus votes on. Then it "
+                     "merges that consensus with the "
                      "Thompson ranking into the final single-model order. "
                      "Finally the framework evaluates the winning ensemble and "
                      "the winning single detector on the same data and deploys "
@@ -282,21 +284,23 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "weight they carry, and each answers a different question. "
                      "SHAP measures how much the meta-learner's anomaly "
                      "probability moves when a detector's actual output is "
-                     "revealed in place of its average output, averaged over "
+                     "revealed in place of its median output, averaged over "
                      "every combination of the other detectors being revealed or "
-                     "held at their averages. Because the ensemble is small, "
+                     "held at their medians. Because the ensemble is small, "
                      "every combination is enumerated exactly rather than "
-                     "sampled. PFI measures how far F1 falls when a detector's "
-                     "score column is shuffled, so unlike SHAP it uses the "
-                     "labels and reports reliance on the detector rather than "
-                     "influence on the output. ALE sweeps a detector across its "
-                     "own observed score range in narrow bands and accumulates "
-                     "how far the meta-learner's output moves, using only the "
-                     "rows that fall in each band."},
+                     "sampled. PFI measures how far the run's fitness falls when "
+                     "a detector's score column is shuffled, so unlike SHAP and "
+                     "ALE it uses the labels and reports reliance on the detector "
+                     "rather than influence on the output. ALE sweeps a detector "
+                     "across its own observed score range in narrow bands and "
+                     "accumulates how far the meta-learner's output moves, using "
+                     "only the rows that fall in each band."},
             {"text": "The three measures are magnitudes. Because they might "
                      "disagree, they are merged by the same kind of Markov rank "
                      "aggregation the single-model branch uses, giving one "
-                     "overall weight ranking."},
+                     "overall weight ranking. SHAP is measured on a fixed sample "
+                     "of 200 test rows where PFI and ALE use every row, a sample "
+                     "size at which the ranking was verified stable."},
         )},
         {"id": "ga-direction", "title": "The sign and how well it is supported",
          "blocks": (
@@ -399,10 +403,11 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "the rival was stronger on. The stage also reports how "
                      "often each detector was actually selected, because μ only "
                      "moves in windows where the arm was pulled, so the score "
-                     "reflects exposure as well as quality. Regimes here are "
-                     "stretches where one detector held the highest score, read "
-                     "straight off the leader at each window after a short "
-                     "warm-up in which every score is still zero."},
+                     "reflects exposure as well as quality. A streak is a "
+                     "stretch of consecutive windows where one detector held "
+                     "the highest score, read straight off the leader at each "
+                     "window after a short warm-up in which every score is "
+                     "still zero."},
             {"formula":
                 "contribution(k, c)     = Σ_{i ∈ c} μ_k[i]²\n"
                 "Σ_c contribution(k, c) = ‖μ_k‖²\n"
@@ -426,9 +431,9 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "reward, computed on the beliefs held before each window's "
                      "update so a regime describes the decision that was made "
                      "rather than its aftermath. Shorter changes of lead are "
-                     "recorded as blips and not treated as regimes. This regime "
-                     "is different from the previous one, so the both need not "
-                     "line up. Every choice the sampler made is also classified "
+                     "recorded as blips and not treated as regimes. A regime is "
+                     "not the same thing as the previous stage's streak, so the "
+                     "two need not line up. Every choice the sampler made is also classified "
                      "as exploitation, informed exploration or random "
                      "exploration, so the run can be read as behaviour and not "
                      "only as an outcome. Exploitation: The sampler picked the "
@@ -497,8 +502,11 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                  "for the figures."},
         {"lead": "Evaluation and ranking.",
          "text": "Every detector is then re-evaluated on the GAN-augmented "
-                 "series and ranked by F1 and by PR-AUC. Those rankings feed the "
-                 "robustness consensus."},
+                 "series and ranked by the run's own fitness. That ranking feeds "
+                 "the robustness consensus. A detector missing any term of the "
+                 "fitness is ranked last rather than scored on the terms that "
+                 "survived, which would compare it against the others on a "
+                 "different quantity."},
     ), "subsections": (
         {"id": "gan-explained", "title": "Exclusive wins and the surrogate trees",
          "blocks": (
@@ -652,10 +660,8 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
         )},
         {"id": "off-by-measured", "title": "Re-ranking on the augmented series", "blocks": (
             {"text": "Every detector is re-evaluated on the augmented series and "
-                     "ranked by F1 and by PR-AUC, contributing two rankings to "
-                     "the robustness consensus. When the fitness is F1 alone, or "
-                     "PR-AUC alone, the test ranks by that metric only and "
-                     "contributes one. The augmented data is used nowhere else in the "
+                     "ranked by the run's own fitness, contributing one ranking to "
+                     "the robustness consensus. The augmented data is used nowhere else in the "
                      "framework. The test needs at least 100 points and both "
                      "classes present in the original labels, and is skipped "
                      "rather than run on data that cannot support it."},
@@ -756,8 +762,9 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                  "signal degrades, so this measures whether a detector's "
                  "standing survives a dirtier version of the same series. Scores "
                  "are averaged across trials, so a detector that happens to win "
-                 "one trial does not carry the ranking. The averaged orderings "
-                 "enter the robustness consensus."},
+                 "one trial does not carry the ranking. The averaged scores are "
+                 "combined into the run's own fitness, and that one ordering "
+                 "enters the robustness consensus."},
         {"text": "The noise level is the standard deviation of the injected "
                  "Gaussian noise, fixed for the production ranking."},
     ), "subsections": (
@@ -776,7 +783,12 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "small decision tree fitted from noise level to winning "
                      "detector, which turns those crossovers into explicit "
                      "thresholds, together with per-detector trends summarising "
-                     "how steeply each degrades."},
+                     "how steeply each degrades. Both views read the run's own "
+                     "fitness, so the sweep has one winner rather than one per "
+                     "metric. Each metric the fitness combines is also drawn on "
+                     "its own curve, under the browse button, so a reader can "
+                     "see which term moved the fitness. Those curves rank "
+                     "nothing."},
         )},
         {"id": "mc-f1", "title": "Adaptive versus frozen thresholds", "blocks": (
             {"text": "Re-choosing each detector's best threshold at every noise "
@@ -803,13 +815,11 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
     )},
     {"id": "rank-aggregation", "title": "Rank aggregation",
      "stages": ("rank_aggregation_robust", "rank_aggregation_final"), "blocks": (
-        {"text": "The single-model branch produces seven orderings of the same "
-                 "detectors: six from the robustness tests and one from Thompson "
-                 "sampling. When the fitness is F1 alone, or PR-AUC alone, each "
-                 "test contributes one ranking instead of two and there are "
-                 "four. They may disagree, and each is about a different "
-                 "thing, so none can simply be preferred. Aggregation turns them "
-                 "into one consensus."},
+        {"text": "The single-model branch produces four orderings of the same "
+                 "detectors: one from each of the three robustness tests and one "
+                 "from Thompson sampling. They may disagree, and each is about a "
+                 "different thing, so none can simply be preferred. Aggregation "
+                 "turns them into one consensus."},
     ), "subsections": (
         {"id": "agg-method", "title": "From pairwise counts to a consensus", "blocks": (
             {"text": "For every pair of detectors, count how many of the input "
@@ -825,14 +835,12 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "places."},
         )},
         {"id": "agg-twice", "title": "The two aggregation stages", "blocks": (
-            {"text": "First to the six robustness rankings, or three when the "
-                     "fitness is F1 alone or PR-AUC alone, producing the "
-                     "robustness consensus. Then to that consensus together with "
-                     "the Thompson ranking, producing the final single-model "
-                     "order. The two-stage shape is deliberate: it keeps the "
-                     "three robustness tests from outvoting the adaptive branch "
-                     "six to one, or three to one when each test contributes a "
-                     "single ranking."},
+            {"text": "First to the three robustness rankings, one per test, "
+                     "producing the robustness consensus. Then to that consensus "
+                     "together with the Thompson ranking, producing the final "
+                     "single-model order. The two-stage shape is deliberate: it "
+                     "keeps the three robustness tests from outvoting the "
+                     "adaptive branch three to one."},
         )},
         {"id": "agg-explained", "title": "Influence, agreement and Borda", "blocks": (
             {"text": "The consensus is one ordering built from several possibly "
@@ -889,12 +897,12 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     ),
     "ga_combination": (
         ("SHAP", "How much the meta-learner's anomaly probability moves when a "
-                 "detector's actual output is revealed in place of its average "
+                 "detector's actual output is revealed in place of its median "
                  "output."),
         ("PFI", "How far fitness drops when that detector's scores are "
                 "shuffled; label-based."),
         ("ALE", "The change in the meta-learner's anomaly probability as the "
-                "detector's own score is gradually increased."),
+                "detector's own score is swept across its range."),
         ("Sign", "The direction of that change: positive means the probability "
                  "rises, negative means it falls."),
     ),
@@ -904,8 +912,8 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
         ("Contribution", "The exact amount a single context feature added to that score."),
         ("Margin", "The gap between two detectors' scores; it traces back to each "
                    "context feature, whose contributions sum to it exactly."),
-        ("Regime", "A stretch of windows in which one detector held the highest "
-                   "score ‖μ‖²."),
+        ("Streak", "A stretch of consecutive windows in which one detector held "
+                   "the highest score ‖μ‖²."),
     ),
     "thompson_sampling": (
         ("Expected reward", "A detector's predicted reward μᵀx for a window, its "
@@ -944,6 +952,8 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "monte_carlo": (
         ("Noise level", "The standard deviation of the Gaussian noise injected "
                         "into the data."),
+        ("Fitness", "The weighted combination of metrics the run configuration "
+                    "chose."),
     ),
     "off_by_threshold": (
         ("Exclusive win", "A point the top-ranked detector classified correctly "
@@ -970,6 +980,13 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     ),
 }
 STAGE_TERMS["rank_aggregation_final"] = STAGE_TERMS["rank_aggregation_robust"]
+
+# Qualifies the terms list where every number in it is a position rather than a
+# score, which reads backwards without saying so.
+TERMS_NOTES: Dict[str, str] = {
+    "ga_combination": "Lower rank = higher score",
+    "rank_aggregation_robust": "Lower rank = higher score",
+}
 
 def split_info(raw: str) -> Tuple[Optional[str], str]:
     """`"INFO: glossary\\n\\nnarrative"` -> `("glossary", "narrative")`.
@@ -1188,6 +1205,8 @@ def _attach_narrated_regimes(regimes: List[Dict[str, Any]], narrative: str,
 
 def _headline_pick(output: Dict[str, Any]) -> Optional[str]:
     """The one detector a stage put first, whatever the stage calls that key."""
+    # `top_pick_f1` is Monte Carlo's key on result trees written before the
+    # stage published a single fitness ranking.
     for key in ("top_pick", "winner", "top_pick_f1"):
         value = output.get(key)
         if isinstance(value, str) and value and value != "not_available":
@@ -1263,6 +1282,7 @@ def build_payload(dataset: str, entity: str) -> Optional[Dict[str, Any]]:
             # The glossary lives on the documentation page; the card keeps the
             # one-line definitions and a pointer to the section holding it.
             "terms": [list(pair) for pair in STAGE_TERMS.get(stage["key"], ())],
+            "terms_note": TERMS_NOTES.get(stage["key"]),
             "doc_section": DOC_SECTION_BY_STAGE.get(stage["key"]),
             "question": (ir_doc or {}).get("question"),
             "output": output,
@@ -1277,6 +1297,7 @@ def build_payload(dataset: str, entity: str) -> Optional[Dict[str, Any]]:
         }
         if stage.get("regimes") and ir_doc:
             entry["regimes"] = _regimes_from_ir(ir_doc)
+            entry["regime_noun"] = stage.get("regime_noun", "Regime")
             _attach_narrated_regimes(entry["regimes"], narrative, ir_doc)
         stages_out.append(entry)
 

@@ -1690,7 +1690,7 @@ def explain_ga_selection(
 #  Explains *how the meta-learner combines* the chosen detectors, by attributing
 #  its output to the per-detector score columns via two methods, then merging
 #  their rankings with a Markov-chain rank aggregation:
-#    • SHAP — exact interventional Shapley (single mean baseline), label-free.
+#    • SHAP — exact interventional Shapley (single median baseline), label-free.
 #    • PFI  — permutation feature importance measured as fitness drop, label-based.
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -1718,7 +1718,7 @@ def compute_meta_shap_values(
     The per-row Shapley matrix, shape (n_rows, n_features).
 
     Exact interventional Shapley values of the meta-learner over its detector
-    features, using a SINGLE mean baseline. For instance x and subset S of
+    features, using a SINGLE baseline row. For instance x and subset S of
     features, F(S) marginalises the absent features to the baseline:
     z_j = x_j if j in S else baseline_row[j].
     phi_i(x) = Σ_{S ⊆ F\\{i}} w(|S|) (F(S∪i) − F(S)),  w(s)=s!(d−s−1)!/d!.
@@ -1787,10 +1787,10 @@ def compute_meta_shap(
     Shapley efficiency makes the signed means decompose
     (mean prediction over the explained rows) − (prediction at the baseline
     row), so they measure how far the explained set sits from that one
-    synthetic row, not which way a feature pushes. With correlated detector
-    columns the baseline row is off-manifold and the signed mean can carry the
-    wrong sign outright. The sign now comes from compute_meta_ale instead;
-    this mode is retained only for the report's superseded comparison table.
+    reference row, not which way a feature pushes, and the signed mean can
+    carry the wrong sign outright. The sign comes from compute_meta_ale
+    instead; this mode is retained only for the report's superseded
+    comparison table.
     """
     d = len(feature_names)
     if d == 0 or X_explain.shape[0] == 0:
@@ -1903,8 +1903,7 @@ def compute_meta_ale(
     That locality is the whole point. It makes the measurement interventional,
     so it isolates this detector's own influence rather than everything
     correlated with it — while never asking the model about a combination that
-    does not occur, which is what breaks single-baseline SHAP and PDP on
-    correlated score columns.
+    does not occur, which is what breaks PDP on correlated score columns.
 
     Per feature:
       deltas          the per-bin local effects, in probability units
@@ -2428,7 +2427,11 @@ def explain_ga_combination(
         X_explain = X_test_f[idx]
     else:
         X_explain = X_test_f
-    baseline_row = X_train_f.mean(axis=0) if X_train_f.shape[0] > 0 else np.zeros(d)
+    # Median, not mean: detector scores are heavy-tailed, so a column mean lands in
+    # the upper quartile of every detector at once — a combination no real row has.
+    # From the test rows the values are explained on, not the training split.
+    baseline_row = (np.median(X_test_f, axis=0) if X_test_f.shape[0] > 0
+                    else np.zeros(d))
 
     # One 2^d enumeration, both summaries. These used to be two identical passes.
     phi = compute_meta_shap_values(predict_fn, X_explain, baseline_row, d)
@@ -2562,7 +2565,8 @@ def explain_ga_combination(
         f.write("\nFinal ranking (Markov): "
                 + " > ".join(f"{r}.{' = '.join(fs)}" for r, fs in groups) + "\n")
         f.write("\nNote: three magnitude measures feed the ranking. mean|SHAP| = the size of the "
-                "detector's influence on the meta-learner's output (label-free); PFI = the fitness drop "
+                "detector's influence on the meta-learner's output (label-free, measured on a "
+                "fixed 200-row sample whereas PFI and ALE use every row); PFI = the fitness drop "
                 "when its column is shuffled (label-based); total |ALE| = how far the output moves "
                 "in total as the detector sweeps its own observed range (label-free). A "
                 "Markov-chain rank aggregation over the pairwise preferences of all three gives "
@@ -2576,7 +2580,7 @@ def explain_ga_combination(
                 "still shown, marked as weakly supported — withholding it hid measured "
                 "negatives behind what looked like missing data.\n"
                 "\nSigned SHAP used to supply the sign and no longer does. It is measured "
-                "against one synthetic 'every detector at its average' row; when the detector "
+                "against one synthetic 'every detector at its median' row; when the detector "
                 "columns are correlated that row does not occur in the data, the meta-learner "
                 "extrapolates there, and the resulting sign can be wrong outright — a contrarian "
                 "detector scored a confident positive in testing. Its table above is retained "

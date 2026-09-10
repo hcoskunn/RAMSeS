@@ -324,8 +324,8 @@ _REGIME_SET_LABELS = {
         "is not a share of the reward and does not sum to it."),
     "ranking_per_regime": (
         "Ranking score",
-        " Weights as at the last window of the regime; the score is cumulative, "
-        "so this is the state reached by then, not what the regime itself added."),
+        " Weights as at the last window of the streak; the score is cumulative, "
+        "so this is the state reached by then, not what the streak itself added."),
 }
 
 
@@ -373,31 +373,47 @@ def _monte_carlo(ds, ent):
     headline, gallery = [], []
     # Plain is the default: the un-annotated figure is the one that belongs in a
     # thesis, and the annotated version is a click away.
-    # One variant per metric the run swept: a metric its fitness did not name
-    # writes no figure, and `_variants` drops the patterns that match nothing.
-    curve_variants = _variants(
-        d,
-        ["*_MonteCarlo_noise_curves_F1_plain.png",
-         "*_MonteCarlo_noise_curves_PRAUC_plain.png",
-         "*_MonteCarlo_noise_curves_VUS_plain.png"],
-        ["F1", "PR-AUC", "VUS"])
-    if curve_variants:
+    # The stage ranks on the fitness, so that curve leads. The per-metric ones
+    # below are the terms it is built from.
+    _COMPONENT_CURVES = (
+        ("*_MonteCarlo_noise_curves_F1_plain.png", "F1"),
+        ("*_MonteCarlo_noise_curves_PRAUC_plain.png", "PR-AUC"),
+        ("*_MonteCarlo_noise_curves_VUS_plain.png", "VUS"))
+    fitness_curve = _ls(d, "*_MonteCarlo_noise_curves_Fitness_plain.png")
+    component_curves = _variants(d, [p for p, _ in _COMPONENT_CURVES],
+                                 [t for _, t in _COMPONENT_CURVES])
+    if fitness_curve:
+        headline.append(_fig(
+            fitness_curve[0], "Score against noise level",
+            "Each detector's fitness as injected noise grows."))
+    elif component_curves:
+        # A result tree written before the stage collapsed to one ranking has
+        # no fitness curve, only the per-metric set it ranked by.
         headline.append({"title": "Score against noise level",
                          "caption": "Each detector's score as injected noise grows.",
-                         "variants": curve_variants, "default": 0})
+                         "variants": component_curves, "default": 0})
+        component_curves = []
     # Browse-only: the plain curves above are the ones that belong in a figure,
     # these are for digging.
     #
-    # Three of what the stage writes are deliberately NOT offered. The pipeline
-    # still generates them — they are on disk for anyone who wants them — but
-    # the annotated F1 and PR-AUC curves are the same data as the plain pair in
-    # the headline with labels drawn on top, and the annotated fixed-threshold
-    # curve is superseded by its own plain version two lines below it. Offering
-    # all seven made the reader choose between near-duplicates.
+    # The annotated curves are deliberately NOT offered. The pipeline still
+    # generates the annotated fitness pair — they are on disk for anyone who
+    # wants them — but they are the same data as the plain version in the
+    # headline with win-regions drawn over it, and the annotated fixed-threshold
+    # curve is superseded by its own plain version below. Offering all of them
+    # made the reader choose between near-duplicates.
+    for figure in component_curves:
+        gallery.append(dict(
+            figure, title=f"{figure['title']} against noise level",
+            caption=f"The {figure['title']} term on its own, one of the metrics "
+                    f"the fitness above combines."))
     for pattern, title in (
+            ("*_MonteCarlo_noise_curves_Fitness_fixed_plain.png",
+             "Fitness at a fixed threshold"),
             ("*_MonteCarlo_noise_curves_F1_fixed_plain.png",
              "F1 at a fixed threshold"),
             ("*_MonteCarlo_ranking_stability.png", "Ranking stability"),
+            ("*_MonteCarlo_surrogate_tree_Fitness.png", "Surrogate tree"),
             ("*_MonteCarlo_surrogate_tree_F1.png", "Surrogate tree (F1)"),
             ("*_MonteCarlo_surrogate_tree_PRAUC.png", "Surrogate tree (PR-AUC)"),
             ("*_MonteCarlo_surrogate_tree_VUS.png", "Surrogate tree (VUS)")):

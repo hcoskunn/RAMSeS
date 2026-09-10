@@ -284,6 +284,12 @@ ALL_ANOMALY_TYPES: Tuple[str, ...] = (
 
 DEFAULT_ANOMALY_TYPE = "spikes"
 
+# Scattered spikes at this rate keep both halves of the default fitness
+# meaningful. Higher rates saturate the point-adjusted metrics: recall pins
+# at a label-determined constant, so F1 stops separating detectors and
+# PR-AUC collapses to exactly 0 on a contiguous injected block.
+DEFAULT_ANOMALY_RATE = 0.2
+
 # Metrics the fitness function is built from. One or more may be chosen, each
 # with a weight; the fitness is their weighted mean, and it is what the GA,
 # Thompson and the final ensemble-vs-single comparison all maximise.
@@ -354,10 +360,10 @@ def parse_anomaly_type(text: Optional[str]) -> str:
 
 
 def parse_anomaly_rate(text) -> Optional[float]:
-    """Target fraction of timesteps to label anomalous, or None for the
-    per-type defaults in Model_Selection/anomaly_parameters.py."""
+    """Target fraction of timesteps to label anomalous, DEFAULT_ANOMALY_RATE
+    when unset."""
     if text is None or str(text).strip() == "":
-        return None
+        return DEFAULT_ANOMALY_RATE
     try:
         rate = float(text)
     except (TypeError, ValueError):
@@ -373,9 +379,9 @@ def parse_decision_metrics(text) -> Union[Tuple[str, ...], Dict[str, float]]:
 
     Accepts 'f1', 'f1,pr_auc' and 'f1:0.5,pr_auc:0.3,vus:0.2'. A metric with no
     explicit weight counts 1; weights are normalised, so they need not sum to 1.
-    A zero weight drops its metric, which is what keeps `ranking_metrics_for`
-    honest. Uniform weights collapse back to a plain tuple so the common case
-    stays one spelling.
+    A zero weight drops its metric, so it is never computed and never enters
+    the fitness. Uniform weights collapse back to a plain tuple so the common
+    case stays one spelling.
     """
     if text is None or (isinstance(text, str) and not text.strip()):
         return DEFAULT_DECISION_METRICS
@@ -454,8 +460,8 @@ def metrics_required(spec) -> Tuple[str, ...]:
     if isinstance(spec, str):
         spec = [spec]
     if isinstance(spec, dict):
-        # A zero weight means "not chosen", so it must not reach
-        # `ranking_metrics_for` as a metric the run cares about.
+        # A zero weight means "not chosen", so it must not be reported as a
+        # metric the run cares about.
         chosen = {str(m).lower().replace("-", "_")
                   for m, w in spec.items() if float(w) > 0}
     else:
@@ -500,28 +506,34 @@ def restrict_metrics(spec, metrics) -> Union[Tuple[str, ...], Dict[str, float]]:
     return {m: w / total for m, w in kept.items()}
 
 
-def combine_metrics(spec, scores: Dict[str, float]) -> float:
+def combine_metrics(spec, scores: Dict[str, float],
+                    renormalise: bool = True) -> float:
     """Raw metric values -> the single number every search maximises.
 
-    A metric that could not be computed drops out and the remaining weights are
-    renormalised, so one unavailable term (VUS on a short window) narrows the
-    fitness instead of voiding it. All of them missing gives nan.
+    With `renormalise` a metric that could not be computed drops out and the
+    remaining weights are renormalised, so one unavailable term (VUS on a short
+    window) narrows the fitness instead of voiding it. All of them missing gives
+    nan.
+
+    Pass `renormalise=False` when the result orders one candidate against
+    another: renormalising there would score two detectors on different metrics
+    and compare the results as though they were the same quantity. A missing
+    term then makes the whole fitness nan, which `Metrics.metrics.rank_key`
+    sorts last.
     """
     weights = metric_weights(spec)
     usable = {}
     for m, w in weights.items():
         value = float(scores[m])
-        if not math.isnan(value):
-            usable[m] = w
+        if math.isnan(value):
+            if not renormalise:
+                return float("nan")
+            continue
+        usable[m] = w
     total = sum(usable.values())
     if total <= 0:
         return float("nan")
     return sum(w * float(scores[m]) for m, w in usable.items()) / total
-
-
-def ranking_metrics_for(spec) -> Tuple[str, ...]:
-    """Which rankings the robustness stages publish: one per chosen metric."""
-    return metrics_required(spec)
 
 
 def parse_stages(text: Optional[str]) -> Set[str]:

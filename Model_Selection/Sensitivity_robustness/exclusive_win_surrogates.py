@@ -221,7 +221,7 @@ def plot_exclusive_win_importance(per_competitor, feature_names, *, directory: s
 
 
 def explain_exclusive_win_stage(
-    point_records, adjusted_y_pred_dict, true_labels, ranked_f1_names,
+    point_records, adjusted_y_pred_dict, true_labels, ranked_names,
     model_names, dataset, entity, explain: bool = False, *,
     stage_label: str,
     build_table,
@@ -256,9 +256,9 @@ def explain_exclusive_win_stage(
         return None
 
     models = table["model_names"]
-    # Winner = highest-ranked F1 model that actually has predictions; else first valid.
-    winner = next((m for m in (ranked_f1_names or []) if m in models), models[0])
-    ranked_valid = [m for m in (ranked_f1_names or []) if m in models]
+    # Winner = highest-ranked model that actually has predictions; else first valid.
+    winner = next((m for m in (ranked_names or []) if m in models), models[0])
+    ranked_valid = [m for m in (ranked_names or []) if m in models]
     runnerup = next((m for m in ranked_valid if m != winner), None)
 
     surrogate_note = ""
@@ -295,8 +295,8 @@ def explain_exclusive_win_stage(
         f.write(f"Models with predictions ({len(models)}): {', '.join(models)}\n")
         f.write(f"{points_label}: {table['n_points']}\n")
         f.write(f"Features: {', '.join(table['feature_names'])}\n")
-        f.write(f"F1 winner (production ranking): {winner}\n")
-        f.write("(Explains the actual production run; correctness is F1/prediction-side — "
+        f.write(f"Winner (production ranking): {winner}\n")
+        f.write("(Explains the actual production run; correctness is prediction-side — "
                 "PR-AUC has no per-point correct/incorrect. The production ranking is unchanged.)\n\n")
 
         if surrogate_note:
@@ -342,7 +342,7 @@ def explain_exclusive_win_stage(
 
     # ── Intermediate Representation (grounded LLM input; non-fatal) ─────────
     try:
-        ir.write_stage_ir(build_ir(dataset, entity, result, ranked_f1_names),
+        ir.write_stage_ir(build_ir(dataset, entity, result, ranked_names),
                           dataset, entity, ir_stem)
     except Exception as e:
         logger.error(f"{stage_label} IR emission failed (non-fatal): {e}")

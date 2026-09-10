@@ -138,17 +138,17 @@ class ArtifactTreeCase(unittest.TestCase):
                  "text": "NN_1's lead over NN_2 came mostly from context feature 3."},
                 {"id": "tsr.regime.0", "type": "regime", "subject": "NN_2",
                  "value": {"start": 10, "end": 71, "duration": 62, "leader": "NN_2"},
-                 "text": "Regime 0 (windows 10 to 71, 62 windows) was led by NN_2."},
+                 "text": "Streak 0 (windows 10 to 71, 62 windows) was led by NN_2."},
             ]))
         _write(self.nl_dir / "nl_thompson_ranking.txt",
                _nl("The ranking score is the sum of every squared weight.",
                    "Ranked by the size of its mean vector, NN_1 scored "
                    "0.559322, ahead of NN_2 by 0.000410. NN_1's score is built "
-                   "mostly from context feature 3 (41.0%). Regime 0 (windows 10 to 71, "
+                   "mostly from context feature 3 (41.0%). Streak 0 (windows 10 to 71, "
                    "62 windows) was led by NN_2."))
 
         _write(self.ir_dir / "ir_monte_carlo.json", _ir(
-            "monte_carlo", output={"top_pick_f1": "LOF_1", "top_pick_pr": "LOF_1"},
+            "monte_carlo", output={"top_pick": "LOF_1"},
             caveats=[{"id": "mc.c", "type": "caveat", "subject": "x", "value": None,
                       "text": "Degenerate folds."}]))
         _write(self.nl_dir / "nl_monte_carlo.txt",
@@ -161,21 +161,21 @@ class ArtifactTreeCase(unittest.TestCase):
                        {"id": "ra_robust.output.top", "type": "stage_output",
                         "subject": "LOF_1", "value": "LOF_1",
                         "text": "Its first-ranked detector is LOF_1."},
-                       {"id": "ra_robust.source.GAN_F1.role", "type": "source_role",
-                        "subject": "GAN_F1",
+                       {"id": "ra_robust.source.GAN.role", "type": "source_role",
+                        "subject": "GAN",
                         "value": {"influence_rank": 1, "agreement_rank": 1,
                                   "borda_rank": 1},
-                        "text": "GAN_F1 shaped the consensus most."},
-                       {"id": "ra_robust.source.GAN_PR_AUC.role", "type": "source_role",
-                        "subject": "GAN_PR_AUC",
+                        "text": "GAN shaped the consensus most."},
+                       {"id": "ra_robust.source.Monte Carlo.role", "type": "source_role",
+                        "subject": "Monte Carlo",
                         "value": {"influence_rank": 5, "agreement_rank": 2,
                                   "borda_rank": 2},
-                        "text": "GAN_PR_AUC shaped the consensus second most."},
+                        "text": "Monte Carlo shaped the consensus second most."},
                    ]))
         _write(self.nl_dir / "nl_rank_aggregation_robust_0.txt",
                _nl("Influence compares rankings.",
-                   "Its first-ranked detector is LOF_1. GAN_F1 shaped the "
-                   "consensus most. GAN_PR_AUC shaped the consensus second most."))
+                   "Its first-ranked detector is LOF_1. GAN shaped the "
+                   "consensus most. Monte Carlo shaped the consensus second most."))
 
         _write(self.ir_dir / "ir_global_iter0.json", {
             "ir_version": "1.0", "stage": "global", "dataset": self.DATASET,
@@ -306,8 +306,8 @@ class TestBuildPayload(ArtifactTreeCase):
         p = artifacts.build_payload(self.DATASET, self.ENTITY)
         by = {s["key"]: s["terms"] for s in p["stages"]}
         self.assertEqual([t for t, _d in by["thompson_ranking"]],
-                         ["Score", "Share", "Contribution", "Margin", "Regime"])
-        self.assertEqual([t for t, _d in by["monte_carlo"]], ["Noise level"])
+                         ["Score", "Share", "Contribution", "Margin", "Streak"])
+        self.assertEqual([t for t, _d in by["monte_carlo"]], ["Noise level", "Fitness"])
         self.assertTrue(all(t and d for stage in by.values() for t, d in stage), by)
 
     def test_both_consensus_cards_define_the_same_vocabulary(self):
@@ -427,11 +427,11 @@ class TestBuildPayload(ArtifactTreeCase):
         on the narrative as written, which is the verbatim record."""
         p = artifacts.build_payload("SKAB", "7")
         s = next(x for x in p["stages"] if x["key"] == "thompson_ranking")
-        self.assertNotIn("Regime 0", s["full"])
+        self.assertNotIn("Streak 0", s["full"])
         self.assertIn("Ranked by the size of its mean vector", s["full"])
         self.assertGreater(s["words"], len(s["full"].split()))
         # And the regimes still carry their own narrated sentences.
-        self.assertTrue(any("Regime 0" in (r.get("narrated") or r["text"])
+        self.assertTrue(any("Streak 0" in (r.get("narrated") or r["text"])
                             for r in s["regimes"]))
 
     def test_case_insensitive_dataset_and_entity(self):
@@ -464,10 +464,26 @@ class TestBuildPayload(ArtifactTreeCase):
         self.assertEqual(ts["regimes"][0]["leader"], "NN_3")
         self.assertEqual((ts["regimes"][1]["start"], ts["regimes"][1]["end"]), (5, 18))
 
+    def test_each_thompson_stage_names_its_segments_its_own_way(self):
+        """The two stages segment different quantities, so the card must not
+        call both "Regime". The noun travels with the payload rather than
+        living as a stage-key check in result.js."""
+        p = artifacts.build_payload(self.DATASET, self.ENTITY)
+        by = {s["key"]: s for s in p["stages"]}
+        self.assertEqual(by["thompson_ranking"]["regime_noun"], "Streak")
+        self.assertEqual(by["thompson_sampling"]["regime_noun"], "Regime")
+
     def test_iteration_suffixed_stage_is_found(self):
         p = artifacts.build_payload(self.DATASET, self.ENTITY)
         ra = next(s for s in p["stages"] if s["key"] == "rank_aggregation_robust")
         self.assertEqual(ra["top_pick"], "LOF_1")
+
+    def test_headline_pick_still_reads_the_old_monte_carlo_key(self):
+        """Monte Carlo wrote `top_pick_f1` while it published one ranking per
+        metric. Result trees from then must keep their headline."""
+        self.assertEqual(artifacts._headline_pick({"top_pick": "LOF_1"}), "LOF_1")
+        self.assertEqual(artifacts._headline_pick({"top_pick_f1": "NN_3"}), "NN_3")
+        self.assertIsNone(artifacts._headline_pick({}))
 
     def test_missing_stage_carries_its_reason(self):
         """A stage the run never explained is listed WITH a reason.
@@ -815,10 +831,10 @@ class TestCaveatsLeaveThePros(unittest.TestCase):
         ir_doc = {"ir_version": "1.0", "stage": "rank_aggregation_robust",
                   "dataset": "DS", "entity": "e1", "output": {},
                   "evidence": [
-                      {"id": "s1", "type": "source_role", "subject": "GAN_F1",
+                      {"id": "s1", "type": "source_role", "subject": "GAN",
                        "value": {"influence_rank": 1, "agreement_rank": 1,
                                  "borda_rank": 1},
-                       "text": "GAN_F1 shaped the consensus most."}],
+                       "text": "GAN shaped the consensus most."}],
                   "caveats": [{"id": "c", "type": "caveat", "subject": "agg",
                                "value": None,
                                "text": "The consensus ranking is produced by "
@@ -828,11 +844,11 @@ class TestCaveatsLeaveThePros(unittest.TestCase):
         # No stage_output sentence, so the lead falls back — and must skip the
         # caveat rather than introduce the table with its own limitation.
         narrative = ("The consensus ranking is produced by Markov-chain rank "
-                     "aggregation over the source rankings. GAN_F1 shaped the "
+                     "aggregation over the source rankings. GAN shaped the "
                      "consensus most.")
         out = summarize.summarize(narrative, stage="rank_aggregation_robust",
                                   ir_doc=ir_doc)
-        self.assertEqual(out["summary"], "GAN_F1 shaped the consensus most.")
+        self.assertEqual(out["summary"], "GAN shaped the consensus most.")
 
     def test_sharing_vocabulary_is_not_a_caveat(self):
         """An evidence sentence that happens to reuse a caveat's words must
@@ -1065,12 +1081,12 @@ class TestThompsonRankingStage(unittest.TestCase):
                      "for NN_2."},
             {"id": "tsr.regimes.summary", "type": "regime_summary",
              "subject": "regimes", "value": {},
-             "text": "Leadership splits into 2 regimes led by 2 detectors."},
+             "text": "Leadership splits into 2 streaks led by 2 detectors."},
         ]
         for i, (lead, a, b) in enumerate((("NN_2", 10, 71), ("NN_1", 72, 172))):
             atoms.append({"id": f"tsr.regime.{i}", "type": "regime", "subject": lead,
                           "value": {"start": a, "end": b, "leader": lead},
-                          "text": f"Regime {i} (windows {a} to {b}) was led by {lead}."})
+                          "text": f"Streak {i} (windows {a} to {b}) was led by {lead}."})
         return _stage_ir("thompson_ranking", atoms)
 
     NARRATIVE = (
@@ -1078,19 +1094,19 @@ class TestThompsonRankingStage(unittest.TestCase):
         "of NN_2 by 0.000410. NN_1's score is built mostly from context feature 3 "
         "(50.0%). NN_1's lead over NN_2 came mostly from context feature 3 (0.091). "
         "NN_1 was selected in 23 of the 173 windows, against 30 for NN_2. "
-        "Leadership splits into 2 regimes led by 2 detectors. Regime 0 (windows "
-        "10 to 71) was led by NN_2. Regime 1 (windows 72 to 172) was led by NN_1.")
+        "Leadership splits into 2 streaks led by 2 detectors. Streak 0 (windows "
+        "10 to 71) was led by NN_2. Streak 1 (windows 72 to 172) was led by NN_1.")
 
     def test_summary_stops_after_the_answer(self):
         """The default view answers the question — winner, the context features its
         score is built from, which context features decided the margin — and stops.
-        The selection counts, the regime walk and the limitations are all
+        The selection counts, the streak walk and the limitations are all
         supporting detail behind the click."""
         out = summarize.summarize(self.NARRATIVE, stage="thompson_ranking",
                                   ir_doc=self._ir())
         self.assertIn("built mostly from context feature 3", out["summary"])
         self.assertIn("lead over NN_2", out["summary"])
-        for held_back in ("Regime 0", "Regime 1", "Leadership splits",
+        for held_back in ("Streak 0", "Streak 1", "Leadership splits",
                           "was selected in"):
             self.assertNotIn(held_back, out["summary"])
         # Unlike its sibling this stage keeps a full-text disclosure, which is
@@ -1098,16 +1114,16 @@ class TestThompsonRankingStage(unittest.TestCase):
         self.assertIsNone(out.get("extended_in"))
         self.assertFalse(out["is_full"])
 
-    def test_the_regime_walk_appears_beside_its_plots_and_nowhere_else(self):
-        """The regime sentences are held back from the summary AND from the
-        full-text view: they belong next to their own per-regime figures, and a
+    def test_the_streak_walk_appears_beside_its_plots_and_nowhere_else(self):
+        """The streak sentences are held back from the summary AND from the
+        full-text view: they belong next to their own per-streak figures, and a
         card that also lists them under "read the full explanation" is showing
         the same eleven sentences twice, the second time without the plots."""
         out = summarize.summarize(self.NARRATIVE, stage="thompson_ranking",
                                   ir_doc=self._ir())
         extended = out["extended"]
-        self.assertNotIn("Regime 0", extended)
-        self.assertNotIn("Regime 1", extended)
+        self.assertNotIn("Streak 0", extended)
+        self.assertNotIn("Streak 1", extended)
         # Everything else the summary held back is exactly what the click buys.
         self.assertIn("Leadership splits", extended)
         self.assertIn("was selected in", extended)
@@ -1144,7 +1160,10 @@ class TestThompsonRankingStage(unittest.TestCase):
 
     def test_regime_atoms_are_found_despite_the_different_prefix(self):
         """One regex serves `ts.regime.N` and `tsr.regime.N`; a prefix-anchored
-        one would silently find nothing here and every regime would vanish."""
+        one would silently find nothing here and every streak would vanish.
+
+        The narrative here says "Streak N" while the ids say `regime`, so this
+        also pins that the sentence anchor accepts both nouns."""
         regimes = artifacts._regimes_from_ir(self._ir())
         self.assertEqual([r["index"] for r in regimes], [0, 1])
         artifacts._attach_narrated_regimes(regimes, self.NARRATIVE, self._ir())
@@ -1202,7 +1221,7 @@ class TestSummaryTables(unittest.TestCase):
         table = out["table"]
         self.assertEqual(table["columns"],
                          ["Weight rank", "Detector", "|SHAP| rank", "PFI rank",
-                          "ALE rank", "Sign"])
+                          "|ALE| rank", "Sign"])
         self.assertEqual(table["rows"][0], [1, "LOF_1", 2, 1, 1, "positive"])
         # A thinly-evidenced sign is still SHOWN. How well it is supported is a
         # caveat and lives in the caveats section — never a second column here.
@@ -1219,27 +1238,66 @@ class TestSummaryTables(unittest.TestCase):
         ir_doc = _stage_ir("rank_aggregation_robust", [
             {"id": "t", "type": "stage_output", "subject": "LOF_1", "value": {},
              "text": "Its first-ranked detector is LOF_1."},
-            {"id": "s1", "type": "source_role", "subject": "GAN_F1",
+            {"id": "s1", "type": "source_role", "subject": "GAN",
              "value": {"influence_rank": 1, "agreement_rank": 1,
                        "borda_rank": 1},
-             "text": "GAN_F1 shaped the consensus most."},
-            {"id": "s2", "type": "source_role", "subject": "GAN_PR_AUC",
+             "text": "GAN shaped the consensus most."},
+            {"id": "s2", "type": "source_role", "subject": "Monte Carlo",
              "value": {"influence_rank": 5, "agreement_rank": 2,
                        "borda_rank": 2},
-             "text": "GAN_PR_AUC shaped the consensus second most."},
+             "text": "Monte Carlo shaped the consensus second most."},
         ])
-        out = summarize.summarize("Its first-ranked detector is LOF_1. GAN_F1 "
+        out = summarize.summarize("Its first-ranked detector is LOF_1. GAN "
                                   "shaped the consensus most.",
                                   stage="rank_aggregation_robust", ir_doc=ir_doc)
         table = out["table"]
         self.assertEqual(table["columns"], ["Overall Rank", "Source",
                                             "Influence Rank", "Agreement Rank"])
-        self.assertEqual(table["rows"][0], [1, "GAN_F1", 1, 1])
-        self.assertEqual(table["rows"][1], [2, "GAN_PR_AUC", 5, 2])
+        self.assertEqual(table["rows"][0], [1, "GAN", 1, 1])
+        self.assertEqual(table["rows"][1], [2, "Monte Carlo", 5, 2])
         # The lead answers what this stage is asked — which source shaped the
         # consensus — and is the narrative's own sentence, not invented copy.
         # It is picked by atom type, so it holds wherever the narrator put it.
-        self.assertEqual(out["summary"], "GAN_F1 shaped the consensus most.")
+        self.assertEqual(out["summary"], "GAN shaped the consensus most.")
+
+    def test_a_source_name_without_an_underscore_still_anchors(self):
+        """Sources are named for display now — "GAN", "Off-by-threshold",
+        "Monte Carlo" — and none carries the underscore the detector-token
+        pattern needs. Unmatched, every source sentence attributed to nothing
+        and the card lost its lead."""
+        atoms = [{"id": "top", "type": "stage_output", "subject": "LOF_1",
+                  "value": "LOF_1", "text": "Its first-ranked detector is LOF_1."}]
+        names = ["GAN", "Off-by-threshold", "Monte Carlo"]
+        for i, n in enumerate(names):
+            atoms.append({"id": f"ra_robust.source.{n}.role", "type": "source_role",
+                          "subject": n, "value": {"borda_rank": i + 1},
+                          "text": f"{n} shaped the consensus {i + 1}."})
+        ir_doc = {"stage": "rank_aggregation_robust", "evidence": atoms}
+        narrative = " ".join(a["text"] for a in atoms)
+        got = [(a or {}).get("id") for _s, a in
+               summarize.attribute_sentences(narrative, ir_doc)]
+        self.assertEqual(got, ["top"] + [f"ra_robust.source.{n}.role" for n in names])
+
+    def test_a_source_name_matches_on_word_boundaries_only(self):
+        """"GAN" lowercased sits inside "began" and "elegant"; a substring test
+        would hand those sentences a name they do not carry."""
+        atoms = [{"id": "s", "type": "source_role", "subject": "GAN",
+                  "value": {}, "text": "GAN shaped the consensus most."}]
+        pattern = summarize._subject_pattern(atoms)
+        self.assertEqual(pattern.findall("GAN led it"), ["GAN"])
+        for miss in ("began the sweep", "an organ", "elegant"):
+            self.assertEqual(pattern.findall(miss), [], miss)
+
+    def test_an_ordinary_word_subject_never_becomes_a_name(self):
+        """Only the atom types whose subject IS a source name feed the matcher.
+        Thompson's summary atom is subject "regimes"; matching that everywhere
+        would rescore every sentence naming one."""
+        atoms = [{"id": "a", "type": "regime_summary", "subject": "regimes",
+                  "value": {}, "text": "The run splits into 2 streaks."},
+                 {"id": "b", "type": "caveat", "subject": "sources",
+                  "value": {}, "text": "Aggregated over the source rankings."}]
+        self.assertIsNone(summarize._subject_pattern(atoms))
+
 
 class TestSummaryTableThroughThePayload(ArtifactTreeCase):
 
@@ -1249,9 +1307,9 @@ class TestSummaryTableThroughThePayload(ArtifactTreeCase):
         self.assertEqual(ra["summary_mode"], "table")
         self.assertFalse(ra["summary_is_full"])
         self.assertEqual([r[1] for r in ra["summary_table"]["rows"]],
-                         ["GAN_F1", "GAN_PR_AUC"])
+                         ["GAN", "Monte Carlo"])
         # The narrative stays available for the disclosure.
-        self.assertIn("GAN_PR_AUC shaped the consensus second most", ra["full"])
+        self.assertIn("Monte Carlo shaped the consensus second most", ra["full"])
 
 
 # ── catalog ──────────────────────────────────────────────────────────────────
@@ -1674,6 +1732,35 @@ class TestPlots(unittest.TestCase):
         # The ranking group used to be rejected outright by a hardcoded gate.
         page = self.plots.gallery_page("SKAB", "7", "ts_ranking/ranking_per_window_50")
         self.assertEqual(page["total"], 30)
+
+    def test_monte_carlo_leads_with_fitness_and_browses_its_components(self):
+        """The stage ranks on the fitness, so that curve is the headline and the
+        metrics it combines are browse-only."""
+        stem = "robustness/MonteCarlo/SKAB/7/SKAB_7_MonteCarlo_noise_curves"
+        for tag in ("Fitness_plain", "F1_plain", "PRAUC_plain"):
+            self._touch(f"{stem}_{tag}.png")
+        headline, gallery = self.plots._monte_carlo("SKAB", "7")
+        self.assertEqual([f["title"] for f in headline],
+                         ["Score against noise level"])
+        self.assertIn("Fitness_plain", headline[0]["src"])
+        self.assertNotIn("variants", headline[0])
+        titles = [f["title"] for f in gallery]
+        self.assertEqual(titles[:2], ["F1 against noise level",
+                                      "PR-AUC against noise level"])
+        self.assertIn("one of the metrics the fitness above combines",
+                      gallery[0]["caption"])
+
+    def test_a_pre_collapse_tree_still_leads_with_its_metric_curves(self):
+        """Result trees written while the stage ranked per metric have no
+        fitness curve. Those keep the old picker rather than an empty headline
+        and three gallery entries."""
+        stem = "robustness/MonteCarlo/SKAB/7/SKAB_7_MonteCarlo_noise_curves"
+        for tag in ("F1_plain", "PRAUC_plain"):
+            self._touch(f"{stem}_{tag}.png")
+        headline, gallery = self.plots._monte_carlo("SKAB", "7")
+        self.assertEqual([v["title"] for v in headline[0]["variants"]],
+                         ["F1", "PR-AUC"])
+        self.assertEqual([f["title"] for f in gallery], [])
 
     def test_per_regime_captions_say_which_quantity_they_show(self):
         """Three per-regime sets cover the same window range and show three
