@@ -425,8 +425,8 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         except (TypeError, ValueError):
             spans.setdefault(lname, 0)
 
-    # This stage explains the expected reward mu^T x, so its headline is the
-    # detector that held the highest expected reward longest — not the ranking
+    # This stage explains the estimated expected reward mu^T x_t, so its headline is the
+    # detector that held the highest estimated expected reward longest — not the ranking
     # by ||mu||^2, which is the sibling card's subject and was this atom's score.
     # Carrying it here left the one sentence answering "which detector had the
     # highest chance of being chosen" reporting a quantity that does not bear on
@@ -442,7 +442,7 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         "n_regimes": len(regimes),
     }
 
-    # ── Lead: who was best by expected reward, and for how much of the run ──
+    # ── Lead: who was best by estimated expected reward, and for how much of the run ──
     if ranked_spans:
         held = ranked_spans[0][1]
         tied = [m for m, w in ranked_spans if w == held]
@@ -452,10 +452,10 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
             # "more than any other" is false when there is no other.
             more = "" if len(tied) == len(ranked_spans) else \
                 ", more than any other detector"
-            lead_txt = (f"{_oxford(tied)} each held the highest expected reward "
+            lead_txt = (f"{_oxford(tied)} each held the highest estimated expected reward "
                         f"in {held} of the {int(n_windows)} windows{more}.")
         else:
-            lead_txt = (f"{top_model} held the highest expected reward in {held} "
+            lead_txt = (f"{top_model} held the highest estimated expected reward in {held} "
                         f"of the {int(n_windows)} windows, more than any other "
                         f"detector")
             if len(ranked_spans) > 1:
@@ -509,14 +509,14 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         # Both narrated context feature facts are now slices of the same total — the raw
         # split of mu.x, whose parts sum to the prediction. `edge_favor_leader`
         # is that same split differenced against the runner-up, so its parts sum
-        # to the leader's margin in expected reward. Putting the edge in SHAP's
+        # to the leader's margin in estimated expected reward. Putting the edge in SHAP's
         # units made one sentence carry two incomparable quantities.
         supplying = [c for c, _ in (r.get("reward_raising") or [])][:2]
         favor = [c for c, _ in (r.get("edge_favor_leader") or [])][:1]
         runner = r.get("runner_up")
 
         # The claims stay distinct clauses, in parallel participles. They are
-        # different quantities: a SHARE of the expected reward, an EDGE over the
+        # different quantities: a SHARE of the estimated expected reward, an EDGE over the
         # runner-up in those same units, and a DEPARTURE from what the context
         # feature usually contributes, which is not a share of anything.
         #
@@ -529,7 +529,7 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         clauses: List[str] = []
         if supplying:
             clauses.append(f"{_oxford([_ch(c) for c in supplying])} raising its "
-                           f"expected reward the most")
+                           f"estimated expected reward the most")
         if favor and runner:
             # One context feature often does both jobs; "also" says so rather than
             # presenting the same context feature twice as two separate findings.
@@ -557,7 +557,7 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
              "supplying_channels": [(c, _val(v, 4)) for c, v in (r.get("reward_raising") or [])],
              "reducing_channels": [(c, _val(v, 4)) for c, v in (r.get("reward_lowering") or [])],
              # The edge, in contribution units: these sum to the leader's margin
-             # in expected reward over the runner-up.
+             # in estimated expected reward over the runner-up.
              "edge_channels": [(c, _val(v, 4)) for c, v in (r.get("edge_favor_leader") or [])],
              "edge_gap": _val(r.get("edge_gap"), 4),
              # SHAP's deviation split, kept machine-readable: it is what the
@@ -607,7 +607,7 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
                  "per_channel": [(c, _val(v, 4)) for c, v in
                                  sorted(totals.items(), key=lambda kv: -kv[1])]},
                 f"Across the regimes {top_model} led, {_ch(best[0])} contributed "
-                f"most to its expected reward.", order=150))
+                f"most to its estimated expected reward.", order=150))
             required.append("ts.winner.channels")
 
     # ── How the run was spent ──
@@ -648,16 +648,16 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         caveats.append(make_atom(
             "ts.caveat.single_channel", "caveat", "context features", int(n_context_features),
             "This dataset has a single context feature, so splitting a detector's "
-            "expected reward across context features carries no information — that one "
+            "estimated expected reward across context features carries no information — that one "
             "context feature necessarily accounts for all of it."))
 
     # Not "why did it rank the winner first" any more: the ranking criterion has
     # its own stage (build_thompson_ranking_ir), and this one never explained it
     # — its regimes, its SHAP and its context features are all about the per-window
-    # expected reward that drove selection. The question now names what the
+    # estimated expected reward that drove selection. The question now names what the
     # evidence below actually answers.
     question = ("When did each detector have the highest chance of being chosen "
-                "— which context features raised its expected reward above its rivals, "
+                "— which context features raised its estimated expected reward above its rivals, "
                 "and how much of the run was spent exploring rather than "
                 "exploiting?")
 
@@ -681,7 +681,7 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
     selection dynamics.
 
     Thompson Sampling ranks detectors by ||mu_k||^2, but build_thompson_ir
-    explains mu^T x — the expected reward that drove per-window selection. This
+    explains mu^T x_t — the estimated expected reward that drove per-window selection. This
     builder explains the ranking itself: ||mu||^2 splits exactly into one
     non-negative contribution per context feature, and the winner's margin over the
     runner-up splits exactly into one signed term per context feature.

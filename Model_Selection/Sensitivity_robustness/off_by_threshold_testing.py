@@ -380,9 +380,7 @@ def plot_offby_point_tree(info, winner, competitor, dataset, entity, feature_nam
     return ews.plot_exclusive_win_tree(
         info, winner, feature_names,
         directory=_offby_explain_dir(dataset, entity),
-        filename=f"{dataset}_{entity}_off_by_point_tree_{winner}_vs_{competitor}.png",
-        title=f"Off-by-threshold: where {winner} beats {competitor}\n"
-              f"(injected points the winner gets right and {competitor} misses)")
+        filename=f"{dataset}_{entity}_off_by_point_tree_{winner}_vs_{competitor}.png")
 
 
 def plot_offby_point_importance(per_competitor, dataset, entity, feature_names) -> None:

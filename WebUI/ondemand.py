@@ -102,7 +102,6 @@ def render_ranking_gap(dataset: str, entity: str, model_a: str, model_b: str,
         return None
 
     gap = [a[i] - b[i] for i in range(n)]
-    total = sum(gap)
     # Largest movers either way, then re-sorted so the bars run smallest to
     # largest — the same two steps plot_ranking_gap takes.
     ranked = sorted(range(n), key=lambda i: abs(gap[i]), reverse=True)[:max(1, top_n)]
@@ -123,8 +122,12 @@ def render_ranking_gap(dataset: str, entity: str, model_a: str, model_b: str,
             color=[_AHEAD if v >= 0 else _BEHIND for _c, v in pairs])
     ax.axvline(0, color="black", linewidth=0.7)
     ax.set_xlabel(r"Contribution to the gap in $\|\mu\|^2$")
-    ax.set_title(f"{model_a} vs {model_b}: where the {total:+.6f} margin came from\n"
-                 f"(green: {model_a} ahead, red: {model_b} ahead)")
+    # The bars are coloured by sign, so without this nothing on the figure says
+    # which detector a colour stands for.
+    from matplotlib.patches import Patch
+    ax.legend(handles=[Patch(color=_AHEAD, label=f"{model_a} ahead"),
+                       Patch(color=_BEHIND, label=f"{model_b} ahead")],
+              loc="lower right", frameon=False)
     ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
     if len(pairs) < n:
         fig.text(0.5, -0.02,
@@ -195,7 +198,7 @@ def _select_models(doc: Dict[str, Any], kind: str, t: int,
 
     Reproduces the eager plots' selection exactly, and can do so from the file
     alone because every criterion is a sum of a stored row: the top-k by
-    expected reward is the row sum of the `reward` set, the top-k by score is
+    estimated expected reward is the row sum of the `reward` set, the top-k by score is
     the row sum of the `ranking` set. Sorting is stable over the producer's
     registry order, so a tie breaks the way it did there.
     """

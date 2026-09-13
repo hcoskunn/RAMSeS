@@ -11,7 +11,7 @@
  * module only lays it out.
  */
 
-import { $, el, getJSON } from "./dom.js";
+import { $, el, getJSON, tildeNodes } from "./dom.js";
 import { jumpToHash, sideNavLayout } from "./sidenav.js";
 
 const root = $("#docs-root");
@@ -33,12 +33,13 @@ function blockNode(block) {
   }
   if (block.list) {
     return el(block.ordered ? "ol" : "ul", { class: "docs-list" },
-      block.list.map((item) => el("li", { text: item })));
+      block.list.map((item) => el("li", {}, tildeNodes(item))));
   }
   if (block.lead) {
-    return el("p", {}, el("strong", { text: block.lead }), ` ${block.text}`);
+    return el("p", {}, el("strong", { text: block.lead }), " ",
+              ...tildeNodes(block.text));
   }
-  return el("p", { text: block.text });
+  return el("p", {}, tildeNodes(block.text));
 }
 
 function proseBlocks(blocks) {

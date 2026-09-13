@@ -47,7 +47,7 @@ from Thompson_Sampling import (
     calculate_reward,
     rank_models,
     calculate_score,
-    compute_expected_rewards,
+    compute_estimated_expected_rewards,
     detect_regime_shifts,
     classify_selection,
     compute_shap_values,
@@ -57,7 +57,7 @@ from Thompson_Sampling import (
     aggregate_squared_per_context_feature,
     rank_gap_decomposition,
     leadership_regimes,
-    _top_k_models_by_expected_reward,
+    _top_k_models_by_estimated_expected_reward,
 )
 
 
@@ -368,7 +368,7 @@ class TestIntegration(unittest.TestCase):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 7.  compute_expected_rewards
+# 7.  compute_estimated_expected_rewards
 # ════════════════════════════════════════════════════════════════════════════
 
 class TestComputeExpectedRewards(unittest.TestCase):
@@ -376,26 +376,26 @@ class TestComputeExpectedRewards(unittest.TestCase):
     def test_dot_product_correctness(self):
         means = {"LOF": np.array([1.0, 2.0, 3.0]), "RNN": np.array([0.0, 0.0, 1.0])}
         context = np.array([1.0, 1.0, 1.0])
-        rewards = compute_expected_rewards(means, context)
+        rewards = compute_estimated_expected_rewards(means, context)
         self.assertAlmostEqual(rewards["LOF"], 6.0)
         self.assertAlmostEqual(rewards["RNN"], 1.0)
 
     def test_negative_reward_possible(self):
         means = {"M": np.array([-1.0, -1.0])}
         context = np.array([1.0, 1.0])
-        self.assertLess(compute_expected_rewards(means, context)["M"], 0.0)
+        self.assertLess(compute_estimated_expected_rewards(means, context)["M"], 0.0)
 
     def test_all_models_returned(self):
         model_names = ["LOF_1", "LOF_2", "CBLOF_1", "NN_1"]
         means = {m: np.zeros(4) for m in model_names}
         context = np.ones(4)
-        self.assertEqual(set(compute_expected_rewards(means, context).keys()), set(model_names))
+        self.assertEqual(set(compute_estimated_expected_rewards(means, context).keys()), set(model_names))
 
     def test_column_vector_mean_handled(self):
         """2-D column mean (d, 1) must give the same result as 1-D (d,)."""
         ctx = np.array([3.0, 4.0])
-        flat = compute_expected_rewards({"M": np.array([1.0, 2.0])}, ctx)["M"]
-        col  = compute_expected_rewards({"M": np.array([[1.0], [2.0]])}, ctx)["M"]
+        flat = compute_estimated_expected_rewards({"M": np.array([1.0, 2.0])}, ctx)["M"]
+        col  = compute_estimated_expected_rewards({"M": np.array([[1.0], [2.0]])}, ctx)["M"]
         self.assertAlmostEqual(flat, col)
 
 
@@ -502,7 +502,7 @@ class TestClassifySelection(unittest.TestCase):
         for _ in range(40):
             ctx = np.random.randn(d)
             chosen, was_random = sample_model(models, means, covs, epsilon=1.0, context=ctx)
-            expected = compute_expected_rewards(means, ctx)
+            expected = compute_estimated_expected_rewards(means, ctx)
             states.append(classify_selection(chosen, was_random, expected))
         self.assertTrue(all(s == "random" for s in states))
 
@@ -612,7 +612,7 @@ class TestRewardContribution(unittest.TestCase):
 
     def test_signed_both_ways(self):
         # mu and the normalised context can each be negative, so a context feature can
-        # pull the expected reward down. An all-positive split would be a bug.
+        # pull the estimated expected reward down. An all-positive split would be a bug.
         mu = np.array([1.0, 1.0, -1.0, -1.0])
         x = np.array([1.0, 1.0, 1.0, 1.0])
         np.testing.assert_array_almost_equal(
@@ -636,7 +636,7 @@ class TestRewardContribution(unittest.TestCase):
 
     def test_leader_minus_runner_sums_to_the_expected_reward_gap(self):
         """The regime prose's edge clause. Differencing two contribution splits
-        gives context feature terms that sum EXACTLY to the gap in expected reward the
+        gives context feature terms that sum EXACTLY to the gap in estimated expected reward the
         same regime reports — so the sentence's context feature and its headline number
         describe one quantity. SHAP's version of the comparison sums to a
         baseline-relative gap instead, which is a different number."""
@@ -665,9 +665,9 @@ class TestTopKByExpectedReward(unittest.TestCase):
         history = [{"A": np.array([0.1]), "B": np.array([9.0])},
                    {"A": np.array([0.1]), "B": np.array([9.0])}]
         self.assertEqual(
-            _top_k_models_by_expected_reward(final, contexts, 1), ["A"])
+            _top_k_models_by_estimated_expected_reward(final, contexts, 1), ["A"])
         self.assertEqual(
-            _top_k_models_by_expected_reward(final, contexts, 1,
+            _top_k_models_by_estimated_expected_reward(final, contexts, 1,
                                              means_per_context=history), ["B"])
 
     def test_falls_back_per_window_when_history_is_short(self):
@@ -676,7 +676,7 @@ class TestTopKByExpectedReward(unittest.TestCase):
         final = self._means(1.0, 1.0)
         history = [{"A": np.array([10.0]), "B": np.array([0.0])}]
         self.assertEqual(
-            _top_k_models_by_expected_reward(final, contexts, 2,
+            _top_k_models_by_estimated_expected_reward(final, contexts, 2,
                                              means_per_context=history),
             ["A", "B"])
 

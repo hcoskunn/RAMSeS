@@ -57,6 +57,7 @@ sys.modules["sklearn.svm"].SVC = type("SVC", (), {})
 sys.modules["Metrics.metrics"].prauc = lambda *a, **k: 0.5
 sys.modules["Metrics.metrics"].f1_score = lambda *a, **k: (0.5,) * 7
 sys.modules["Metrics.metrics"].vus_score = lambda *a, **k: 0.5
+sys.modules["Metrics.metrics"].vus_window = lambda *a, **k: 100
 sys.modules["Utils.model_selection_utils"].evaluate_model = lambda *a, **k: None
 sys.modules["Utils.model_selection_utils"].ScoringTimeout = type(
     "ScoringTimeout", (Exception,), {})
@@ -487,27 +488,26 @@ class TestCombination(unittest.TestCase):
         self.assertEqual(scores["A"], max(scores.values()))  # highest stationary prob
         self.assertAlmostEqual(sum(scores.values()), 1.0)    # π is a distribution
 
-    def test_markov_plot_title_names_every_source_that_feeds_the_chain(self):
-        """The figure's label and the chain's actual inputs, checked against
-        each other. ALE was added to the aggregation but the title kept saying
-        "mean|SHAP| + PFI", so the plot claimed a two-source consensus beside a
+    def test_card_caption_names_every_source_that_feeds_the_chain(self):
+        """The label a reader sees and the chain's actual inputs, checked against
+        each other. ALE was added to the aggregation but the label kept saying
+        "mean|SHAP| + PFI", so the figure claimed a two-source consensus beside a
         panel drawing three bars — a caption drifting off its own figure is
         invisible to every other test here.
+
+        The label used to be drawn inside the figure; it is now the card's
+        caption, which is why this reads plots.py rather than the plotting code.
         """
         import inspect
         from Metrics import Ensemble_GA
         agg = inspect.getsource(Ensemble_GA.explain_ga_combination)
-        title = inspect.getsource(Ensemble_GA.plot_ga_combination)
         call = agg.split("markov_aggregate_importances(")[1].split(")")[0]
-        # Every source key handed to the aggregator must be recognisable in the
-        # title, and the count must match — a title naming four would be as
-        # wrong as one naming two.
         keys = re.findall(r'"([A-Za-z_]+)":', call)
         self.assertEqual(sorted(keys), ["ALE", "PFI", "SHAP_abs"])
-        shown = title.split('set_title("Final ranking')[1].split('")')[0]
+        manifest = open(os.path.join(_PROJECT_ROOT, "WebUI", "plots.py")).read()
+        shown = manifest.split('"Detector weighting",')[1].split("for p in")[0]
         for token in ("SHAP", "PFI", "ALE"):
             self.assertIn(token, shown, shown)
-        self.assertEqual(shown.count("+"), len(keys) - 1, shown)
 
     def test_markov_single_feature(self):
         scores, final = markov_aggregate_importances({"SHAP": {"only": 0.5}}, ["only"])
@@ -575,6 +575,58 @@ class TestCombination(unittest.TestCase):
             self.assertIsInstance(res[5], _FakeModel)
         finally:
             GA.train_meta_model_rf = orig
+
+    def test_score_ensemble_reads_only_the_ensembles_columns(self):
+        # The winner is scored on the test split after the search, and the meta-model
+        # it was validated with expects exactly its own columns, in algorithm_list order.
+        import Metrics.Ensemble_GA as GA
+
+        seen = {}
+
+        class _FakeModel:
+            def predict_proba(self, Z):
+                seen["X"] = np.array(Z)
+                n = len(Z)
+                return np.column_stack([np.zeros(n), np.full(n, 0.6)])
+
+        algos = ["A", "B", "C"]
+        rng = np.random.RandomState(0)
+        Xte = rng.rand(15, 3)
+        yte = (rng.rand(15) >= 0.5).astype(int)
+        f1, pr_auc, scores = GA.score_ensemble(_FakeModel(), ["C", "A"], algos, Xte, yte)
+
+        np.testing.assert_allclose(seen["X"], Xte[:, [0, 2]])
+        self.assertEqual(len(scores), 15)
+        self.assertFalse(np.isnan(f1) or np.isnan(pr_auc))
+
+    def test_score_ensemble_sweeps_the_threshold_on_the_scored_rows(self):
+        # The single-model branch takes its best threshold over the rows it is
+        # measured on, so the ensemble has to as well or the two sides of the
+        # final decision are not comparable.
+        import Metrics.Ensemble_GA as GA
+
+        class _FakeModel:
+            def predict_proba(self, Z):
+                column = np.array([0.35, 0.35, 0.1, 0.1])
+                return np.column_stack([1.0 - column, column])
+
+        def _real_f1(y_pred, y_true):
+            tp = int(np.sum((y_pred == 1) & (y_true == 1)))
+            fp = int(np.sum((y_pred == 1) & (y_true == 0)))
+            fn = int(np.sum((y_pred == 0) & (y_true == 1)))
+            tn = int(np.sum((y_pred == 0) & (y_true == 0)))
+            f1 = 0.0 if not tp else 2 * tp / (2 * tp + fp + fn)
+            return f1, 0.0, 0.0, tp, tn, fp, fn
+
+        orig = GA.f1_score
+        GA.f1_score = _real_f1
+        try:
+            f1, _, _ = GA.score_ensemble(
+                _FakeModel(), ["A"], ["A"], np.zeros((4, 1)), np.array([1, 1, 0, 0]))
+        finally:
+            GA.f1_score = orig
+        # A fixed 0.5 cut predicts nothing and scores 0; the sweep finds the cut below 0.35.
+        self.assertEqual(f1, 1.0)
 
     def test_explain_combination_writes_outputs(self):
         algorithm_list = ["A", "B", "C"]

@@ -150,16 +150,13 @@ def _ga_selection(ds, ent):
 def _ga_combination(ds, ent):
     d = _dir_for(TREE_GA, ds, ent)
     headline = [_fig(p, "Detector weighting",
-                     "Absolute SHAP, PFI and total ALE — the three magnitude measures "
-                     "that feed the Markov consensus ranking. All are magnitudes; "
-                     "the sign is in the ALE figure below.")
+                     "Absolute SHAP, PFI and total ALE. All are magnitudes; the "
+                     "signs are in the ALE figure.")
                 for p in _ls(d, "ga_combination_importance_*.png")]
     # Its own figure since the two were split apart; the caption is what still
     # ties it to the weighting figure above.
     headline += [_fig(p, "Consensus ranking",
-                      "The Markov stationary probability each detector ends up "
-                      "with, as the result of the three measures on the previous "
-                      "plot.")
+                      "The Markov stationary probability each detector ends up with.")
                  for p in _ls(d, "ga_combination_ranking_*.png")]
     # Both ALE figures live under the same prefix, so they are split by name
     # rather than by glob: the dataset name follows the prefix and could itself
@@ -171,8 +168,8 @@ def _ga_combination(ds, ent):
                ([_fig(binned[0], "Bin edges marked")] if binned else [])
     if variants:
         headline.append({
-            "title": "How each detector moves the meta-learner",
-            "caption": "One accumulated-effect curve per detector, over that "
+            "title": "ALE curves",
+            "caption": "How each detector moves the meta-learner, over that "
                        "detector's own score range.",
             "variants": variants, "default": 0})
     return headline, []
@@ -202,9 +199,8 @@ def _thompson(ds, ent):
                             ["Smoothed", "Raw"])
         if rewards:
             headline.append({
-                "title": "Expected rewards",
-                "caption": "Per-window expected reward for every detector. "
-                           "Smoothing is what regime detection reads; the raw "
+                "title": "Estimated expected rewards over the run",
+                "caption": "Smoothed is what regime detection reads; the raw "
                            "signal is the same quantity unsmoothed.",
                 "variants": rewards, "default": 0})
         for pattern, title, caption in (
@@ -217,9 +213,9 @@ def _thompson(ds, ent):
         avg = _variants(d, [f"reward_average_top3_{it}.png", f"reward_average_all_{it}.png"],
                         ["Top 3 detectors", "All detectors"])
         if avg:
-            headline.append({"title": "Mean context feature contribution across all windows",
-                             "caption": "Each context feature's own share of a detector's expected "
-                                        "reward, averaged over every window.",
+            headline.append({"title": "Estimated expected reward decomposition",
+                             "caption": "Each context feature's own share of a detector's "
+                                        "estimated expected reward, averaged over all windows.",
                              "variants": avg, "default": 0})
         # Only the two mean|SHAP| figures browse. The posterior history, the
         # per-model panels and the two context feature comparisons all restate what the
@@ -260,9 +256,9 @@ def _ranking_pair_picker(ds, ent) -> Optional[Dict[str, Any]]:
         return None
     order = sorted(shares, key=lambda m: -sum(shares[m]))
     return {
-        "title": "What decided the top spot",
-        "caption": "The margin between two detectors, split context feature by context feature; "
-                   "these bars sum to the margin exactly.",
+        "title": "Ranking score decomposition",
+        "caption": "The margin between two detectors, split context feature by "
+                   "context feature.",
         "pair_picker": {
             "detectors": order,
             "endpoint": f"/api/plots/{ds}/{ent}/ranking-gap",
@@ -286,7 +282,8 @@ def _ts_ranking(ds, ent):
         return headline, gallery
     for pattern, title, caption in (
         (f"ranking_final_{it}.png", "Final ranking",
-         "The score each detector was ranked by, with how many windows it was tried in."),
+         "The ranking score of each detector, together with how many windows it "
+         "was tried in."),
         (f"ranking_criterion_{it}.png", "Ranking score over the run",
          "Every detector's score window by window, shaded by which one led."),
     ):
@@ -314,16 +311,16 @@ def _ts_ranking(ds, ent):
 # identical "windows 10–62" captions describing three different quantities.
 _REGIME_SET_LABELS = {
     "reward_per_regime": (
-        "Expected-reward contribution",
-        " Each context feature's own share of the leader's expected reward, averaged "
-        "over the regime; the bars sum to that reward."),
+        "Estimated-expected-reward contribution",
+        " Each context feature's own share of the leader's estimated expected reward, "
+        "averaged over the regime; the bars sum to that reward."),
     "shap_per_regime": (
         "Deviation from a typical window",
         " How far each context feature's contribution departs from what it usually "
         "contributes. This is what separates one detector from another, but it "
         "is not a share of the reward and does not sum to it."),
     "ranking_per_regime": (
-        "Ranking score",
+        "Streak {index}",
         " Weights as at the last window of the streak; the score is cumulative, "
         "so this is the state reached by then, not what the streak itself added."),
 }
@@ -347,8 +344,11 @@ def regime_plots(ds, ent, subdir_stem: str = "shap_per_regime") -> Dict[int, Dic
     for path in _ls(d / f"{subdir_stem}_{it}"):
         m = pattern.match(path.name)
         if m:
-            out[int(m.group(1))] = _fig(
-                path, label or f"Regime {int(m.group(1))}",
+            index = int(m.group(1))
+            # A label may name its own index — the ranking set titles each figure
+            # after the streak it covers, where the other two name the quantity.
+            out[index] = _fig(
+                path, label.format(index=index) if label else f"Regime {index}",
                 f"Windows {m.group(2)}–{m.group(3)}, led by {m.group(4)}." + detail)
     return out
 
@@ -593,7 +593,7 @@ _GALLERY_TREES = {"thompson": TREE_THOMPSON, "ts_ranking": TREE_THOMPSON}
 _PER_WINDOW_SETS = (
     ("thompson", "reward", "top", 1,
      "Reward contribution per window (top 3)",
-     "One frame per window; each detector's bars sum to its expected reward."),
+     "One frame per window; each detector's bars sum to its estimated expected reward."),
     ("thompson", "reward", "all", 1,
      "Reward contribution per window (all detectors)", ""),
     ("thompson", "reward", "top", 10,

@@ -17,7 +17,7 @@ from Utils.pipeline_spec import (abbreviate_detector, combine_metrics,
                                  DEFAULT_DECISION_METRICS, metrics_required)
 from Utils.plot_labels import draw_abbreviation_key
 
-from Metrics.metrics import prauc, f1_score, vus_score
+from Metrics.metrics import prauc, f1_score, vus_score, vus_window
 from Utils.model_selection_utils import evaluate_model, ScoringTimeout
 from Explainability import ir
 
@@ -397,6 +397,33 @@ def fitness_function(ensemble, train_data, test_data, trained_models,
     return best_f1, pr_auc, fitness, y_scores, y_true_test, meta_model
 
 
+def score_ensemble(meta_model, ensemble, algorithm_list, base_model_predictions, y_true):
+    """Score an already-trained meta-model on one set of base-model outputs.
+
+    The threshold is swept on the rows being scored, matching what the single-model
+    branch does, so the two sides of the final decision stay comparable.
+
+    Returns:
+        tuple: (best_f1, pr_auc, y_scores).
+    """
+    mask = np.isin(np.array(algorithm_list), ensemble)
+    X = np.array(base_model_predictions, dtype=np.float32)[:, mask]
+    X = np.nan_to_num(X, nan=0.0, posinf=1.0, neginf=0.0)
+    y_true = np.asarray(y_true).flatten()
+    y_scores = meta_model.predict_proba(X)[:, 1]
+
+    best_threshold = 0.5
+    best_temp_f1 = 0
+    for threshold in np.linspace(0.1, 0.9, 50):
+        temp_f1, _, _, _, _, _, _ = f1_score((y_scores >= threshold).astype(int), y_true)
+        if temp_f1 > best_temp_f1:
+            best_temp_f1 = temp_f1
+            best_threshold = threshold
+
+    best_f1, _, _, _, _, _, _ = f1_score((y_scores >= best_threshold).astype(int), y_true)
+    return best_f1, prauc(y_true, y_scores), y_scores
+
+
 def selection(population, fitness_scores, num_selected):
     """
     Select the top ensembles based on fitness scores.
@@ -623,16 +650,21 @@ def plot_models_scores(algorithm_list, test_data, y_scores_list, dataset, entity
     # plt.show()
 
 
-def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, trained_models, meta_model_type,
+def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorithm_list, trained_models, meta_model_type,
                       population_size, generations, mutation_rate, explain: bool = False,
                       metric=DEFAULT_DECISION_METRICS, vus_win=None):
     """
     Run the genetic algorithm to find the best ensemble of models.
 
+    Subsets are searched on the validation fold: the meta-learner is trained on
+    train_data and every candidate is scored on val_data. Only the winner is then
+    scored on test_data, which is what the final ensemble-vs-single decision reads.
+
     Args:
         dataset (str): Dataset name.
         entity (str): Entity name.
-        train_data: Training dataset.
+        train_data: Training dataset (the fit fold).
+        val_data: Validation fold the search scores subsets on.
         test_data: Test dataset.
         algorithm_list (list): List of algorithm names.
         trained_models (dict): Dictionary of trained models.
@@ -706,7 +738,17 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
         algorithm_list,
         is_ensemble=True)
     logger.info(f"  ✓ Training data evaluation complete in {time_module.time() - start_train:.2f}s")
-    
+
+    logger.info(f"  → Evaluating all {len(algorithm_list)} models on the VALIDATION fold (for subset search)...")
+    start_val = time_module.time()
+    y_true_val, base_model_predictions_val, _, _ = evaluate_model_consistently(
+        val_data,
+        trained_models,
+        algorithm_list,
+        is_ensemble=True)
+    val_vus_win = vus_window(val_data.entities[0].Y)
+    logger.info(f"  ✓ Validation fold evaluation complete in {time_module.time() - start_val:.2f}s")
+
     # Reuse test predictions from individual_predictions instead of re-computing
     logger.info(f"  → Reusing test predictions from individual evaluation (no re-computation)...")
     start_reuse = time_module.time()
@@ -736,12 +778,12 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
             if ensemble is not None:  # Ensure ensemble is not None
                 ensemble_key = tuple(sorted(ensemble))  # Create a unique key for the ensemble
                 if ensemble_key not in evaluated_ensembles:
-                    fitness_result = fitness_function(ensemble, train_data, test_data, trained_models,
+                    fitness_result = fitness_function(ensemble, train_data, val_data, trained_models,
                                                       individual_predictions,
                                                       base_model_predictions_train, algorithm_list,
-                                                      base_model_predictions_test, y_true_train, y_true_test,
+                                                      base_model_predictions_val, y_true_train, y_true_val,
                                                       meta_model_type=meta_model_type,
-                                                      metric=metric, vus_win=vus_win)
+                                                      metric=metric, vus_win=val_vus_win)
                     evaluated_ensembles[ensemble_key] = fitness_result
 
 
@@ -785,17 +827,33 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
             # fitness tuple) for the combination-explainability layer. Aligned with
             # f1_scores / fitness_scores, which are all derived from fitness_results.
             best_meta_model = fitness_results[best_idx][5]
-            # Index 3 is this ensemble's continuous scores, which the final decision
-            # needs to compute VUS.
             best_scores = fitness_results[best_idx][3]
         population = new_population
 
         logger.info(f"End of Generation {generation + 1}, Population: {population}")
         print(f"End of Generation {generation + 1}, Population: {population}")
 
+    # The search is over, and everything above it was measured on the validation
+    # fold. The winner is scored once on the test split, and those are the numbers
+    # the final ensemble-vs-single decision compares against a single detector
+    # measured on the same rows. best_fitness stays the validation fitness — it is
+    # the objective the search maximised, not an estimate of held-out performance.
+    validation_metrics = {}
+    if best_ensemble:
+        validation_metrics = {
+            'f1': best_f1, 'pr_auc': best_pr_auc, 'fitness': best_fitness,
+            'vus': vus_score(best_scores, y_true_val, val_vus_win),
+        }
+
+    if best_ensemble and best_meta_model is not None and base_model_predictions_test.size:
+        best_f1, best_pr_auc, best_scores = score_ensemble(
+            best_meta_model, best_ensemble, algorithm_list,
+            base_model_predictions_test, y_true_test)
+        logger.info(f"Best ensemble scored on the test split: F1 {best_f1}, PR AUC {best_pr_auc}")
+
     misclassified_ens = []
     for predicts in adjusted_y_pred_list:
-        true_values = np.array(test_data.entities[0].labels)  # 1 for anomaly, 0 for normal
+        true_values = np.array(val_data.entities[0].labels)  # 1 for anomaly, 0 for normal
 
         predicted_values = np.array(predicts)  # True for predicted anomaly, False for no predicted anomaly
 
@@ -819,9 +877,9 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     pr_auc_scores = [result[1] for result in evaluated_ensembles.values()]
     flat_ensemble_names = ['_'.join(names) for names in ensemble_names]
     plot_name = f'myresults/Outputs/GA_Ens/ensemble_scores_{dataset}_{entity}_{meta_model_type}_{population_size}_{generations}_{mutation_rate}_ensemble_{date_time_string}.png'
-    plot_models_scores(list_ensemble, test_data, adjusted_y_pred_list, dataset, entity, F1_Score_list,
+    plot_models_scores(list_ensemble, val_data, adjusted_y_pred_list, dataset, entity, F1_Score_list,
                        PR_AUC_Score_list)
-    plot_scores_vs_true(test_data, F1_Score_list, PR_AUC_Score_list, adjusted_y_pred_list, list_ensemble, plot_name,
+    plot_scores_vs_true(val_data, F1_Score_list, PR_AUC_Score_list, adjusted_y_pred_list, list_ensemble, plot_name,
                         plot_path)
     # Plot for F1 scores
     plt.figure(figsize=(10, 5))
@@ -869,9 +927,11 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
 
     # plt.show()
     logger.info(
-        f"Best ensemble found: {best_ensemble} with F1 score {best_f1}, PR AUC {best_pr_auc}, and fitness {best_fitness}")
+        f"Best ensemble found: {best_ensemble} with validation fitness {best_fitness}, "
+        f"and test F1 score {best_f1}, test PR AUC {best_pr_auc}")
     print(
-        f"Best ensemble found: {best_ensemble} with F1 score {best_f1}, PR AUC {best_pr_auc}, and fitness {best_fitness}")
+        f"Best ensemble found: {best_ensemble} with validation fitness {best_fitness}, "
+        f"and test F1 score {best_f1}, test PR AUC {best_pr_auc}")
     # Sort evaluated_ensembles by fitness score before writing to the file
     sorted_ensembles = sorted(evaluated_ensembles.items(), key=lambda x: x[1][2], reverse=True)
     # Save the results to a text file
@@ -885,12 +945,12 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
             key = tuple(sorted(subset))
             if key in evaluated_ensembles:
                 return evaluated_ensembles[key][2]
-            res = fitness_function(list(subset), train_data, test_data, trained_models,
+            res = fitness_function(list(subset), train_data, val_data, trained_models,
                                    individual_predictions, base_model_predictions_train,
-                                   algorithm_list, base_model_predictions_test,
-                                   y_true_train, y_true_test,
+                                   algorithm_list, base_model_predictions_val,
+                                   y_true_train, y_true_val,
                                    meta_model_type=meta_model_type,
-                                   metric=metric, vus_win=vus_win)
+                                   metric=metric, vus_win=val_vus_win)
             evaluated_ensembles[key] = res
             return res[2]
 
@@ -904,7 +964,7 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
                                dataset, entity, meta_model=best_meta_model, explain=True,
                                metric=metric, vus_win=vus_win)
 
-    return best_ensemble, best_f1, best_pr_auc, best_fitness, individual_predictions, base_model_predictions_train, base_model_predictions_test, y_true_train, y_true_test, meta_model_type, best_scores
+    return best_ensemble, best_f1, best_pr_auc, best_fitness, individual_predictions, base_model_predictions_train, base_model_predictions_test, y_true_train, y_true_test, meta_model_type, best_scores, validation_metrics
 
 # Usage
 # Assuming train_data and test_data are already loaded and preprocessed
@@ -1515,7 +1575,6 @@ def plot_ga_archetypes(
     # when there is one, so the two never collide.
     draw_abbreviation_key(fig, algorithm_list, y=-0.06 if unclassified else -0.02)
 
-    fig.suptitle("Functional Archetypes · utility × stability", y=1.0)
     plt.tight_layout(pad=1.2)
     directory = f"myresults/GA_Ens/{dataset}/{entity}/"
     os.makedirs(directory, exist_ok=True)
@@ -2179,7 +2238,6 @@ def plot_ga_combination(
     ax_imp.set_yticklabels(list(feature_names))
     ax_imp.invert_yaxis()
     ax_imp.set_xlabel("Importance (normalised to each method's max |·|)")
-    ax_imp.set_title("Meta-learner feature attribution (magnitude)")
     ax_imp.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
     # Outside the axes. In the corner it sat on top of whichever detector had
     # the shortest bars, and which detector that is changes per entity.
@@ -2207,11 +2265,6 @@ def plot_ga_combination(
     ax_markov.set_yticklabels([f"{rk[f]}. {f}" for f in ranked])
     ax_markov.invert_yaxis()
     ax_markov.set_xlabel("Markov score (stationary prob.)")
-    # Names all three sources, and the same three the other figure draws. The
-    # label said "mean|SHAP| + PFI" for as long as ALE had been feeding the
-    # chain, so the figure claimed a two-source consensus beside a panel
-    # showing three bars.
-    ax_markov.set_title("Final ranking (Markov: mean|SHAP| + PFI + total |ALE|)")
     ax_markov.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
     plt.tight_layout(pad=1.2)
     plt.savefig(f"{directory}/ga_combination_ranking_{dataset}_{entity}.png",
@@ -2332,8 +2385,6 @@ def plot_ga_combination_ale(
                  "vertex per edge and no detail between them.")
     if skipped:
         note += f"  Not shown (no ALE could be computed): {', '.join(skipped)}."
-    fig.suptitle("How each detector moves the meta-learner (ALE)"
-                 + (" — bins marked" if mark_bins else ""), fontsize=13)
     # WRAPPED to a fixed width, and it must stay that way: the note sits
     # outside the axes, `bbox_inches="tight"` grows the image to contain it, so
     # an unwrapped note makes the bins figure save wider than the plain one and

@@ -177,7 +177,7 @@ def explain_rcparams() -> None:
 
 
 def plot_exclusive_win_tree(info, winner, feature_names, *, directory: str,
-                            filename: str, title: str):
+                            filename: str):
     """Plot one winner-vs-competitor exclusive-win surrogate tree.
 
     Returns the filename written, or None when the surrogate is degenerate and
@@ -194,7 +194,6 @@ def plot_exclusive_win_tree(info, winner, feature_names, *, directory: str,
     plot_tree(info["clf"], feature_names=list(feature_names),
               class_names=[f"not {winner}-only", f"{winner}-only win"],
               filled=True, rounded=True, fontsize=8, ax=ax)
-    ax.set_title(title)
     fig.tight_layout()
     fig.savefig(os.path.join(directory, filename), dpi=300)
     plt.close(fig)

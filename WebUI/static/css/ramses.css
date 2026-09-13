@@ -587,6 +587,20 @@ details[open] > summary::before { transform: rotate(90deg); }
 .docs-list { margin: 0 0 1em; padding-left: 3ch; }
 .docs-list li { margin-bottom: .35em; }
 .docs-list li:last-child { margin-bottom: 0; }
+/* θ̃. A combining tilde is anchored for Latin bases, so the prose font sets it
+   off to one side of a Greek theta. docs.js splits the pair, and the tilde is
+   drawn here as a spacing glyph centred over the base instead, which needs no
+   anchor from the font. Nudge `top` if a future prose face sits differently. */
+.tilde-over { position: relative; display: inline-block; }
+.tilde-over::after {
+  content: "\02DC";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: .9em;
+  line-height: 1;
+  pointer-events: none;
+}
 /* Notation keeps the alignment it was written with, so it scrolls in its own
    box rather than wrapping or pushing the page sideways. */
 .docs-formula {
@@ -636,6 +650,9 @@ details[open] > summary::before { transform: rotate(90deg); }
 /* ── Figures ──────────────────────────────────────────────────────────────── */
 
 .figures { display: grid; gap: var(--sp-4); grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+/* Held to the same measure as the prose above it, so a single tall figure does
+   not read as wider than the paragraph that introduces it. */
+.figures-measured { max-width: var(--measure); }
 /* Reserve the control row on figures that have none, so every image in a grid
    row starts at the same height. Giving `.variant-tabs` a fixed height only
    lines up figures that HAVE controls — the neighbours of a picker are usually

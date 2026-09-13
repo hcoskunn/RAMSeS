@@ -10,7 +10,8 @@ against a crowded axis, where a sixteen-character name either collides with its
 neighbour or pushes the legend over the plot:
 
     * the ranking-score trace       (Thompson Sampling: Ranking)
-    * both expected-reward traces   (Thompson Sampling: Selection — and up to
+    * both estimated-expected-reward traces
+                                    (Thompson Sampling: Selection — and up to
                                      107 legend entries)
 
 Those call `abbreviate_detector` on the label and `draw_abbreviation_key` under

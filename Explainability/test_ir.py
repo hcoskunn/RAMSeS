@@ -284,7 +284,7 @@ class TestBuilders(unittest.TestCase):
         # highest chance of being chosen" with a number that does not bear on it.
         self.assertEqual(
             by_id["ts.output.top"]["text"],
-            "A and B each held the highest expected reward in 3 of the 6 windows.")
+            "A and B each held the highest estimated expected reward in 3 of the 6 windows.")
 
         # THREE distinct claims over two atoms: what the reward was made of and
         # where the edge came from share the span sentence, in that order, while
@@ -292,7 +292,7 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(
             by_id["ts.regime.0"]["text"],
             "Regime 0 (windows 0 to 2, 3 windows) was led by A, with context feature 0 "
-            "and context feature 1 raising its expected reward the most, and context "
+            "and context feature 1 raising its estimated expected reward the most, and context "
             "feature 0 also giving it its biggest edge over B.")
         self.assertEqual(
             by_id["ts.regime.0.deviation"]["text"],
@@ -379,7 +379,7 @@ class TestBuilders(unittest.TestCase):
         kwargs["regimes"][0]["edge_favor_leader"] = [(7, 0.3)]
         doc = ir.build_thompson_ir("DS", "e1", **kwargs)
         by_id = {a["id"]: a["text"] for a in doc["evidence"]}
-        self.assertIn("context feature 2 and context feature 5 raising its expected reward the most",
+        self.assertIn("context feature 2 and context feature 5 raising its estimated expected reward the most",
                       by_id["ts.regime.0"])
         self.assertIn("context feature 7 giving it its biggest edge over B",
                       by_id["ts.regime.0"])
@@ -438,7 +438,7 @@ class TestBuilders(unittest.TestCase):
             "DS", "e1", context_feature_names=["Pressure", "Accelerometer1RMS"], **kwargs)
         txt = next(a for a in named["evidence"] if a["id"] == "ts.regime.0")["text"]
         # Name is used verbatim — never lower-cased by a blanket .capitalize().
-        self.assertIn("Accelerometer1RMS raising its expected reward the most", txt)
+        self.assertIn("Accelerometer1RMS raising its estimated expected reward the most", txt)
         self.assertNotIn("context feature 1", txt)
         # Out-of-range indices fall back to the numeric form.
         short = ir.build_thompson_ir("DS", "e1", context_feature_names=["Pressure"], **kwargs)

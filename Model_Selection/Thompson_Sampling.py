@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 from typing import Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 import numpy as np
 from loguru import logger
 from scipy.ndimage import gaussian_filter1d
@@ -81,9 +82,11 @@ def sample_model(models: Dict[str, Any], means: Dict[str, np.ndarray], covarianc
     - means (Dict[str, np.ndarray]): Dictionary of means for each model.
     - covariances (Dict[str, np.ndarray]): Dictionary of covariances for each model.
     - epsilon (float): Epsilon value for the Epsilon-Greedy strategy.
-    - context (np.ndarray): The current context vector x (flattened data window). Used to
-      compute the expected reward estimate theta_tilde^T * x for each model, which is the
-      correct Linear Thompson Sampling selection criterion.
+    - context (np.ndarray): The current context vector x_t (flattened data window). Used to
+      compute the SAMPLED expected reward theta_tilde^T * x_t for each model, which is the
+      correct Linear Thompson Sampling selection criterion. This is the expected reward
+      under one weight vector drawn from the posterior, not the estimated expected reward
+      mu^T * x_t the cards plot.
 
     Returns:
     - Tuple[str, bool]: (chosen model name, was_random) where was_random is True iff the
@@ -101,13 +104,13 @@ def sample_model(models: Dict[str, Any], means: Dict[str, np.ndarray], covarianc
         try:
             # Draw a full sample theta_tilde ~ N(mu, Sigma)
             theta_tilde = multivariate_normal.rvs(mean=mean.flatten(), cov=covariances[model_name])
-            # Compute expected reward: theta_tilde^T * x  (the "Linear" in LinTS)
+            # Sampled expected reward: theta_tilde^T * x_t  (the "Linear" in LinTS)
             samples[model_name] = float(np.dot(theta_tilde, x))
         except ValueError as e:
             logger.error(f"Error sampling model {model_name}: {e}")
             raise
     chosen_model = max(samples, key=samples.get)
-    logger.info(f"Linear Thompson Sampling: Chosen model {chosen_model} with expected reward {samples[chosen_model]:.4f}")
+    logger.info(f"Linear Thompson Sampling: Chosen model {chosen_model} with sampled expected reward {samples[chosen_model]:.4f}")
     return chosen_model, False
 
 
@@ -191,9 +194,10 @@ def calculate_reward(f1: float, pr_auc: float, f1_weight: float, pr_auc_weight: 
     return (f1_weight * f1) + (pr_auc_weight * pr_auc)
 
 
-def compute_expected_rewards(means: Dict[str, np.ndarray], context: np.ndarray) -> Dict[str, float]:
+def compute_estimated_expected_rewards(means: Dict[str, np.ndarray], context: np.ndarray) -> Dict[str, float]:
     """
-    Compute the expected reward for every model given current posterior means and a context vector.
+    Compute the estimated expected reward for every model given current posterior means
+    and a context vector.
 
     E[reward | model_k, context_t] = mu_k^T * context_t
 
@@ -207,7 +211,7 @@ def compute_expected_rewards(means: Dict[str, np.ndarray], context: np.ndarray) 
     Returns
     -------
     Dict[str, float]
-        Keys are model names; values are scalar expected rewards mu_k^T * x.
+        Keys are model names; values are scalar estimated expected rewards mu_k^T * x_t.
         Values can be negative (standardised data, uninitialised means).
     """
     return {m: float(np.dot(mu.flatten(), context.flatten())) for m, mu in means.items()}
@@ -216,7 +220,7 @@ def compute_expected_rewards(means: Dict[str, np.ndarray], context: np.ndarray) 
 def classify_selection(
     chosen_model: str,
     was_random: bool,
-    expected_rewards: Dict[str, float],
+    estimated_expected_rewards: Dict[str, float],
 ) -> str:
     """
     Categorize a model selection into one of three behavioral states.
@@ -224,12 +228,13 @@ def classify_selection(
     States
     ------
     - "random"               : ε-greedy random pick fired (exploration floor).
-    - "exploitation"         : chosen model equals argmax_k (mu_k^T * x) over current
+    - "exploitation"         : chosen model equals argmax_k (mu_k^T * x_t) over current
                                (pre-update) posterior means; the agent picked what it
                                already believed was best.
-    - "informed_exploration" : chosen via Thompson sampling but differs from the mean-
-                               based argmax; posterior uncertainty steered the agent
-                               away from its mean-best guess.
+    - "informed_exploration" : chosen by maximising the SAMPLED expected reward, which
+                               differs from the estimated-expected-reward argmax;
+                               posterior uncertainty steered the agent away from its
+                               mean-best guess.
 
     Parameters
     ----------
@@ -238,9 +243,9 @@ def classify_selection(
     was_random : bool
         True iff ε-greedy fired. Takes precedence over the argmax comparison so that
         an ε-greedy pick that happens to match the argmax is still labeled "random".
-    expected_rewards : Dict[str, float]
-        Output of compute_expected_rewards(means, context) using the PRE-update means
-        (the beliefs that informed this decision).
+    estimated_expected_rewards : Dict[str, float]
+        Output of compute_estimated_expected_rewards(means, context) using the PRE-update
+        means (the beliefs that informed this decision).
 
     Returns
     -------
@@ -248,18 +253,19 @@ def classify_selection(
     """
     if was_random:
         return "random"
-    expected_best = max(expected_rewards, key=expected_rewards.get)
-    return "exploitation" if chosen_model == expected_best else "informed_exploration"
+    estimated_best = max(estimated_expected_rewards, key=estimated_expected_rewards.get)
+    return "exploitation" if chosen_model == estimated_best else "informed_exploration"
 
 
 def compute_shap_values(mean: np.ndarray, context: np.ndarray, baseline: np.ndarray) -> np.ndarray:
     """
-    Per-feature SHAP attribution for a linear model E[R] = mean^T x.
+    Per-feature SHAP attribution for a linear model whose estimated expected
+    reward is mean^T x_t.
 
     Closed form for linear models (matches shap.LinearExplainer with
     feature_dependence='independent'):
 
-        phi_0 = mean^T baseline          (baseline expected reward)
+        phi_0 = mean^T baseline          (baseline estimated expected reward)
         phi_i = mean_i * (x_i - baseline_i)
         phi_0 + sum(phi) = mean^T x      (additivity guarantee)
 
@@ -313,21 +319,21 @@ def aggregate_shap_per_context_feature(shap_values: np.ndarray, n_context_featur
 def reward_contribution_per_context_feature(mean: np.ndarray, context: np.ndarray,
                                     n_context_features: int) -> np.ndarray:
     """
-    Split the expected reward mu^T x into one contribution per context feature.
+    Split the estimated expected reward mu^T x_t into one contribution per context feature.
 
     contrib(c) = sum over context feature c's timesteps of mu_i * x_i, so the parts sum
-    to mu^T x EXACTLY — the model has no intercept, so there is no remainder.
+    to mu^T x_t EXACTLY — the model has no intercept, so there is no remainder.
 
     This is the honest answer to "how much does this context feature contribute to this
-    detector's expected reward". SHAP answers a different question: it measures
+    detector's estimated expected reward". SHAP answers a different question: it measures
     each context feature's deviation from a TYPICAL window, so it explains only
-    mu^T x - mu^T baseline and discards the constant mu^T baseline, which is
+    mu^T x_t - mu^T baseline and discards the constant mu^T baseline, which is
     usually the bulk of the prediction. Worse for any averaged view, the signed
     SHAP average over all windows is identically zero by construction, because
     the baseline IS the mean of those windows.
 
     Signed: mu and the (L2-normalised) context can both be negative, so a
-    context feature can pull the expected reward down.
+    context feature can pull the estimated expected reward down.
     """
     if n_context_features <= 0:
         return np.zeros(0)
@@ -364,7 +370,7 @@ def _avg_per_context_feature_reward_map(
     No `absolute` switch, unlike the SHAP version: this average is not
     structurally zero, so the signed mean is the meaningful quantity and there
     is nothing to work around. Averaged over every window it is each context feature's
-    share of the detector's expected reward on a typical window.
+    share of the detector's estimated expected reward on a typical window.
 
     `means_per_context` explains window t with the beliefs held at window t;
     the product mu*x is bilinear, so the per-window loop is the correct order.
@@ -444,21 +450,23 @@ def rank_gap_decomposition(mean_a: np.ndarray, mean_b: np.ndarray,
 
 
 def detect_regime_shifts(
-    expected_rewards_history: Dict[str, List[float]],
+    estimated_expected_rewards_history: Dict[str, List[float]],
     smoothing_window: int = 5,
     min_regime_length: int = 3,
 ) -> Tuple[List[Dict], List[str]]:
     """
     Detect sustained changes in the dominant model from expected-reward history.
 
-    A regime is a sustained period where one model holds the highest expected reward.
+    A regime is a sustained period where one model holds the highest estimated
+    expected reward.
     A regime shift is recorded when the new dominant model persists for at least
     min_regime_length consecutive windows. Shorter changes are classified as blips.
 
     Parameters
     ----------
-    expected_rewards_history : Dict[str, List[float]]
-        Per-model expected reward sequences. NaN values (from skipped windows) are handled.
+    estimated_expected_rewards_history : Dict[str, List[float]]
+        Per-model estimated expected reward sequences. NaN values (from skipped windows)
+        are handled.
     smoothing_window : int, default 5
         Width of rolling mean used to suppress per-window noise (1 = no smoothing).
     min_regime_length : int, default 3
@@ -473,15 +481,15 @@ def detect_regime_shifts(
     blip_windows : List[str]
         Human-readable labels for transient dominance changes below min_regime_length.
     """
-    model_list = list(expected_rewards_history.keys())
+    model_list = list(estimated_expected_rewards_history.keys())
     if not model_list:
         return [], []
 
-    T = len(expected_rewards_history[model_list[0]])
+    T = len(estimated_expected_rewards_history[model_list[0]])
     if T == 0:
         return [], []
 
-    reward_matrix = np.array([expected_rewards_history[m] for m in model_list], dtype=float)
+    reward_matrix = np.array([estimated_expected_rewards_history[m] for m in model_list], dtype=float)
 
     # Rolling mean smoothing per model; replace NaN with 0 for convolution stability
     nan_mask = np.isnan(reward_matrix)
@@ -742,10 +750,10 @@ def fit_linear_thompson_sampling(dataset,
         list_of_chosen_models.append(chosen_model_name)
 
         if explain:
-            # Expected rewards from the PRE-update means — the beliefs at the time
+            # Estimated expected rewards from the PRE-update means — the beliefs at the time
             # of sampling. Used for classification and for the report's Dominant /
             # Top E[Reward] columns (which describe the decision, not its aftermath).
-            pre_update_rewards = compute_expected_rewards(means, context)
+            pre_update_rewards = compute_estimated_expected_rewards(means, context)
             _selection_states.append(classify_selection(chosen_model_name, was_random, pre_update_rewards))
             for _m in models:
                 _pre_exp_rewards_hist[_m].append(pre_update_rewards[_m])
@@ -943,8 +951,8 @@ def plot_history(history: List[Dict[str, np.ndarray]], models: Dict[str, Any],
     plt.close()
 
 
-def plot_expected_rewards(
-    expected_rewards_history: Dict[str, List[float]],
+def plot_estimated_expected_rewards(
+    estimated_expected_rewards_history: Dict[str, List[float]],
     regime_shifts: List[Dict],
     model_names: List[str],
     dataset: str,
@@ -953,7 +961,7 @@ def plot_expected_rewards(
     smooth: bool = False,
 ) -> None:
     """
-    Plot expected reward evolution for all models with regimes annotated.
+    Plot estimated expected reward evolution for all models with regimes annotated.
 
     Regime regions are shaded by dominant model, regime boundaries are marked
     with dashed vertical lines, and every regime is labelled at its centre
@@ -975,13 +983,13 @@ def plot_expected_rewards(
         "ytick.labelsize": 10
     })
 
-    T = len(next(iter(expected_rewards_history.values()))) if expected_rewards_history else 0
+    T = len(next(iter(estimated_expected_rewards_history.values()))) if estimated_expected_rewards_history else 0
     colour_map = {name: plt.cm.tab20(i / max(len(model_names), 1)) for i, name in enumerate(model_names)}
 
     fig, ax = plt.subplots(figsize=(10, 5))
 
     for model_name in model_names:
-        raw = np.array(expected_rewards_history.get(model_name, []), dtype=float)
+        raw = np.array(estimated_expected_rewards_history.get(model_name, []), dtype=float)
         if raw.size == 0:
             continue
         nan_mean = float(np.nanmean(raw)) if not np.all(np.isnan(raw)) else 0.0
@@ -1010,10 +1018,8 @@ def plot_expected_rewards(
         for shift in regime_shifts:
             ax.axvline(x=shift['window'], color='black', linestyle='--', linewidth=0.9, alpha=0.7)
 
-    title_suffix = ' (smoothed)' if smooth else ''
     ax.set_xlabel('Window')
-    ax.set_ylabel('Expected Reward (mu_k^T * x_t)')
-    ax.set_title('Expected Reward Trajectories Over Windows' + title_suffix)
+    ax.set_ylabel('Estimated Expected Reward (mu_k^T * x_t)')
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
     # One column, matching plot_ranking_score_trace: two columns of up to 107
     # detectors is wider than the axes it sits beside, and the eye has to track
@@ -1098,7 +1104,6 @@ def plot_selection_states(
             ha='center', va='bottom', fontsize=10,
         )
     ax_bar.set_ylabel('Window Count')
-    ax_bar.set_title('Selection State Totals')
     ax_bar.grid(True, axis='y', linestyle='--', linewidth=0.5, alpha=0.7)
 
     # Legend outside the plot area
@@ -1129,20 +1134,20 @@ def _top_k_models_by_norm(means: Dict[str, np.ndarray], k: int) -> List[str]:
     return [name for name, _ in ranked[:k]]
 
 
-def _top_k_models_by_expected_reward(
+def _top_k_models_by_estimated_expected_reward(
     means: Dict[str, np.ndarray],
     contexts: List[np.ndarray],
     k: int,
     means_per_context: Optional[List[Dict[str, np.ndarray]]] = None,
 ) -> List[str]:
     """
-    Return the top-k models by expected reward mu·x averaged over the given
+    Return the top-k models by estimated expected reward mu·x_t averaged over the given
     contexts.
 
     means_per_context : the beliefs held at each context, aligned with
         `contexts`. Supplying it makes the selection read the same mu·x the run
         actually saw at each window — which is what the regime prose ranks by
-        (pre_expected_rewards_history) and what the plotted bars are computed
+        (pre_estimated_expected_rewards_history) and what the plotted bars are computed
         from. Falling back to the final `means` here would let a plot show three
         detectors while the sentence beside it named a different runner-up.
     """
@@ -1154,7 +1159,7 @@ def _top_k_models_by_expected_reward(
         if means_per_context and i < len(means_per_context) and means_per_context[i]:
             at = {m: np.asarray(v).reshape(-1, 1)
                   for m, v in means_per_context[i].items()}
-        for m, v in compute_expected_rewards(at, ctx).items():
+        for m, v in compute_estimated_expected_rewards(at, ctx).items():
             if m in totals:
                 totals[m] += v
     ranked = sorted(totals.items(), key=lambda x: x[1], reverse=True)
@@ -1244,8 +1249,8 @@ def _render_shap_comparison(
     per_context_feature_by_model: Dict[str, np.ndarray],
     top_models: List[str],
     top_n_context_features: int,
-    title: str,
     save_path: str,
+    title: Optional[str] = None,
     ylabel: str = 'Per-context-feature SHAP contribution',
     n_context_features_total: Optional[int] = None,
     note: Optional[str] = None,
@@ -1300,7 +1305,8 @@ def _render_shap_comparison(
     ax.set_xticklabels([f"cf{c}" for c in selected], rotation=45, ha='right')
     ax.set_xlabel('Context feature')
     ax.set_ylabel(ylabel)
-    ax.set_title(title)
+    if title:
+        ax.set_title(title)
     ax.grid(True, axis='y', linestyle='--', linewidth=0.5, alpha=0.6)
     ax.legend(loc='upper left', frameon=False, bbox_to_anchor=(1.01, 1), borderaxespad=0)
 
@@ -1434,7 +1440,7 @@ def plot_shap_comparison(
     )
 
 
-_REWARD_YLABEL = r'Contribution to expected reward  $\mu^\top x$'
+_REWARD_YLABEL = r'Contribution to estimated expected reward  $\mu^\top x_t$'
 
 
 def _plot_per_regime(
@@ -1446,7 +1452,6 @@ def _plot_per_regime(
     iterations: int,
     *,
     stem: str,
-    title_prefix: str,
     per_context_feature_fn,
     note_fn,
     ylabel: Optional[str] = None,
@@ -1488,16 +1493,12 @@ def _plot_per_regime(
         regime_mu = mu_hist[start:end + 1] if mu_hist else None
         if all_models:
             sel_models = every_model
-            scope = 'all models'
         else:
-            sel_models = _top_k_models_by_expected_reward(
+            sel_models = _top_k_models_by_estimated_expected_reward(
                 means, regime_ctx, top_k_models, means_per_context=regime_mu)
-            scope = f'top {top_k_models} by E[R] in regime'
         _render_shap_comparison(
             per_context_feature_fn(sel_models, regime_ctx, regime_mu),
             sel_models, top_n_context_features,
-            title=(f'{title_prefix} — regime {i} ({model}, '
-                   f'windows {start}-{end}, {scope})'),
             save_path=os.path.join(directory, f'regime_{i:02d}_w{start}-{end}_{model}.png'),
             ylabel=ylabel or 'Per-context-feature SHAP contribution',
             n_context_features_total=n_context_features,
@@ -1523,13 +1524,13 @@ def plot_shap_per_regime(
 
     all_models : bool
         When False (default) each regime's plot shows the top_k_models by
-        expected reward (mu·x) averaged over that regime's windows; saved under
+        estimated expected reward (mu·x_t) averaged over that regime's windows; saved under
         shap_per_regime_{iterations}/. When True every model is shown; saved
         under shap_per_regime_all_{iterations}/.
     """
     _plot_per_regime(
         means, shap_payload, regime_shifts, dataset, entity, iterations,
-        stem='shap_per_regime', title_prefix='SHAP',
+        stem='shap_per_regime',
         per_context_feature_fn=lambda sel, ctx, mu: _avg_per_context_feature_shap_map(
             means, sel, ctx, shap_payload["baseline_context"],
             shap_payload["n_channels"], absolute=False, means_per_context=mu),
@@ -1559,7 +1560,7 @@ def plot_reward_per_regime(
     """
     _plot_per_regime(
         means, shap_payload, regime_shifts, dataset, entity, iterations,
-        stem='reward_per_regime', title_prefix='Expected-reward contribution',
+        stem='reward_per_regime',
         per_context_feature_fn=lambda sel, ctx, mu: _avg_per_context_feature_reward_map(
             means, sel, ctx, shap_payload["n_channels"], means_per_context=mu),
         note_fn=lambda n: (f"Averaged over the {n} windows of this regime; "
@@ -1583,14 +1584,14 @@ def plot_reward_average_all(
 ) -> None:
     """
     One figure for the whole run: each context feature's mean contribution to a
-    detector's expected reward, averaged over every window.
+    detector's estimated expected reward, averaged over every window.
 
     This replaces mean|SHAP| as the run-level summary. The signed SHAP average
     over all windows is identically zero — the baseline IS the mean of those
     windows — which forced the old figure onto absolute values, and mean|SHAP|
     measures how much a context feature's influence VARIES, not how much it contributes.
     This average has no such defect: it is signed, non-degenerate, and its bars
-    sum to the detector's expected reward on a typical window.
+    sum to the detector's estimated expected reward on a typical window.
     """
     if not shap_payload or shap_payload.get("n_channels", 0) <= 0:
         return
@@ -1601,23 +1602,22 @@ def plot_reward_average_all(
 
     if all_models:
         sel_models = _top_k_models_by_norm(means, len(means))
-        suffix, scope = 'all', 'all models'
+        suffix = 'all'
     else:
-        sel_models = _top_k_models_by_expected_reward(means, contexts, top_k_models)
-        suffix, scope = f'top{top_k_models}', f'top {top_k_models} by E[R]'
+        sel_models = _top_k_models_by_estimated_expected_reward(means, contexts, top_k_models)
+        suffix = f'top{top_k_models}'
 
     per_context_feature = _avg_per_context_feature_reward_map(
         means, sel_models, contexts, n_context_features,
         means_per_context=shap_payload.get("means_history") or None)
     _render_shap_comparison(
         per_context_feature, sel_models, top_n_context_features,
-        title=f'Mean expected-reward contribution across all windows — {scope}',
         save_path=(f'myresults/Thomposon/{dataset}/{entity}/'
                    f'reward_average_{suffix}_{iterations}.png'),
         ylabel=_REWARD_YLABEL,
         n_context_features_total=n_context_features,
         note=("Averaged over every window; each detector's bars sum to its "
-              "expected reward on a typical window."),
+              "estimated expected reward on a typical window."),
     )
 
 
@@ -1640,7 +1640,7 @@ def plot_shap_average_all(
     all_models : bool
         When True (default) every model is shown, saved as
         shap_average_all_{iterations}.png. When False only the top_k_models by
-        expected reward (mu·x) averaged over the whole run are shown, saved as
+        estimated expected reward (mu·x_t) averaged over the whole run are shown, saved as
         shap_average_top3_{iterations}.png.
     """
     if not shap_payload or shap_payload.get("n_channels", 0) <= 0:
@@ -1657,10 +1657,10 @@ def plot_shap_average_all(
         suffix = 'all'
         title = 'Mean |SHAP| Across All Windows — all models (global importance)'
     else:
-        sel_models = _top_k_models_by_expected_reward(means, contexts, top_k_models)
+        sel_models = _top_k_models_by_estimated_expected_reward(means, contexts, top_k_models)
         suffix = f'top{top_k_models}'
-        title = (f'Mean |SHAP| Across All Windows — top {top_k_models} by E[R] '
-                 '(global importance)')
+        title = (f'Mean |SHAP| Across All Windows — top {top_k_models} by '
+                 'estimated expected reward (global importance)')
 
     per_context_feature = _avg_per_context_feature_shap_map(
         means, sel_models, contexts, baseline, n_context_features, absolute=True,
@@ -1675,9 +1675,9 @@ def plot_shap_average_all(
 
 def explain_thompson_sampling(
     means: Dict[str, np.ndarray],
-    expected_rewards_history: Dict[str, List[float]],
+    estimated_expected_rewards_history: Dict[str, List[float]],
     l2_norm_history: Dict[str, List[float]],
-    pre_expected_rewards_history: Dict[str, List[float]],
+    pre_estimated_expected_rewards_history: Dict[str, List[float]],
     list_of_chosen_models: List[str],
     regime_shifts: List[Dict],
     blip_windows: List[str],
@@ -1695,26 +1695,26 @@ def explain_thompson_sampling(
     summary, SHAP feature attribution (when shap_payload is provided), SHAP preference
     decomposition, and final ranking by ||mu_k||^2.
 
-    The Dominant / Top E[Reward] columns are computed from pre_expected_rewards_history
-    — the expected rewards at the *time of sampling* (pre-update means). When every
-    model's expected reward is identical (e.g. window 0, all means still the zero
+    The Dominant / Top E[Reward] columns are computed from pre_estimated_expected_rewards_history
+    — the estimated expected rewards at the *time of sampling* (pre-update means). When
+    every model's estimated expected reward is identical (e.g. window 0, all means still the zero
     vector) there is no meaningful winner, so both columns print 'N/A'.
 
     Saves to myresults/Thomposon/{dataset}/{entity}/explainability_{iterations}.txt.
     """
-    model_list = list(expected_rewards_history.keys())
+    model_list = list(estimated_expected_rewards_history.keys())
     T = len(list_of_chosen_models)
 
-    # Per-window dominant model + top expected reward, computed from the PRE-update
+    # Per-window dominant model + top estimated expected reward, computed from the PRE-update
     # means (the beliefs at the time of sampling). 'N/A' when all rewards are tied
     # (e.g. window 0, where every mean vector is still the zero vector).
     dominant_per_window: List[str] = []
     top_reward_per_window: List[Optional[float]] = []
     for t in range(T):
         rewards_at_t = {
-            m: pre_expected_rewards_history[m][t]
+            m: pre_estimated_expected_rewards_history[m][t]
             for m in model_list
-            if t < len(pre_expected_rewards_history[m]) and not np.isnan(pre_expected_rewards_history[m][t])
+            if t < len(pre_estimated_expected_rewards_history[m]) and not np.isnan(pre_estimated_expected_rewards_history[m][t])
         }
         if rewards_at_t and max(rewards_at_t.values()) != min(rewards_at_t.values()):
             dom = max(rewards_at_t, key=rewards_at_t.get)
@@ -1730,7 +1730,7 @@ def explain_thompson_sampling(
     first_dom = max(set(_valid_doms), key=_valid_doms.count) if _valid_doms else 'N/A'
     regime_segments = reconstruct_regime_segments(regime_shifts, T, fallback_model=first_dom)
 
-    # Per-regime story blocks: regime-mean expected rewards (from the recorded
+    # Per-regime story blocks: regime-mean estimated expected rewards (from the recorded
     # pre-update beliefs), the leader's SHAP context features on the regime-aggregated
     # context, and the leader-vs-runner-up preference decomposition. Computed
     # ONCE here and consumed by BOTH the report below and the Intermediate
@@ -1747,7 +1747,7 @@ def explain_thompson_sampling(
             seg_start = max(int(seg_s), 0)
             reg_rewards: Dict[str, float] = {}
             for m in model_list:
-                hist = pre_expected_rewards_history.get(m, [])
+                hist = pre_estimated_expected_rewards_history.get(m, [])
                 vals = [hist[t] for t in range(seg_start, seg_end + 1)
                         if t < len(hist) and hist[t] is not None and not np.isnan(hist[t])]
                 if vals:
@@ -1806,8 +1806,8 @@ def explain_thompson_sampling(
                         edge_acc += float(np.dot(mu_l - mu_r, ctx_t))
                 pc_l /= n_win
                 rc_l /= n_win
-                # What the leader's expected reward is actually MADE OF here.
-                # These sum to its mean expected reward over the regime, which
+                # What the leader's estimated expected reward is actually MADE OF here.
+                # These sum to its mean estimated expected reward over the regime, which
                 # the SHAP split cannot claim — it drops the mu.baseline term.
                 reward_raising, reward_lowering = _split_by_sign(rc_l)
                 shap_raising, shap_lowering = _split_by_sign(pc_l)
@@ -1816,7 +1816,7 @@ def explain_thompson_sampling(
                     rc_r /= n_win
                     # The narrated edge: the leader's own expected-reward split
                     # minus the runner-up's. These deltas sum to the gap in
-                    # expected reward the regime is actually decided by — the
+                    # estimated expected reward the regime is actually decided by — the
                     # same quantity `reward_gap` reports — so the sentence's
                     # context feature and its headline number describe one thing.
                     edge_gap = edge_acc / n_win
@@ -1830,13 +1830,13 @@ def explain_thompson_sampling(
                 "index": seg_idx, "start": seg_start, "end": seg_end,
                 "duration": int(seg_dur), "leader": leader,
                 "rewards_top": top3, "reward_gap": gap, "runner_up": runner,
-                # The narrated context features: what the leader's expected reward is
+                # The narrated context features: what the leader's estimated expected reward is
                 # made of here. SHAP's split rides along for the deviation
                 # clause and the alternate plot, but no longer leads.
                 "reward_raising": reward_raising, "reward_lowering": reward_lowering,
                 "shap_raising": shap_raising, "shap_lowering": shap_lowering,
                 # The leader's edge over the runner-up in the SAME units as the
-                # clause before it — a slice of expected reward, not a
+                # clause before it — a slice of estimated expected reward, not a
                 # baseline-relative deviation.
                 "edge_favor_leader": edge_favor_leader,
                 "edge_favor_runner": edge_favor_runner,
@@ -1894,7 +1894,7 @@ def explain_thompson_sampling(
         else:
             f.write("No blips detected.\n")
 
-        f.write("\n--- Per-Regime Expected Rewards & Context-Feature Attribution ---\n")
+        f.write("\n--- Per-Regime Estimated Expected Rewards & Context-Feature Attribution ---\n")
         f.write("(Mean E[reward] over each regime's windows from the recorded pre-update\n")
         f.write(" beliefs. Two context feature splits, both averaged over the regime's windows\n")
         f.write(" using the beliefs held at each one. CONTRIBUTION is the raw split of\n")
@@ -1928,7 +1928,7 @@ def explain_thompson_sampling(
                         f"{raise_s}\n")
                 f.write(f"  DEVIATION — context features below it: {lower_s}\n")
             # The narrated edge, in contribution units: these deltas sum to the
-            # leader-vs-runner-up gap in expected reward reported above.
+            # leader-vs-runner-up gap in estimated expected reward reported above.
             has_edge = r.get("edge_favor_leader") or r.get("edge_favor_runner")
             if has_edge and r["runner_up"] and not np.isnan(r.get("edge_gap", float('nan'))):
                 favored = r["leader"] if r["edge_gap"] >= 0 else r["runner_up"]
@@ -1984,7 +1984,8 @@ def explain_thompson_sampling(
                 e_r_base = float(np.dot(mu, base))
                 delta = e_r - e_r_base
                 f.write(f"  {rank}. {model_name}  "
-                        f"(E[R | last] = {e_r:+.4f},  baseline E[R] = {e_r_base:+.4f},  delta = {delta:+.4f})\n")
+                        f"(estimated expected reward at last window = {e_r:+.4f},  "
+                        f"at the baseline window = {e_r_base:+.4f},  delta = {delta:+.4f})\n")
                 f.write(f"     Top 5 context features by |per-context-feature SHAP|:\n")
                 top_idx = np.argsort(np.abs(per_ch))[::-1][:5]
                 for c in top_idx:
@@ -2046,7 +2047,7 @@ def explain_thompson_sampling(
 
 # ── Ranking-criterion explainability (||mu_k||^2) ────────────────────────────
 #
-# The stage above explains mu^T x — the expected reward that drives per-window
+# The stage above explains mu^T x_t — the estimated expected reward that drives per-window
 # selection. Everything below explains the quantity the detectors are actually
 # ranked by, mu^T mu, which is context-free and therefore decomposes over
 # context features on its own, with no baseline and no SHAP.
@@ -2111,7 +2112,7 @@ def plot_ranking_criterion(means_history: List[Dict[str, np.ndarray]],
     ||mu_k||^2 for every detector across the run, with the leadership regimes
     shaded and the excluded warm-up greyed out.
 
-    The sibling of plot_expected_rewards, on the axis the ranking actually uses:
+    The sibling of plot_estimated_expected_rewards, on the axis the ranking actually uses:
     where that plot shows a detector's chance of being picked next, this one
     shows the quantity it is finally ranked by. Unsmoothed on purpose — regimes
     here are read off the raw series, so a smoothed curve would show boundaries
@@ -2167,7 +2168,6 @@ def plot_ranking_criterion(means_history: List[Dict[str, np.ndarray]],
 
     ax.set_xlabel('Window')
     ax.set_ylabel(r'Ranking score  $\|\mu_k\|^2$')
-    ax.set_title('Ranking score over the run, shaded by leadership regime')
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.6)
     ax.legend(loc='upper left', frameon=False, bbox_to_anchor=(1.01, 1),
               borderaxespad=0)
@@ -2223,7 +2223,6 @@ def plot_ranking_final(means: Dict[str, np.ndarray],
 
     ax.set_xlim(0, span * 1.35 if span else 1.0)
     ax.set_xlabel(r'Ranking score  $\|\mu_k\|^2$')
-    ax.set_title('Final ranking, with the number of windows each detector was tried')
     ax.grid(True, axis='x', linestyle='--', linewidth=0.5, alpha=0.6)
 
     directory = f'myresults/Thomposon/{dataset}/{entity}/'
@@ -2246,12 +2245,10 @@ def plot_ranking_channels(means: Dict[str, np.ndarray], n_context_features: int,
     per_context_feature = {m: aggregate_squared_per_context_feature(means[m], n_context_features)
                    for m in models}
     suffix = '_all' if all_models else ''
-    scope = 'all models' if all_models else f'top {top_k_models} by score'
     directory = f'myresults/Thomposon/{dataset}/{entity}/'
     os.makedirs(directory, exist_ok=True)
     _render_shap_comparison(
         per_context_feature, models, top_n_context_features,
-        title=f'Where each detector\'s ranking score comes from ({scope})',
         save_path=os.path.join(directory,
                                f'ranking_channels{suffix}_{iterations}.png'),
         ylabel=r'Contribution to $\|\mu_k\|^2$',
@@ -2288,10 +2285,12 @@ def plot_ranking_gap(means: Dict[str, np.ndarray], n_context_features: int,
     ax.barh([f'cf{c}' for c, _v in pairs], [v for _c, v in pairs],
             color=['#2F9E44' if v >= 0 else '#C92A2A' for _c, v in pairs])
     ax.axvline(0, color='black', linewidth=0.7)
-    total = float(np.sum(gap))
     ax.set_xlabel(r'Contribution to the gap in $\|\mu\|^2$')
-    ax.set_title(f'{winner} vs {runner}: where the {total:+.6f} margin came from\n'
-                 f'(green: {winner} ahead, red: {runner} ahead)')
+    # The bars are coloured by sign, so without this nothing on the figure says
+    # which detector a colour stands for.
+    ax.legend(handles=[Patch(color='#2F9E44', label=f'{winner} ahead'),
+                       Patch(color='#C92A2A', label=f'{runner} ahead')],
+              loc='lower right', frameon=False)
     ax.grid(True, axis='x', linestyle='--', linewidth=0.5, alpha=0.6)
 
     directory = f'myresults/Thomposon/{dataset}/{entity}/'
@@ -2332,20 +2331,20 @@ _PER_WINDOW_KINDS: Dict[str, Dict[str, Any]] = {
     "reward": {
         "label": "Reward contribution",
         "ylabel": _REWARD_YLABEL,
-        "title_top": "Expected-reward contribution — window {t} (top {k} by E[R] in window)",
-        "title_all": "Expected-reward contribution — window {t} (all models)",
-        "note": ("Each detector's bars sum to its expected reward at window {t}; "
-                 "no baseline is subtracted."),
+        "title_top": "Estimated-expected-reward contribution — window {t} (top {k} by estimated expected reward in window)",
+        "title_all": "Estimated-expected-reward contribution — window {t} (all models)",
+        "note": ("Each detector's bars sum to its estimated expected reward at "
+                 "window {t}; no baseline is subtracted."),
         "rank_by": "reward",
         "all_by": "final",
     },
     "shap": {
         "label": "Deviation from a typical window",
         "ylabel": "Per-context-feature SHAP contribution",
-        "title_top": "SHAP — window {t} (top {k} by E[R] in window)",
+        "title_top": "SHAP — window {t} (top {k} by estimated expected reward in window)",
         "title_all": "SHAP — window {t} (all models)",
         "note": None,
-        # The SHAP set's top-k was chosen on expected reward, not on SHAP, so
+        # The SHAP set's top-k was chosen on estimated expected reward, not on SHAP, so
         # the frame shows the same detectors as its reward sibling.
         "rank_by": "reward",
         "all_by": "final",
@@ -2484,8 +2483,6 @@ def plot_ranking_per_regime(means_history: List[Dict[str, np.ndarray]],
         rng = f'{fact["start"]}-{end}'
         _render_shap_comparison(
             per_context_feature, models, top_n_context_features,
-            title=(f'Ranking score by context feature — streak {fact["index"]} '
-                   f'({leader}, windows {rng}), as at window {end}'),
             save_path=os.path.join(
                 directory,
                 f'regime_{fact["index"]:02d}_w{rng}_{leader}.png'),
@@ -2784,9 +2781,9 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
         # WebUI draws whichever one is asked for rather than the pipeline
         # writing every one of them.
         save_per_window_context_features(means, shap_payload, dataset, entity, iterations)
-        plot_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
+        plot_estimated_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
                               dataset, entity, iterations, smooth=False)
-        plot_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
+        plot_estimated_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
                               dataset, entity, iterations, smooth=True)
         plot_selection_states(selection_states, dataset, entity, iterations)
         plot_shap_per_model(means, shap_payload, dataset, entity, iterations)
@@ -2802,7 +2799,7 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
         plot_shap_average_all(means, shap_payload, dataset, entity, iterations)
         plot_shap_average_all(means, shap_payload, dataset, entity, iterations, all_models=False)
 
-        # ── Expected-reward contribution (mu^T x split per context feature) ─────────
+        # ── Estimated-expected-reward contribution (mu^T x split per context feature) ─────────
         # Full parity with the SHAP sets above so the two can be read frame for
         # frame. These are the ones whose bars sum to the prediction; the SHAP
         # ones answer the narrower question of deviation from a typical window.
@@ -2821,7 +2818,7 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
 
         # ── Ranking criterion (||mu_k||^2) — the sibling stage ──────────────
         # Separate regimes from the ones above: leadership on the ranking score
-        # rather than on expected reward, by plain run-length encoding of the
+        # rather than on estimated expected reward, by plain run-length encoding of the
         # argmax. Segmented once here and handed to both the plots and the
         # report so a figure can never disagree with the sentence beside it.
         means_history = (shap_payload or {}).get("means_history") or []

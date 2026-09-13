@@ -661,7 +661,6 @@ def plot_aggregation_explainability(
     ax.set_xticklabels(source_names, rotation=30, ha="right")
     ax.set_ylim(0, 1.05)
     ax.set_ylabel("Score (rescaled to [0, 1])")
-    ax.set_title(f"Rank Aggregation Explainability — {stage_name} stage")
     ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
     ax.legend(loc="upper left", frameon=False,
               bbox_to_anchor=(1.01, 1), borderaxespad=0)
@@ -712,7 +711,6 @@ def plot_kendall_only_alignment(
     ax.set_xticklabels(source_names, rotation=15, ha="right")
     ax.set_ylabel("Kendall's tau with final ranking")
     ax.set_ylim(-1.05, 1.05)
-    ax.set_title(f"Kendall-tau-Only Alignment — {stage_name} stage")
     ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
 
     plt.tight_layout(pad=1.2)

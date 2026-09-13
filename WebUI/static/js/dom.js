@@ -80,6 +80,33 @@ export function familyClass(name) {
   return `chip chip-${family}`;
 }
 
+/* A base letter carrying U+0303 COMBINING TILDE, split into its own element.
+ *
+ * The notation needs θ̃, and a combining tilde is anchored for Latin bases: over
+ * a Greek theta the prose font drops it off to one side. Splitting the pair out
+ * lets CSS draw a spacing tilde centred above the base instead, which does not
+ * depend on the font having an anchor for that pair. Nodes, never markup, so a
+ * caller still cannot inject a string. */
+const TILDE = "̃";
+
+export function tildeNodes(text) {
+  const out = [];
+  let plain = "";
+  for (const ch of String(text)) {
+    if (ch === TILDE && plain) {
+      const base = Array.from(plain).pop();
+      plain = plain.slice(0, -base.length);
+      if (plain) out.push(plain);
+      out.push(el("span", { class: "tilde-over" }, base));
+      plain = "";
+      continue;
+    }
+    plain += ch;
+  }
+  if (plain) out.push(plain);
+  return out;
+}
+
 /* Paragraph-aware rendering: the narratives contain blank-line paragraph
  * breaks, and textContent alone would collapse them into one block. */
 export function proseNode(text, className = "prose") {

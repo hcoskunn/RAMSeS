@@ -113,7 +113,7 @@ class ArtifactTreeCase(unittest.TestCase):
                  "text": "Regime 0 (windows 0 to 4) was led by NN_3."},
             ]))
         _write(self.nl_dir / "nl_thompson.txt",
-               _nl("Expected reward is the weights applied to the window.",
+               _nl("Estimated expected reward is the mean weights applied to the window.",
                    "Thompson Sampling ranked NN_1 first."))
 
         # The ranking-criterion sibling: same tree, own files, own atom prefix.
@@ -448,7 +448,7 @@ class TestBuildPayload(ArtifactTreeCase):
         ts = next(s for s in p["stages"] if s["key"] == "thompson_sampling")
         self.assertEqual(ts["full"], "Thompson Sampling ranked NN_1 first.")
         self.assertNotIn("INFO:", ts["full"])
-        self.assertNotIn("Expected reward is the weights", ts["full"])
+        self.assertNotIn("Estimated expected reward is the mean weights", ts["full"])
         self.assertNotIn("info", ts)
 
     def test_headline_pick_handles_each_stages_naming(self):
@@ -654,7 +654,7 @@ class TestSummarizeSeam(ArtifactTreeCase):
     def test_glossary_is_never_summarised(self):
         p = artifacts.build_payload(self.DATASET, self.ENTITY)
         ts = next(s for s in p["stages"] if s["key"] == "thompson_sampling")
-        self.assertNotIn("Expected reward is", ts["summary"])
+        self.assertNotIn("Estimated expected reward is", ts["summary"])
 
 
 def _stage_ir(stage, atoms, output=None):
@@ -1764,7 +1764,7 @@ class TestPlots(unittest.TestCase):
 
     def test_per_regime_captions_say_which_quantity_they_show(self):
         """Three per-regime sets cover the same window range and show three
-        different things — a share of the expected reward, a departure from a
+        different things — a share of the estimated expected reward, a departure from a
         typical window, and a cumulative ranking snapshot. "Windows 10–62"
         alone under-describes all of them."""
         self._touch("Thomposon/SKAB/7/expected_rewards_50.png")
@@ -1789,11 +1789,11 @@ class TestPlots(unittest.TestCase):
             "SKAB", "7", ["reward_per_regime", "shap_per_regime"])
         self.assertEqual(sorted(variants), [0, 1])
         self.assertEqual([f["title"] for f in variants[0]],
-                         ["Expected-reward contribution", "Deviation from a typical window"])
+                         ["Estimated-expected-reward contribution", "Deviation from a typical window"])
         # A regime present in only one set keeps that set, rather than the
         # missing one shifting the others.
         self.assertEqual([f["title"] for f in variants[1]],
-                         ["Expected-reward contribution"])
+                         ["Estimated-expected-reward contribution"])
 
     def test_context_feature_plot_captions_state_the_selection_rule(self):
         """These figures plot a subset — 9 context features on SKAB, 38 on SMD — and the

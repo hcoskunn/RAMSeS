@@ -4,7 +4,7 @@
  * being rebuilt here, so what the user copies is exactly what gets spawned.
  */
 
-import { $, $$, el, getJSON, postJSON, pct, timeAgo, familyClass } from "./dom.js";
+import { $, $$, el, getJSON, postJSON, timeAgo, familyClass } from "./dom.js";
 
 const STAGE_LABELS = {
   ga: "Genetic algorithm", thompson: "Thompson Sampling", gan: "GAN perturbations",
@@ -486,10 +486,7 @@ function renderResults() {
       el("strong", { text: `${r.dataset_label || r.dataset} · ${r.entity}` }),
       el("div", { class: "small muted", text:
         `${r.framework_choice ? r.framework_choice.replace(/_/g, " ") : "no decision"} · ${r.n_stages} stages explained` })),
-    el("div", { class: "small muted mono", text:
-      [r.hallucination_rate !== null && r.hallucination_rate !== undefined
-        ? `${pct(r.hallucination_rate)} unsupported` : null,
-       timeAgo(r.generated_at)].filter(Boolean).join(" · ") }))));
+    el("div", { class: "small muted mono", text: timeAgo(r.generated_at) }))));
 }
 
 async function renderHealth() {

@@ -99,18 +99,24 @@ def load_csv_file(data_path: str, name_of_data: str, group: str, normalize: bool
     date_column_name = df.columns[0]
     df.set_index(date_column_name, inplace=True)
 
-    # Check if last column is binary (anomaly labels)
-    last_col = df.iloc[:, -1]
-    is_binary_label = set(last_col.unique()).issubset({0, 1, 0.0, 1.0})
-    
-    if is_binary_label:
-        # Separate labels from features
-        labels = last_col.values
-        X = df.iloc[:, :-1].values.T  # All columns except last
+    # SKAB: `anomaly` is the label, `changepoint` only marks where a collective
+    # anomaly begins. Both are ground truth, so neither belongs in the features.
+    if {'anomaly', 'changepoint'}.issubset(df.columns):
+        labels = df['anomaly'].values
+        X = df.drop(columns=['anomaly', 'changepoint']).values.T
     else:
-        # No labels column, use all columns as features
-        labels = None
-        X = df.values.T  # Shape: (n_features, n_timestamps)
+        # Check if last column is binary (anomaly labels)
+        last_col = df.iloc[:, -1]
+        is_binary_label = set(last_col.unique()).issubset({0, 1, 0.0, 1.0})
+
+        if is_binary_label:
+            # Separate labels from features
+            labels = last_col.values
+            X = df.iloc[:, :-1].values.T  # All columns except last
+        else:
+            # No labels column, use all columns as features
+            labels = None
+            X = df.values.T  # Shape: (n_features, n_timestamps)
     
     n_features, n_timestamps = X.shape
     

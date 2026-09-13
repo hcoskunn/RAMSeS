@@ -676,7 +676,8 @@ def _mc_explain_rcparams() -> None:
     })
 
 
-def plot_noise_curves(curves, model_names, metric_name, dataset, entity, plain: bool = False) -> None:
+def plot_noise_curves(curves, model_names, metric_name, dataset, entity, plain: bool = False,
+                      show_title: bool = True) -> None:
     """Per-model score vs noise_level.
 
     plain=False (default): mean±std band + win-region shading + crossover markers +
@@ -711,11 +712,10 @@ def plot_noise_curves(curves, model_names, metric_name, dataset, entity, plain: 
 
     ax.set_xlabel("noise_level (Gaussian std)")
     ax.set_ylabel(f"{metric_name}" + ("" if plain else " (mean ± std over repeats)"))
-    if plain:
-        ax.set_title(f"Monte Carlo · {metric_name} vs noise level (per-model means)")
-    else:
+    if show_title:
         ax.set_title(f"Monte Carlo · {metric_name} vs noise level "
-                     "(shaded = win-region; ▼ = breakdown)")
+                     + ("(per-model means)" if plain
+                        else "(shaded = win-region; ▼ = breakdown)"))
     ax.set_ylim(bottom=0)
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     ax.legend(loc="upper left", ncol=2, frameon=False, bbox_to_anchor=(1.01, 1), borderaxespad=0)
@@ -835,7 +835,10 @@ def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
     for _curves, _label in ((curves, "Fitness"), (curves_fixed, "Fitness_fixed")):
         if _curves:
             plot_noise_curves(_curves, models, _label, dataset, entity)
-            plot_noise_curves(_curves, models, _label, dataset, entity, plain=True)
+            # The plain fitness curve is the one the card leads with, and the card
+            # titles it itself.
+            plot_noise_curves(_curves, models, _label, dataset, entity, plain=True,
+                              show_title=_label != "Fitness")
     # Components are plain only: they browse beside the fitness curve rather
     # than leading, and the annotated version of each is the same data with
     # win-regions drawn over it.

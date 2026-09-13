@@ -432,7 +432,7 @@ def _caveat_lines(ir_doc: Dict[str, Any]) -> List[str]:
 #         "context features. Name that detector outright — never describe it by reference "
 #         "to the previous regime. Three different things are said about context features "
 #         "and they must not be merged or traded for one another: one context feature "
-#         "SUPPLIES a share of a detector's expected reward, one GIVES IT AN EDGE "
+#         "SUPPLIES a share of a detector's estimated expected reward, one GIVES IT AN EDGE "
 #         "over the named rival, and one DEPARTS FURTHEST FROM ITS USUAL "
 #         "contribution. The last is a separate sentence in the facts and must "
 #         "stay separate clauses. Keep whichever wording the fact uses. "
