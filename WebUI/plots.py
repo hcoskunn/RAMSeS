@@ -371,57 +371,30 @@ def regime_plot_variants(ds, ent, stems: List[str]) -> Dict[int, List[Dict[str, 
 def _monte_carlo(ds, ent):
     d = _dir_for(TREE_MC, ds, ent)
     headline, gallery = [], []
-    # Plain is the default: the un-annotated figure is the one that belongs in a
-    # thesis, and the annotated version is a click away.
-    # The stage ranks on the fitness, so that curve leads. The per-metric ones
-    # below are the terms it is built from.
-    _COMPONENT_CURVES = (
-        ("*_MonteCarlo_noise_curves_F1_plain.png", "F1"),
-        ("*_MonteCarlo_noise_curves_PRAUC_plain.png", "PR-AUC"),
-        ("*_MonteCarlo_noise_curves_VUS_plain.png", "VUS"))
-    fitness_curve = _ls(d, "*_MonteCarlo_noise_curves_Fitness_plain.png")
-    component_curves = _variants(d, [p for p, _ in _COMPONENT_CURVES],
-                                 [t for _, t in _COMPONENT_CURVES])
-    if fitness_curve:
+    # Both halves of what the stage explains: where each detector placed, and
+    # what it scored. The ranking figure leads because the placement is what the
+    # stage publishes; the scores are what the placement was read off.
+    for path in _ls(d, "*_MonteCarlo_trial_ranks.png"):
         headline.append(_fig(
-            fitness_curve[0], "Score against noise level",
-            "Each detector's fitness as injected noise grows."))
-    elif component_curves:
-        # A result tree written before the stage collapsed to one ranking has
-        # no fitness curve, only the per-metric set it ranked by.
-        headline.append({"title": "Score against noise level",
-                         "caption": "Each detector's score as injected noise grows.",
-                         "variants": component_curves, "default": 0})
-        component_curves = []
-    # Browse-only: the plain curves above are the ones that belong in a figure,
-    # these are for digging.
-    #
-    # The annotated curves are deliberately NOT offered. The pipeline still
-    # generates the annotated fitness pair — they are on disk for anyone who
-    # wants them — but they are the same data as the plain version in the
-    # headline with win-regions drawn over it, and the annotated fixed-threshold
-    # curve is superseded by its own plain version below. Offering all of them
-    # made the reader choose between near-duplicates.
-    for figure in component_curves:
-        gallery.append(dict(
-            figure, title=f"{figure['title']} against noise level",
-            caption=f"The {figure['title']} term on its own, one of the metrics "
-                    f"the fitness above combines."))
-    for pattern, title in (
-            ("*_MonteCarlo_noise_curves_Fitness_fixed_plain.png",
-             "Fitness at a fixed threshold"),
-            ("*_MonteCarlo_noise_curves_F1_fixed_plain.png",
-             "F1 at a fixed threshold"),
-            ("*_MonteCarlo_ranking_stability.png", "Ranking stability"),
-            ("*_MonteCarlo_surrogate_tree_Fitness.png", "Surrogate tree"),
-            ("*_MonteCarlo_surrogate_tree_F1.png", "Surrogate tree (F1)"),
-            ("*_MonteCarlo_surrogate_tree_PRAUC.png", "Surrogate tree (PR-AUC)"),
-            ("*_MonteCarlo_surrogate_tree_VUS.png", "Surrogate tree (VUS)")):
+            path, "Rank in each trial",
+            "Where each detector placed in every noise draw."))
+    for path in _ls(d, "*_MonteCarlo_trial_fitness.png"):
+        headline.append(_fig(
+            path, "Fitness in each trial",
+            "Every trial's fitness beside the mean the ranking is built from."))
+    # Browse-only: the terms the fitness above combines, so a reader can see
+    # which one moved between trials.
+    for pattern, title in (("*_MonteCarlo_trial_F1.png", "F1"),
+                           ("*_MonteCarlo_trial_PRAUC.png", "PR-AUC"),
+                           ("*_MonteCarlo_trial_VUS.png", "VUS")):
         for path in _ls(d, pattern):
-            gallery.append(_fig(path, title))
+            gallery.append(_fig(
+                path, f"{title} in each trial",
+                f"The {title} term on its own, one of the metrics the fitness "
+                f"above combines."))
     # The per-detector *_MonteCarloResults.png set is not listed. One figure per
-    # detector repeats what the noise curves already draw together, which is the
-    # comparison that matters here, and its title came out as a bare family
+    # detector repeats what the per-trial figures already draw together, which is
+    # the comparison that matters here, and its title came out as a bare family
     # index ("1", "2") because the stem splits on the underscore inside the
     # detector name.
     return headline, gallery

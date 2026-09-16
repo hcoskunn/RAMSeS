@@ -353,7 +353,7 @@ def build_offby_point_table(point_records, adjusted_y_pred_dict, true_labels,
 
 
 def train_offby_point_surrogates(table, winner, max_depth: int = 3,
-                                 random_state: int = 0) -> Dict[str, Any]:
+                                 random_state: int = 42) -> Dict[str, Any]:
     """
     For the winner, fit one DecisionTreeClassifier per competitor `k` predicting
     the winner's *exclusive wins*: y_i = winner_correct_i AND NOT k_correct_i.

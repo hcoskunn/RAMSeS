@@ -18,7 +18,7 @@ from flask import (Flask, Response, abort, jsonify, render_template, request,
 
 from Utils.pipeline_spec import (ALL_ANOMALY_TYPES, ALL_DETECTORS, ALL_STAGES,
                                  DECISION_METRICS, DEFAULT_LLM_BASE_URL,
-                                 DEFAULT_LLM_MODEL)
+                                 DEFAULT_LLM_MODEL, META_MODELS)
 from WebUI import artifacts, catalog, jobs, ondemand, paths, plots
 
 SSE_KEEPALIVE_SECONDS = 15
@@ -95,6 +95,10 @@ def _validate_run(body: Dict[str, Any]) -> Optional[str]:
                 return "decision metric weights must not be negative"
             if not any(w > 0 for w in weights.values()):
                 return "select at least one decision metric"
+    meta_model = body.get("meta_model")
+    if meta_model is not None and \
+            str(meta_model).strip().lower().replace("-", "_") not in META_MODELS:
+        return f"unknown meta-learner: {meta_model}"
     return None
 
 

@@ -68,303 +68,6 @@ def _fake_data(n=60, two_class=True):
     return types.SimpleNamespace(entities=[ent])
 
 
-# ════════════════════════════════════════════════════════════════════════════
-# 1.  monte_carlo_noise_sweep
-# ════════════════════════════════════════════════════════════════════════════
-
-class TestSweep(unittest.TestCase):
-
-    def test_shapes_and_grid(self):
-        models = ["A", "B"]
-        levels = np.linspace(0.0, 0.5, 6)
-
-        def ev(m, level):
-            return (0.9 - level if m == "A" else 0.2 + level, 0.5)
-
-        out = mc.monte_carlo_noise_sweep(_fake_data(), {}, models,
-                                         noise_levels=levels, repeats=4, evaluate_fn=ev)
-        self.assertIsNotNone(out)
-        self.assertEqual(out["F1"].shape, (6 * 4, 2))
-        self.assertEqual(out["noise"].shape, (6 * 4,))
-        self.assertTrue(np.allclose(np.unique(out["noise"]), levels))
-
-    def test_infeasible_returns_none(self):
-        # too small
-        self.assertIsNone(mc.monte_carlo_noise_sweep(_fake_data(n=20), {}, ["A"],
-                                                     evaluate_fn=lambda m, l: (0.5, 0.5)))
-        # single class
-        self.assertIsNone(mc.monte_carlo_noise_sweep(_fake_data(two_class=False), {}, ["A"],
-                                                     evaluate_fn=lambda m, l: (0.5, 0.5)))
-
-    def test_nan_on_model_failure(self):
-        def ev(m, level):
-            if m == "bad":
-                raise RuntimeError("boom")
-            return (0.7, 0.6)
-        out = mc.monte_carlo_noise_sweep(_fake_data(), {}, ["good", "bad"],
-                                         noise_levels=[0.0, 0.1], repeats=2, evaluate_fn=ev)
-        self.assertTrue(np.all(np.isnan(out["F1"][:, 1])))      # bad column all NaN
-        self.assertFalse(np.any(np.isnan(out["F1"][:, 0])))     # good column finite
-
-    def test_f1_fixed_two_tuple_mirrors_f1(self):
-        # A 2-tuple evaluate_fn carries no fixed value → F1_fixed == F1.
-        out = mc.monte_carlo_noise_sweep(_fake_data(), {}, ["A"],
-                                         noise_levels=[0.0, 0.25], repeats=2,
-                                         evaluate_fn=lambda m, l: (0.9 - l, 0.5))
-        self.assertEqual(out["F1_fixed"].shape, out["F1"].shape)
-        self.assertTrue(np.allclose(out["F1_fixed"], out["F1"]))
-
-    def test_f1_fixed_three_tuple_used(self):
-        # A 3-tuple evaluate_fn routes its 3rd element into F1_fixed.
-        out = mc.monte_carlo_noise_sweep(_fake_data(), {}, ["A"],
-                                         noise_levels=[0.0, 0.25], repeats=1,
-                                         evaluate_fn=lambda m, l: (0.9 - l, 0.5, 0.3 - l))
-        self.assertTrue(np.allclose(out["F1"].flatten(), [0.9, 0.65]))
-        self.assertTrue(np.allclose(out["F1_fixed"].flatten(), [0.3, 0.05]))
-
-    def test_grid_sorted_ascending(self):
-        out = mc.monte_carlo_noise_sweep(_fake_data(), {}, ["A"],
-                                         noise_levels=[0.5, 0.0, 0.25], repeats=1,
-                                         evaluate_fn=lambda m, l: (0.5, 0.5))
-        self.assertTrue(np.allclose(out["grid_levels"], [0.0, 0.25, 0.5]))
-
-
-class TestFixedThresholdHelpers(unittest.TestCase):
-
-    def test_f1_at_cut_nan(self):
-        self.assertTrue(np.isnan(mc._f1_at_cut(np.array([0, 1]), np.array([0.1, 0.9]), float('nan'))))
-
-    def test_best_f1_and_cut_returns_in_range_cut(self):
-        # f1_score is mocked to a constant, so the first quantile wins; the cut must
-        # be a real score-range value (not NaN) and best_f1 the mocked constant.
-        y_true = np.array([0, 0, 1, 1])
-        y_scores = np.array([0.1, 0.4, 0.6, 0.9])
-        best_f1, cut = mc._best_f1_and_cut(y_true, y_scores)
-        self.assertFalse(np.isnan(cut))
-        self.assertTrue(y_scores.min() <= cut <= y_scores.max())
-        self.assertGreater(best_f1, 0.0)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 2.  compute_noise_curves
-# ════════════════════════════════════════════════════════════════════════════
-
-class TestNoiseCurves(unittest.TestCase):
-
-    def test_crossover_winregions_breakdown(self):
-        models = ["A", "B"]
-        grid = np.array([0.0, 0.2, 0.4, 0.6])
-        # A leads at low noise then collapses below 0.5; B stays robust (always ≥0.5).
-        # scores: A = [0.9, 0.7, 0.3, 0.1] ; B = [0.55, 0.65, 0.6, 0.8]
-        noise = grid.copy()
-        score = np.array([[0.9, 0.55], [0.7, 0.65], [0.3, 0.6], [0.1, 0.8]])
-        cur = mc.compute_noise_curves(noise, grid, score, models, breakdown_threshold=0.5)
-        # winner flips A→B between 0.2 and 0.4.
-        self.assertEqual(len(cur["crossovers"]), 1)
-        self.assertEqual(cur["crossovers"][0]["from_model"], "A")
-        self.assertEqual(cur["crossovers"][0]["to_model"], "B")
-        self.assertAlmostEqual(cur["crossovers"][0]["noise"], 0.4)
-        # A's win-region covers the low-noise band.
-        self.assertEqual(cur["win_regions"]["A"], [(0.0, 0.2)])
-        # A breaks down (first mean <0.5) at 0.4; B never.
-        self.assertAlmostEqual(cur["breakdown_points"]["A"], 0.4)
-        self.assertIsNone(cur["breakdown_points"]["B"])
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 3.  compute_ranking_stability
-# ════════════════════════════════════════════════════════════════════════════
-
-class TestRankingStability(unittest.TestCase):
-
-    def test_constant_ranking_tau_one(self):
-        models = ["A", "B", "C"]
-        grid = np.array([0.0, 0.3])
-        # A>B>C at every level → τ ≈ 1 everywhere.
-        noise = np.array([0.0, 0.3])
-        score = np.array([[0.9, 0.5, 0.1], [0.8, 0.4, 0.05]])
-        st = mc.compute_ranking_stability(noise, grid, score, models)
-        self.assertTrue(np.all(st["tau_per_level"] > 0.99))
-
-    def test_reversed_ranking_tau_drops(self):
-        models = ["A", "B", "C"]
-        grid = np.array([0.0, 0.3])
-        # low noise A>B>C ; high noise C>B>A (full reversal) → τ negative at high.
-        noise = np.array([0.0, 0.3])
-        score = np.array([[0.9, 0.5, 0.1], [0.1, 0.5, 0.9]])
-        st = mc.compute_ranking_stability(noise, grid, score, models)
-        self.assertLess(st["tau_per_level"][1], 0.0)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 4.  winner-label / single-class surrogate path (no sklearn)
-# ════════════════════════════════════════════════════════════════════════════
-
-class TestWinnerLabelSingleClass(unittest.TestCase):
-
-    def test_single_winner_no_sklearn(self):
-        # A wins every row → single-class path returns without importing sklearn.
-        models = ["A", "B"]
-        noise = np.array([0.0, 0.1, 0.2, 0.3])
-        score = np.array([[0.9, 0.1]] * 4)
-        info = mc.train_noise_winner_surrogate(noise, score, models)
-        self.assertTrue(info["feasible"])
-        self.assertEqual(info["classes"], ["A"])
-        self.assertEqual(info["win_rates"]["A"], 1.0)
-        self.assertIn("Always A", info["rules_text"])
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 5.  Integration — needs sklearn (skips where mocked/missing)
-# ════════════════════════════════════════════════════════════════════════════
-
-class TestExplainMonteCarloIntegration(unittest.TestCase):
-
-    @staticmethod
-    def _flip_eval(m, level):
-        # A leads below s≈0.35, B above (0.9−s == 0.2+s ⇒ s = 0.35); same for F1 & PR.
-        s = (0.9 - level) if m == "A" else (0.2 + level)
-        return (s, s)
-
-    def test_winner_surrogate_threshold(self):
-        import importlib
-        if importlib.util.find_spec("sklearn") is None:
-            self.skipTest("scikit-learn not installed")
-        models = ["A", "B"]
-        sweep = mc.monte_carlo_noise_sweep(_fake_data(), {}, models,
-                                           noise_levels=np.linspace(0.0, 0.5, 15),
-                                           repeats=6, evaluate_fn=self._flip_eval)
-        info = mc.train_noise_winner_surrogate(sweep["noise"], sweep["F1"], models)
-        self.assertTrue(info["feasible"])
-        self.assertGreater(info["train_accuracy"], 0.9)
-        self.assertIsNotNone(info["root_threshold"])
-        self.assertTrue(0.25 < info["root_threshold"] < 0.45)
-        # Held-out fidelity (cross-validated) must be reported alongside the
-        # in-sample train_accuracy, not just the optimistic in-sample number.
-        self.assertIn("cv_accuracy", info)
-        self.assertFalse(np.isnan(info["cv_accuracy"]))
-        self.assertGreaterEqual(info["cv_accuracy"], 0.0)
-        self.assertLessEqual(info["cv_accuracy"], 1.0)
-        # This sweep has a clean, noise-free crossover, so the surrogate should
-        # generalize almost as well as it fits in-sample.
-        self.assertGreater(info["cv_accuracy"], 0.8)
-
-    def test_permodel_surrogates_report_cv_r2(self):
-        import importlib
-        if importlib.util.find_spec("sklearn") is None:
-            self.skipTest("scikit-learn not installed")
-        models = ["A", "B"]
-        sweep = mc.monte_carlo_noise_sweep(_fake_data(), {}, models,
-                                           noise_levels=np.linspace(0.0, 0.5, 15),
-                                           repeats=6, evaluate_fn=self._flip_eval)
-        permodel = mc.train_noise_permodel_surrogates(sweep["noise"], sweep["F1"], models)
-        for m in models:
-            self.assertIn("cv_r2", permodel[m])
-            self.assertIn("cv_method", permodel[m])
-
-    def test_constant_target_cv_r2_guarded(self):
-        """A flat curve (constant up to float noise) must report cv_r2 as NaN
-        with the constant_target method — never an astronomically negative
-        R^2 from a near-zero-variance fold. The guard fires before the
-        sklearn import, so this test needs no sklearn."""
-        sf = mc.surrogate_fidelity
-        X = np.linspace(0.0, 0.2, 20).reshape(-1, 1)
-        y = np.full(20, 0.618)
-        out = sf.held_out_regressor_fidelity(X, y)
-        self.assertTrue(np.isnan(out["cv_r2"]))
-        self.assertEqual(out["method"], "constant_target")
-        self.assertIn("constant", out["note"])
-        # Jitter below the 1e-8 tolerance is still "constant".
-        y_jit = y + np.random.RandomState(0).uniform(-1e-10, 1e-10, 20)
-        self.assertEqual(sf.held_out_regressor_fidelity(X, y_jit)["method"],
-                         "constant_target")
-
-    def test_mostly_flat_target_scored_per_fold(self):
-        """A mostly-flat curve (global spread > 1e-8, but some folds' test
-        points all on the flat part) must yield a finite cv_r2 via the
-        per-fold force_finite convention — never an astronomical negative."""
-        import importlib
-        if importlib.util.find_spec("sklearn") is None:
-            self.skipTest("scikit-learn not installed")
-        sf = mc.surrogate_fidelity
-        X = np.linspace(0.0, 0.2, 20).reshape(-1, 1)
-        y = np.full(20, 0.022) + np.random.RandomState(1).uniform(-1e-12, 1e-12, 20)
-        y[3] = 0.024
-        y[15] = 0.020
-        out = sf.held_out_regressor_fidelity(X, y)
-        self.assertEqual(out["method"], "kfold")
-        self.assertTrue(np.isfinite(out["cv_r2"]))
-        self.assertGreaterEqual(out["cv_r2"], -100.0)
-        self.assertIn("force_finite", out["note"])
-
-    def test_orchestrator_writes_report_and_plots(self):
-        import importlib
-        if importlib.util.find_spec("sklearn") is None:
-            self.skipTest("scikit-learn not installed")
-        models = ["A", "B"]
-        with tempfile.TemporaryDirectory() as tmp:
-            cwd = os.getcwd()
-            os.chdir(tmp)
-            try:
-                res = mc.explain_monte_carlo(
-                    _fake_data(), {"A": object(), "B": object()}, models,
-                    "TEST", "e1", noise_levels=np.linspace(0.0, 0.5, 15), repeats=5,
-                    explain=True, evaluate_fn=self._flip_eval,
-                )
-                self.assertIsInstance(res, dict)
-                for k in ("sweep", "curves", "curves_fixed", "stability",
-                          "winner", "permodel", "n_trials"):
-                    self.assertIn(k, res)
-                # The components stay in the sweep; the fitness is what the
-                # views read.
-                for k in ("F1", "F1_fixed", "PR", "VUS", "FIT", "FIT_fixed"):
-                    self.assertIn(k, res["sweep"])
-                    self.assertEqual(res["sweep"][k].shape, res["sweep"]["F1"].shape)
-                # A→B crossover should be detected on the fitness curves.
-                self.assertGreaterEqual(len(res["curves"]["crossovers"]), 1)
-                out = os.path.join("myresults", "robustness", "MonteCarlo", "TEST", "e1")
-                for fname in (
-                    "TEST_e1_MonteCarlo_explainability.txt",
-                    "TEST_e1_MonteCarlo_noise_curves_Fitness.png",
-                    "TEST_e1_MonteCarlo_noise_curves_Fitness_plain.png",
-                    "TEST_e1_MonteCarlo_noise_curves_Fitness_fixed.png",
-                    "TEST_e1_MonteCarlo_noise_curves_Fitness_fixed_plain.png",
-                    "TEST_e1_MonteCarlo_ranking_stability.png",
-                    "TEST_e1_MonteCarlo_surrogate_tree_Fitness.png",
-                ):
-                    self.assertTrue(os.path.exists(os.path.join(out, fname)), fname)
-                # One set, not one per metric.
-                for gone in ("TEST_e1_MonteCarlo_noise_curves_F1.png",
-                             "TEST_e1_MonteCarlo_noise_curves_PRAUC.png",
-                             "TEST_e1_MonteCarlo_surrogate_tree_F1.png"):
-                    self.assertFalse(os.path.exists(os.path.join(out, gone)), gone)
-                # Intermediate Representation JSON is emitted alongside.
-                import json
-                ir_path = os.path.join("myresults", "explanations_ir", "TEST", "e1",
-                                       "ir_monte_carlo.json")
-                self.assertTrue(os.path.exists(ir_path), ir_path)
-                with open(ir_path) as fh:
-                    ir_doc = json.load(fh)
-                self.assertEqual(ir_doc["stage"], "monte_carlo")
-                with open(os.path.join(
-                        out, "TEST_e1_MonteCarlo_explainability.txt")) as fh:
-                    report_txt = fh.read()
-                self.assertIn("Held-out accuracy", report_txt)
-                self.assertIn("R² (held-out)", report_txt)
-            finally:
-                os.chdir(cwd)
-
-    def test_explain_false_returns_none(self):
-        self.assertIsNone(mc.explain_monte_carlo(
-            _fake_data(), {}, ["A"], "X", "Y", explain=False))
-
-
-# ════════════════════════════════════════════════════════════════════════════
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class TestProductionRanking(unittest.TestCase):
     """The production summary publishes ONE ranking, by the run's own fitness."""
 
@@ -404,143 +107,267 @@ class TestProductionRanking(unittest.TestCase):
         self.assertEqual(s["ranked"][-1], "C")
         self.assertTrue(np.isnan(s["C"]["fitness"]))
 
-    def test_ranking_keys_cover_every_ranking_the_summary_adds(self):
-        """Whatever walks the summary must skip all of them."""
-        s = mc.summarize_results(self._results(True))
-        added = [k for k, v in s.items() if isinstance(v, list)]
-        self.assertEqual(set(added), set(mc.RANKING_KEYS))
 
 
-class TestSweepMetricGating(unittest.TestCase):
-    """The explain-only sweep computes what the run's fitness names, no more."""
+def _trials(matrix, names, vus=None):
+    """Trial x model score lists in the shape monte_carlo_simulation produces."""
+    matrix = np.asarray(matrix, dtype=float)
+    return {n: {"f1_scores": list(matrix[:, j]),
+                "pr_auc_scores": list(matrix[:, j]),
+                "vus_scores": ([] if vus is None else list(np.asarray(vus)[:, j]))}
+            for j, n in enumerate(names)}
+
+
+# A clear winner, a block of three that trade places, and a clear loser.
+_CONTESTED = [[0.90, 0.60, 0.55, 0.50, 0.10],
+              [0.91, 0.50, 0.60, 0.55, 0.11],
+              [0.92, 0.55, 0.50, 0.60, 0.09],
+              [0.90, 0.60, 0.55, 0.50, 0.10],
+              [0.91, 0.50, 0.60, 0.55, 0.12]]
+_NAMES = ["A", "B", "C", "D", "E"]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 1.  The trial matrices
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestTrialMatrices(unittest.TestCase):
+
+    def test_matrices_are_trials_by_models(self):
+        pt = mc.build_trial_matrices(_trials(_CONTESTED, _NAMES), 5)
+        self.assertEqual(pt["FIT"].shape, (5, 5))
+        self.assertEqual(pt["model_names"], _NAMES)
+        self.assertEqual(pt["n_trials"], 5)
+
+    def test_a_detector_that_timed_out_is_left_out(self):
+        """A timeout pops the model wholesale, so its list is short and the
+        columns would stop lining up if it were kept."""
+        results = _trials(_CONTESTED, _NAMES)
+        results["C"]["f1_scores"] = [0.5, 0.5]
+        pt = mc.build_trial_matrices(results, 5)
+        self.assertNotIn("C", pt["model_names"])
+        self.assertEqual(pt["FIT"].shape, (5, 4))
+
+    def test_the_fitness_cell_uses_the_runs_weights(self):
+        f1 = np.full((2, 1), 0.8)
+        pr = np.full((2, 1), 0.4)
+        results = {"A": {"f1_scores": list(f1[:, 0]),
+                         "pr_auc_scores": list(pr[:, 0]), "vus_scores": []}}
+        pt = mc.build_trial_matrices(results, 2, {"f1": 0.75, "pr_auc": 0.25})
+        self.assertAlmostEqual(pt["FIT"][0, 0], 0.75 * 0.8 + 0.25 * 0.4, places=6)
+
+    def test_no_usable_trials_gives_nothing(self):
+        self.assertEqual(mc.build_trial_matrices({}, 5), {})
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 2.  Per-trial ranking, spread, leave-one-out
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestTrialSummary(unittest.TestCase):
 
     @staticmethod
-    def _sweep(metrics):
-        return mc.monte_carlo_noise_sweep(
-            _fake_data(), {}, ["A", "B"], noise_levels=np.linspace(0.0, 0.2, 3),
-            repeats=2, evaluate_fn=lambda m, l: (0.8, 0.6, 0.7, 0.55),
-            metrics=metrics)
+    def _summary(matrix=None, names=None, ranked=None):
+        matrix = _CONTESTED if matrix is None else matrix
+        names = _NAMES if names is None else names
+        pt = mc.build_trial_matrices(_trials(matrix, names), len(matrix))
+        return mc.summarize_trials(pt, ranked)
 
-    def test_the_sweep_reports_which_metrics_it_ran(self):
-        self.assertEqual(self._sweep(("f1", "vus"))["metrics"], ("f1", "vus"))
+    def test_each_trial_is_ranked_on_its_own(self):
+        s = self._summary()
+        ranks = s["ranks"]
+        self.assertEqual(ranks.shape, (5, 5))
+        # A is best in every trial, E worst in every trial.
+        self.assertTrue(all(ranks[i, 0] == 1 for i in range(5)))
+        self.assertTrue(all(ranks[i, 4] == 5 for i in range(5)))
+        # The contested block really does change order.
+        self.assertGreater(len(set(tuple(r[1:4]) for r in ranks)), 1)
 
-    def test_every_column_is_present_whatever_was_asked_for(self):
-        """Shapes stay rectangular so nothing downstream has to branch."""
-        out = self._sweep(("f1",))
-        for key in ("F1", "F1_fixed", "PR", "VUS", "FIT", "FIT_fixed"):
-            self.assertEqual(out[key].shape, (3 * 2, 2), key)
+    def test_wins_count_the_trials_not_the_average(self):
+        s = self._summary()
+        self.assertEqual(s["wins"]["A"], 5)
+        self.assertEqual(sum(s["wins"].values()), 5)
 
-    def test_the_fitness_column_weights_the_components(self):
-        out = self._sweep({"f1": 0.75, "pr_auc": 0.25})
-        self.assertTrue(np.allclose(out["FIT"], 0.75 * 0.8 + 0.25 * 0.6))
-        # F1's frozen threshold feeds FIT_fixed in place of the adaptive F1.
-        self.assertTrue(np.allclose(out["FIT_fixed"], 0.75 * 0.7 + 0.25 * 0.6))
+    def test_rank_range_reports_best_and_worst_placing(self):
+        s = self._summary()
+        self.assertEqual(s["rank_ranges"]["A"], (1, 1))
+        self.assertEqual(s["rank_ranges"]["B"], (2, 4))
 
-    def test_an_uncomputable_component_voids_the_fitness_cell(self):
-        """Not renormalised: one detector scored on two metrics and another on
-        three cannot be ordered against each other."""
-        out = mc.monte_carlo_noise_sweep(
-            _fake_data(), {}, ["A", "B"], noise_levels=np.linspace(0.0, 0.2, 3),
-            repeats=2, metrics=("f1", "vus"),
-            evaluate_fn=lambda m, l: (0.8, 0.6, 0.7,
-                                      float("nan") if m == "A" else 0.5))
-        self.assertTrue(np.all(np.isnan(out["FIT"][:, 0])))
-        self.assertTrue(np.all(np.isfinite(out["FIT"][:, 1])))
+    def test_defeats_name_the_detector_that_led_each_lost_trial(self):
+        """Not the runner-up by mean: B is second overall but never tops a
+        trial, while C and D each take one off the winner."""
+        matrix = [[0.90, 0.80, 0.30, 0.30],
+                  [0.90, 0.80, 0.30, 0.30],
+                  [0.90, 0.80, 0.30, 0.30],
+                  [0.40, 0.38, 0.45, 0.30],
+                  [0.40, 0.38, 0.30, 0.42]]
+        s = self._summary(matrix, ["A", "B", "C", "D"])
+        d = s["defeats"]
+        self.assertEqual(d["winner"], "A")
+        self.assertEqual(d["n_defeats"], 2)
+        self.assertEqual([e["trial"] for e in d["events"]], [4, 5])
+        self.assertEqual([e["detector"] for e in d["events"]], ["C", "D"])
+        self.assertAlmostEqual(d["margin_max"], 0.05, places=6)
+        self.assertAlmostEqual(d["margin_min"], 0.02, places=6)
+        # Each challenger carries where it finished, and B is not among them.
+        self.assertEqual([(c["detector"], c["place"]) for c in d["challengers"]],
+                         [("C", 3), ("D", 4)])
 
-    def test_an_injected_evaluator_can_supply_a_vus_column(self):
-        out = self._sweep(("f1", "pr_auc", "vus"))
-        self.assertTrue(np.allclose(out["VUS"], 0.55))
-        self.assertTrue(np.allclose(out["PR"], 0.6))
+    def test_a_winner_that_led_every_trial_has_no_defeats(self):
+        matrix = [[0.9, 0.6, 0.3]] * 4
+        self.assertEqual(self._summary(matrix, ["A", "B", "C"])["defeats"]["n_defeats"], 0)
+
+    def test_one_challenger_taking_two_trials_is_listed_once(self):
+        matrix = [[0.90, 0.80], [0.90, 0.80], [0.90, 0.80],
+                  [0.40, 0.45], [0.40, 0.43]]
+        d = self._summary(matrix, ["A", "B"])["defeats"]
+        self.assertEqual(len(d["challengers"]), 1)
+        self.assertEqual(d["challengers"][0]["trials"], 2)
+
+    def test_the_published_ranking_sets_the_order(self):
+        """The explanation must walk detectors the way the card does, even when
+        the passed ranking and the means disagree."""
+        s = self._summary(ranked=["E", "D", "C", "B", "A"])
+        self.assertEqual(s["order"], ["E", "D", "C", "B", "A"])
+
+    def test_leave_one_trial_out_keeps_a_winner_that_led_every_trial(self):
+        s = self._summary()
+        self.assertTrue(s["leave_one_out"]["stable"])
+        self.assertEqual(s["leave_one_out"]["flips"], [])
+
+    def test_leave_one_trial_out_names_the_trial_that_carries_first_place(self):
+        """A wins on the mean only because of trial 1; drop it and B leads."""
+        matrix = [[0.99, 0.50],
+                  [0.40, 0.50],
+                  [0.40, 0.50]]
+        s = self._summary(matrix, ["A", "B"])
+        loo = s["leave_one_out"]
+        self.assertEqual(loo["winner"], "A")
+        self.assertFalse(loo["stable"])
+        self.assertEqual([f["trial"] for f in loo["flips"]], [1])
+        self.assertEqual(loo["flips"][0]["winner"], "B")
+
+    def test_the_gap_is_a_median_so_one_huge_gap_cannot_skew_it(self):
+        """Four gaps of 0.05 and one of 0.60: the mean would report 0.16 and
+        read as a well separated ranking, the median reports the 0.05 that
+        actually separates neighbouring places."""
+        row = [0.90, 0.85, 0.80, 0.75, 0.70, 0.10]
+        s = self._summary([row, row], ["A", "B", "C", "D", "E", "F"])
+        self.assertEqual(s["median_spread"], 0.0)
+        self.assertAlmostEqual(s["median_gap"], 0.05, places=6)
 
 
-class TestExplainMetricGating(unittest.TestCase):
-    """Only the chosen metrics produce curves, surrogates and report sections."""
+class TestWinnerDecomposition(unittest.TestCase):
 
-    def _run(self, metrics, tmp):
-        cwd = os.getcwd()
+    @staticmethod
+    def _winner(f1, pr, names=("A", "B")):
+        results = {n: {"f1_scores": list(np.asarray(f1)[:, j]),
+                       "pr_auc_scores": list(np.asarray(pr)[:, j]),
+                       "vus_scores": []} for j, n in enumerate(names)}
+        pt = mc.build_trial_matrices(results, len(f1))
+        return mc.summarize_trials(pt)["winner"]
+
+    def test_leading_on_every_term_is_recorded_as_such(self):
+        w = self._winner([[0.9, 0.5], [0.9, 0.5]], [[0.8, 0.4], [0.8, 0.4]])
+        self.assertEqual(w["winner"], "A")
+        self.assertEqual(w["runner_up"], "B")
+        self.assertTrue(w["led_every_term"])
+
+    def test_a_deficit_covered_by_another_term_is_recorded_as_such(self):
+        """A wins the fitness while losing PR-AUC — a different reason to rank
+        first, so the flag has to separate the two cases."""
+        w = self._winner([[0.9, 0.5], [0.9, 0.5]], [[0.3, 0.4], [0.3, 0.4]])
+        self.assertEqual(w["winner"], "A")
+        self.assertFalse(w["led_every_term"])
+        deltas = {t["metric"]: t["delta"] for t in w["terms"]}
+        self.assertGreater(deltas["f1"], 0)
+        self.assertLess(deltas["pr_auc"], 0)
+
+    def test_the_margin_is_reported_per_trial(self):
+        w = self._winner([[0.9, 0.5], [0.6, 0.5]], [[0.9, 0.5], [0.6, 0.5]])
+        self.assertEqual(w["ahead_in_trials"], 2)
+        self.assertAlmostEqual(w["margin_max"], 0.4, places=6)
+        self.assertAlmostEqual(w["margin_min"], 0.1, places=6)
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 3.  Orchestrator: report, figures, IR
+# ════════════════════════════════════════════════════════════════════════════
+
+class TestOrchestrator(unittest.TestCase):
+
+    def _run(self, tmp, metrics=("f1", "pr_auc"), vus=None):
         os.chdir(tmp)
-        try:
-            return mc.explain_monte_carlo(
-                _fake_data(), {}, ["A", "B"], "DS", "e1",
-                noise_levels=np.linspace(0.0, 0.2, 3), repeats=2, explain=True,
-                evaluate_fn=lambda m, l: (0.9 - l if m == "A" else 0.2 + l, 0.6, 0.7, 0.55),
-                metrics=metrics)
-        finally:
-            os.chdir(cwd)
+        pt = mc.build_trial_matrices(_trials(_CONTESTED, _NAMES, vus), 5, metrics)
+        return mc.explain_monte_carlo(pt, _NAMES, "DS", "e1", explain=True,
+                                      metrics=metrics, noise_level=0.1)
 
-    def test_one_set_of_structures_whatever_the_fitness_names(self):
+    def test_explain_false_returns_none(self):
+        self.assertIsNone(mc.explain_monte_carlo({}, [], "DS", "e1", explain=False))
+
+    def test_no_trials_returns_none(self):
+        self.assertIsNone(mc.explain_monte_carlo({}, [], "DS", "e1", explain=True))
+
+    def test_writes_report_and_figures(self):
+        cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._run(("f1", "pr_auc", "vus"), tmp)
-            self.assertTrue(res["curves"])
-            self.assertTrue(res["stability"])
-            self.assertEqual(res["fitness_formula"],
-                             "0.333 * F1 + 0.333 * PR-AUC + 0.333 * VUS")
-            report = _read_report(tmp)
-        self.assertIn("Method A · fitness curves", report)
-        self.assertIn("0.333 * F1 + 0.333 * PR-AUC + 0.333 * VUS", report)
-        for gone in ("Method A · F1 curves", "Method A · PR-AUC curves",
-                     "Method A · VUS curves"):
-            self.assertNotIn(gone, report)
+            try:
+                self._run(tmp)
+                directory = os.path.join(tmp, "myresults", "robustness",
+                                         "MonteCarlo", "DS", "e1")
+                names = set(os.listdir(directory))
+                self.assertIn("DS_e1_MonteCarlo_trial_ranks.png", names)
+                self.assertIn("DS_e1_MonteCarlo_trial_fitness.png", names)
+                self.assertIn("DS_e1_MonteCarlo_explainability.txt", names)
+            finally:
+                os.chdir(cwd)
 
-    def test_each_component_of_the_fitness_gets_its_own_curve(self):
-        """The sweep already holds the component matrices, so the terms the
-        fitness combines are drawn beside it for browsing. Only those the
-        fitness names: an unchosen metric was never computed."""
+    def test_every_fitness_component_gets_its_own_figure(self):
+        cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._run(("f1", "vus"), tmp)
-            self.assertEqual(sorted(res["component_curves"]), ["F1", "VUS"])
-            figs = os.listdir(os.path.join(tmp, "myresults", "robustness",
-                                           "MonteCarlo", "DS", "e1"))
-        names = " ".join(figs)
-        self.assertIn("noise_curves_F1_plain.png", names)
-        self.assertIn("noise_curves_VUS_plain.png", names)
-        self.assertNotIn("noise_curves_PRAUC", names)
-        # Plain only: the annotated version of a component is the same data
-        # with win-regions over it, and nothing offers it.
-        self.assertNotIn("noise_curves_F1.png", names)
-        self.assertNotIn("noise_curves_VUS.png", names)
+            try:
+                self._run(tmp, metrics=("f1", "pr_auc", "vus"),
+                          vus=np.full((5, 5), 0.5))
+                names = set(os.listdir(os.path.join(
+                    tmp, "myresults", "robustness", "MonteCarlo", "DS", "e1")))
+                for tag in ("F1", "PRAUC", "VUS"):
+                    self.assertIn(f"DS_e1_MonteCarlo_trial_{tag}.png", names)
+            finally:
+                os.chdir(cwd)
 
-    def test_a_one_term_fitness_draws_no_component_curve(self):
-        """The fitness IS that metric there, so a component curve would be the
-        same data under a second name: one figure in the headline and its twin
-        in the gallery, captioned as one of several terms."""
+    def test_a_one_term_fitness_draws_no_component_figure(self):
+        """The component figures exist to show which term moved; with one term
+        they would duplicate the fitness figure exactly."""
+        cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._run(("f1",), tmp)
-            self.assertEqual(res["component_curves"], {})
-            sweep = res["sweep"]
-            figs = os.listdir(os.path.join(tmp, "myresults", "robustness",
-                                           "MonteCarlo", "DS", "e1"))
-        self.assertTrue(np.allclose(sweep["FIT"], sweep["F1"], equal_nan=True))
-        names = " ".join(figs)
-        self.assertIn("noise_curves_Fitness_plain.png", names)
-        self.assertNotIn("noise_curves_F1_plain.png", names)
+            try:
+                self._run(tmp, metrics=("f1",))
+                names = set(os.listdir(os.path.join(
+                    tmp, "myresults", "robustness", "MonteCarlo", "DS", "e1")))
+                self.assertIn("DS_e1_MonteCarlo_trial_fitness.png", names)
+                self.assertNotIn("DS_e1_MonteCarlo_trial_F1.png", names)
+            finally:
+                os.chdir(cwd)
 
-    def test_a_thresholdless_fitness_skips_the_frozen_view(self):
-        """Only F1 carries a threshold, so there is nothing to freeze."""
+    def test_the_report_carries_every_trials_ranking(self):
+        cwd = os.getcwd()
         with tempfile.TemporaryDirectory() as tmp:
-            res = self._run(("vus",), tmp)
-            self.assertTrue(res["curves"])
-            self.assertEqual(res["curves_fixed"], {})
-            report = _read_report(tmp)
-        self.assertNotIn("Fixed-operating-point degradation", report)
+            try:
+                self._run(tmp)
+                text = _read_report(tmp)
+                for i in range(1, 6):
+                    self.assertIn(f"Trial {i}:", text)
+                self.assertIn("Median fitness spread between trials", text)
+                self.assertIn("Leave-one-trial-out", text)
+            finally:
+                os.chdir(cwd)
 
-    def test_the_figures_are_named_for_the_fitness_not_the_metrics(self):
-        """The result page globs these, so the names must not move when the
-        run configuration changes which metrics the fitness names."""
-        for metrics in (("f1", "vus"), ("f1", "pr_auc")):
-            with tempfile.TemporaryDirectory() as tmp:
-                self._run(metrics, tmp)
-                figs = os.listdir(os.path.join(tmp, "myresults", "robustness",
-                                               "MonteCarlo", "DS", "e1"))
-            names = " ".join(figs)
-            self.assertIn("noise_curves_Fitness_plain.png", names, metrics)
-            # No surrogate-tree assertion: this grid never reaches the
-            # crossover, so the sweep has one winner and no tree is fitted.
-            # The per-metric names still appear as the fitness components, but
-            # nothing the stage RANKS on carries a metric name any more.
-            for gone in ("surrogate_tree_F1", "surrogate_tree_PRAUC",
-                         "surrogate_tree_VUS", "ranking_stability_F1"):
-                self.assertNotIn(gone, names, metrics)
+    def test_no_sweep_is_run(self):
+        """The layer reads the trials the ranking averages; a second experiment
+        is exactly what this change removed."""
+        for gone in ("monte_carlo_noise_sweep", "compute_noise_curves",
+                     "train_noise_winner_surrogate", "plot_ranking_stability"):
+            self.assertFalse(hasattr(mc, gone), gone)
 
 
 def _read_report(tmp):
@@ -548,3 +375,7 @@ def _read_report(tmp):
     name = [f for f in os.listdir(directory) if f.endswith("_explainability.txt")][0]
     with open(os.path.join(directory, name)) as f:
         return f.read()
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

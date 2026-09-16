@@ -76,7 +76,7 @@ class LLMClient:
                  # 600s, not 120: the Thompson stage alone exceeds two
                  # minutes on a 14B model, and it fails quietly — narrate_entity
                  # records the error and the run still reports success.
-                 temperature: float = 0.0, seed: int = 0, timeout: int = 600,
+                 temperature: float = 0.0, seed: int = 42, timeout: int = 600,
                  transport: Optional[Callable[[Dict[str, Any]], str]] = None):
         self.base_url = base_url.rstrip("/")
         self.model = model

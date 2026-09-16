@@ -301,6 +301,16 @@ DECISION_METRICS: Dict[str, str] = {"f1": "F1", "pr_auc": "PR-AUC", "vus": "VUS"
 
 DEFAULT_DECISION_METRICS: Tuple[str, ...] = ("f1", "pr_auc")
 
+# The level-1 learner the GA stacks the chosen detectors' scores into. Fixed for
+# a run rather than searched per subset; the keys are the ones
+# `Metrics.Ensemble_GA.fitness_function` dispatches on.
+META_MODELS: Dict[str, str] = {
+    "rf": "Random Forest", "lr": "Logistic Regression",
+    "gbm": "Gradient Boosting", "svm": "SVM",
+}
+
+DEFAULT_META_MODEL = "rf"
+
 # Iteration number the explainability artifacts are written under. Deliberately
 # distinct from the CLI --iteration (which sizes the online windows), so IR/NL
 # filenames stay stable across online configurations.
@@ -425,6 +435,23 @@ def parse_decision_metrics(text) -> Union[Tuple[str, ...], Dict[str, float]]:
         return tuple(chosen)
     total = sum(chosen.values())
     return {m: w / total for m, w in chosen.items()}
+
+
+def parse_meta_model(text) -> str:
+    """A meta-learner name -> its canonical key."""
+    if text is None or (isinstance(text, str) and not text.strip()):
+        return DEFAULT_META_MODEL
+    name = str(text).strip().lower().replace("-", "_")
+    if name not in META_MODELS:
+        raise ValueError(
+            f"--meta_model: unknown meta-learner '{text}'. "
+            f"Valid choices: {', '.join(META_MODELS)}")
+    return name
+
+
+def meta_model_label(key: str) -> str:
+    """'rf' -> 'Random Forest'."""
+    return META_MODELS.get(str(key).lower(), str(key))
 
 
 def format_decision_metrics(spec) -> str:

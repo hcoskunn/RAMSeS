@@ -307,7 +307,8 @@ class TestBuildPayload(ArtifactTreeCase):
         by = {s["key"]: s["terms"] for s in p["stages"]}
         self.assertEqual([t for t, _d in by["thompson_ranking"]],
                          ["Score", "Share", "Contribution", "Margin", "Streak"])
-        self.assertEqual([t for t, _d in by["monte_carlo"]], ["Noise level", "Fitness"])
+        self.assertEqual([t for t, _d in by["monte_carlo"]],
+                         ["Noise level", "Trial"])
         self.assertTrue(all(t and d for stage in by.values() for t, d in stage), by)
 
     def test_both_consensus_cards_define_the_same_vocabulary(self):
@@ -688,33 +689,32 @@ class TestSummaryDropsAtomClasses(unittest.TestCase):
         self.assertIn("LOF_1 was chosen", out["summary"])
         self.assertNotIn("CBLOF_3", out["summary"])
 
-    def test_monte_carlo_drops_the_per_noise_walk(self):
+    def test_monte_carlo_drops_the_per_detector_walk(self):
         """Dropped by type, not by position: the narrator merges facts, so a
         count of atoms cuts in the wrong place."""
         ir_doc = _stage_ir("monte_carlo", [
             {"id": "t", "type": "stage_output", "subject": "LOF_1", "value": {},
-             "text": "In the production test, LOF_1 ranked first by F1."},
-            {"id": "v1", "type": "sweep_verdict", "subject": "LOF_1", "value": {},
-             "text": "Measured by F1, the sweep and the production run agree."},
-            {"id": "v2", "type": "sweep_verdict", "subject": "NN_3", "value": {},
-             "text": "Measured by PR-AUC, the sweep and the production run do "
-                     "not agree."},
-            {"id": "r", "type": "surrogate_win_rates", "subject": "rates",
-             "value": {}, "text": "Across the sweep LOF_1 led with 39.0%."},
-            {"id": "w", "type": "win_region", "subject": "NN_3", "value": {},
-             "text": "NN_3 won by F1 at noise levels 0.042 and 0.158."},
+             "text": "LOF_1 ranked first in the Monte Carlo test."},
+            {"id": "c", "type": "winner_consistency", "subject": "LOF_1",
+             "value": {}, "text": "LOF_1 scored highest in four of the five trials."},
+            {"id": "s", "type": "spread_comparison", "subject": "fitness",
+             "value": {}, "text": "A detector's fitness moved by 0.0340 between trials."},
+            {"id": "r1", "type": "rank_range", "subject": "NN_3", "value": {},
+             "text": "NN_3 placed as high as second and as low as eighth."},
+            {"id": "r2", "type": "rank_range", "subject": "PCA_1", "value": {},
+             "text": "PCA_1 placed as high as third and as low as ninth."},
         ])
-        narrative = ("In the production test, LOF_1 ranked first by F1. "
-                     "Measured by F1, the sweep and the production run agree. "
-                     "Measured by PR-AUC, the sweep and the production run do "
-                     "not agree. Across the sweep LOF_1 led with 39.0%. NN_3 "
-                     "won by F1 at noise levels 0.042 and 0.158.")
+        narrative = ("LOF_1 ranked first in the Monte Carlo test. LOF_1 scored "
+                     "highest in four of the five trials. A detector's fitness "
+                     "moved by 0.0340 between trials. NN_3 placed as high as "
+                     "second and as low as eighth. PCA_1 placed as high as "
+                     "third and as low as ninth.")
         out = summarize.summarize(narrative, stage="monte_carlo", ir_doc=ir_doc)
         self.assertEqual(out["mode"], "drop")
         self.assertFalse(out["is_full"])
-        self.assertIn("39.0%", out["summary"])
-        self.assertIn("PR-AUC", out["summary"])
-        self.assertNotIn("0.042", out["summary"])
+        self.assertIn("0.0340", out["summary"])
+        self.assertIn("four of the five trials", out["summary"])
+        self.assertNotIn("eighth", out["summary"])
 
     def test_off_by_and_gan_keep_only_their_opening_sentences(self):
         """These two stages summarise by POSITION, not by atom type.
@@ -1648,13 +1648,6 @@ class TestPlots(unittest.TestCase):
                 if a != b:
                     self.assertFalse(a.startswith(b), f"{a} starts with {b}")
 
-    def test_monte_carlo_defaults_to_the_plain_variant(self):
-        for suffix in ("F1_plain", "F1", "PRAUC_plain"):
-            self._touch(f"robustness/MonteCarlo/SKAB/7/SKAB_7_MonteCarlo_noise_curves_{suffix}.png")
-        headline, _ = self.plots._monte_carlo("SKAB", "7")
-        self.assertEqual(headline[0]["default"], 0)
-        self.assertIn("_F1_plain.png", headline[0]["variants"][0]["name"])
-
     def test_ale_views_are_one_toggle_with_the_plain_curve_first(self):
         """Both ALE figures share the `ga_combination_ale` prefix, and the
         dataset name follows it — so they are split by name, not by a glob
@@ -1733,34 +1726,30 @@ class TestPlots(unittest.TestCase):
         page = self.plots.gallery_page("SKAB", "7", "ts_ranking/ranking_per_window_50")
         self.assertEqual(page["total"], 30)
 
-    def test_monte_carlo_leads_with_fitness_and_browses_its_components(self):
-        """The stage ranks on the fitness, so that curve is the headline and the
-        metrics it combines are browse-only."""
-        stem = "robustness/MonteCarlo/SKAB/7/SKAB_7_MonteCarlo_noise_curves"
-        for tag in ("Fitness_plain", "F1_plain", "PRAUC_plain"):
+    def test_monte_carlo_leads_with_both_halves_and_browses_its_components(self):
+        """The stage explains a ranking read off per-trial scores, so both the
+        placements and the scores lead; the fitness terms are browse-only."""
+        stem = "robustness/MonteCarlo/SKAB/7/SKAB_7_MonteCarlo_trial"
+        for tag in ("ranks", "fitness", "F1", "PRAUC"):
             self._touch(f"{stem}_{tag}.png")
         headline, gallery = self.plots._monte_carlo("SKAB", "7")
         self.assertEqual([f["title"] for f in headline],
-                         ["Score against noise level"])
-        self.assertIn("Fitness_plain", headline[0]["src"])
-        self.assertNotIn("variants", headline[0])
-        titles = [f["title"] for f in gallery]
-        self.assertEqual(titles[:2], ["F1 against noise level",
-                                      "PR-AUC against noise level"])
+                         ["Rank in each trial", "Fitness in each trial"])
+        self.assertIn("trial_ranks", headline[0]["src"])
+        self.assertEqual([f["title"] for f in gallery],
+                         ["F1 in each trial", "PR-AUC in each trial"])
         self.assertIn("one of the metrics the fitness above combines",
                       gallery[0]["caption"])
 
-    def test_a_pre_collapse_tree_still_leads_with_its_metric_curves(self):
-        """Result trees written while the stage ranked per metric have no
-        fitness curve. Those keep the old picker rather than an empty headline
-        and three gallery entries."""
+    def test_a_result_tree_without_the_trial_figures_renders_empty(self):
+        """Trees written before the stage read its own trials have only sweep
+        figures, which are no longer listed. An empty card beats a stale one."""
         stem = "robustness/MonteCarlo/SKAB/7/SKAB_7_MonteCarlo_noise_curves"
-        for tag in ("F1_plain", "PRAUC_plain"):
+        for tag in ("Fitness_plain", "F1_plain"):
             self._touch(f"{stem}_{tag}.png")
         headline, gallery = self.plots._monte_carlo("SKAB", "7")
-        self.assertEqual([v["title"] for v in headline[0]["variants"]],
-                         ["F1", "PR-AUC"])
-        self.assertEqual([f["title"] for f in gallery], [])
+        self.assertEqual(headline, [])
+        self.assertEqual(gallery, [])
 
     def test_per_regime_captions_say_which_quantity_they_show(self):
         """Three per-regime sets cover the same window range and show three

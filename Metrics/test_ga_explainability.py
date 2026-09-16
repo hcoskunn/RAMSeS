@@ -576,6 +576,71 @@ class TestCombination(unittest.TestCase):
         finally:
             GA.train_meta_model_rf = orig
 
+    def test_add_one_in_is_the_mirror_of_lofo(self):
+        # LOFO removes a member; this adds a non-member, against the same base.
+        import Metrics.Ensemble_GA as GA
+        seen = []
+
+        def fake_full(subset):
+            seen.append(tuple(subset))
+            score = {("A", "B"): 0.70, ("A", "B", "C"): 0.64,
+                     ("A", "B", "D"): 0.78}[tuple(sorted(subset))]
+            return (0.0, 0.0, score, None, None, None)
+
+        out = GA.compute_add_one_in(["A", "B"], ["C", "D"], ["A", "B", "C", "D"],
+                                    fake_full)
+        self.assertAlmostEqual(out["C"]["delta"], -0.06)
+        self.assertAlmostEqual(out["D"]["delta"], 0.08)
+        # The base is evaluated once, not once per excluded detector.
+        self.assertEqual(seen.count(("A", "B")), 1)
+
+    def test_add_one_in_without_a_winner_returns_nans(self):
+        import Metrics.Ensemble_GA as GA
+        out = GA.compute_add_one_in([], ["C"], ["C"], lambda s: None)
+        self.assertTrue(np.isnan(out["C"]["delta"]))
+
+    def test_redundancy_finds_the_member_it_duplicates(self):
+        import Metrics.Ensemble_GA as GA
+        rng = np.random.RandomState(0)
+        a = rng.rand(50)
+        X = np.column_stack([a, rng.rand(50), a * 2.0 + 0.01 * rng.rand(50)])
+        out = GA.compute_score_redundancy(["A", "B"], ["C"], ["A", "B", "C"], X)
+        self.assertEqual(out["C"]["partner"], "A")
+        self.assertGreater(out["C"]["redundancy"], 0.99)
+
+    def test_redundancy_is_nan_for_a_constant_column(self):
+        # A detector that emits one value has no correlation with anything, and
+        # must not be reported as duplicating a member.
+        import Metrics.Ensemble_GA as GA
+        X = np.column_stack([np.random.RandomState(0).rand(20), np.ones(20)])
+        out = GA.compute_score_redundancy(["A"], ["B"], ["A", "B"], X)
+        self.assertTrue(np.isnan(out["B"]["redundancy"]))
+        self.assertIsNone(out["B"]["partner"])
+
+    def test_refit_noise_is_two_sigma_of_the_repeats(self):
+        import Metrics.Ensemble_GA as GA
+        scores = iter([0.60, 0.62, 0.64, 0.66, 0.68])
+
+        def fake_fitness(*a, **k):
+            return (0.0, 0.0, next(scores), None, None, None)
+
+        orig = GA.fitness_function
+        GA.fitness_function = fake_fitness
+        try:
+            out = GA.measure_refit_noise(["A"], ["A"], None, None,
+                                         np.zeros((2, 1)), None, repeats=5)
+        finally:
+            GA.fitness_function = orig
+        self.assertEqual(out["repeats"], 5)
+        self.assertAlmostEqual(out["sigma"], float(np.std(
+            [0.60, 0.62, 0.64, 0.66, 0.68], ddof=1)))
+        self.assertAlmostEqual(out["eps"], 2 * out["sigma"])
+
+    def test_refit_noise_on_an_empty_ensemble_is_nan(self):
+        import Metrics.Ensemble_GA as GA
+        out = GA.measure_refit_noise([], ["A"], None, None, None, None)
+        self.assertTrue(np.isnan(out["eps"]))
+
     def test_score_ensemble_reads_only_the_ensembles_columns(self):
         # The winner is scored on the test split after the search, and the meta-model
         # it was validated with expects exactly its own columns, in algorithm_list order.

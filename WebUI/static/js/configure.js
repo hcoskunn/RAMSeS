@@ -32,6 +32,7 @@ function currentBody(extra = {}) {
     anomaly_type: $("#anomaly_type").value,
     anomaly_rate: Number($("#anomaly_rate").value) || null,
     decision_metrics: metricWeights(),
+    meta_model: $("#meta_model").value,
     stages: selectedStages(),
     detectors: Array.from(selectedDetectors),
     explain: $("#explain").checked,
@@ -126,6 +127,15 @@ function renderDecisionMetrics() {
                     min: "0", step: "0.05", "data-metric": m.token,
                     title: "Weight in the fitness function", oninput: onChange }))));
   syncMetricNotes();
+}
+
+function renderMetaModels() {
+  const select = $("#meta_model");
+  const models = catalog.meta_models || [];
+  const fallback = catalog.default_meta_model || (models[0] && models[0].token);
+  select.replaceChildren(...models.map((m) =>
+    el("option", { value: m.token }, m.label || m.token)));
+  select.value = fallback;
 }
 
 function selectedMetrics() {
@@ -556,6 +566,7 @@ async function init() {
   renderDatasets();
   renderAnomalyTypes();
   renderDecisionMetrics();
+  renderMetaModels();
   renderStages();
   renderResults();
   renderHealth();

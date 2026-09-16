@@ -48,8 +48,10 @@ from Utils.pipeline_spec import (
     dataset_label,
     DEFAULT_ANOMALY_TYPE,
     DEFAULT_DECISION_METRICS,
+    DEFAULT_META_MODEL,
     decision_metric_formula,
     decision_metric_label,
+    meta_model_label,
     metrics_required,
     restrict_metrics,
     DETECTOR_FAMILIES,
@@ -362,7 +364,7 @@ def write_comprehensive_results(output_file, dataset, entity, iteration, results
             f.write(f"    PR-AUC      : {_fmt_metric(ga_validation.get('pr_auc'))}\n")
             f.write(f"    VUS         : {_fmt_metric(ga_validation.get('vus'))}\n")
             f.write(f"    Fitness     : {_fmt_metric(ga_validation.get('fitness'))}\n")
-        f.write(f"  Meta-Model  : {ga_results.get('meta_model_type', 'N/A')}\n")
+        f.write(f"  Meta-Model  : {meta_model_label(ga_results.get('meta_model_type', 'N/A'))}\n")
         f.write(f"  Ensemble Size: {len(ga_results.get('ensemble', []))}\n\n")
         
         # ============ THOMPSON SAMPLING ============
@@ -458,7 +460,7 @@ def write_comprehensive_results(output_file, dataset, entity, iteration, results
         f.write("-" * 50 + "\n")
         f.write(f"  Models      : {final_decision.get('ensemble', 'N/A')}\n")
         f.write(f"  Size        : {len(final_decision.get('ensemble', []))}\n")
-        f.write(f"  Meta-Model  : {final_decision.get('meta_model_type', 'N/A')}\n")
+        f.write(f"  Meta-Model  : {meta_model_label(final_decision.get('meta_model_type', 'N/A'))}\n")
         f.write(f"  F1 Score    : {final_decision.get('ensemble_f1', 0):.6f}\n")
         f.write(f"  PR-AUC      : {final_decision.get('ensemble_pr_auc', 0):.6f}\n")
         f.write(f"  VUS         : {_fmt_metric(final_decision.get('ensemble_vus'))}\n")
@@ -580,7 +582,7 @@ def split_train_for_validation(train_data, anomaly_list, rate=None,
     return fold(0, cut), fold(cut, n_time)
 
 
-def run_model_selection_algorithms_1(train_data, train_val_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False, explain=False, stages=None, decision_metric=DEFAULT_DECISION_METRICS):
+def run_model_selection_algorithms_1(train_data, train_val_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False, explain=False, stages=None, decision_metric=DEFAULT_DECISION_METRICS, meta_model=DEFAULT_META_MODEL):
     """
     One-pass model selection pipeline in the order:
       1) GA (stacking ensemble search)
@@ -666,7 +668,7 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
             dataset, entity, train_data, train_val_data, test_data,
             still_usable(), trained_models,
             population_size=20, generations=20,
-            meta_model_type='rf', mutation_rate=0.1,
+            meta_model_type=meta_model, mutation_rate=0.1,
             explain=explain,
             metric=decision_metric,
             vus_win=vus_window(test_data.entities[0].Y),
@@ -779,7 +781,7 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
         test_data_for_mc = copy.deepcopy(test_data_gan if test_data_gan is not None else test_data)
         monte_carlo_ranked_models = run_monte_carlo_simulation(
             test_data_for_mc, trained_models, still_usable(), dataset, entity,
-            n_simulations=2, noise_level=0.1, explain=explain, metrics=decision_metric,
+            n_simulations=5, noise_level=0.1, explain=explain, metrics=decision_metric,
         )
         timing_dict['5_Monte_Carlo'] = time.time() - start_time
         mem_after = get_memory_usage_mb()
@@ -914,7 +916,7 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
     return _result()
 
 
-def run_model_selection_algorithms_2(train_data, train_val_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False, explain=False, decision_metric=DEFAULT_DECISION_METRICS):
+def run_model_selection_algorithms_2(train_data, train_val_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False, explain=False, decision_metric=DEFAULT_DECISION_METRICS, meta_model=DEFAULT_META_MODEL):
     """
     PARALLEL VERSION: Runs model selection algorithms concurrently using ThreadPoolExecutor.
     
@@ -979,7 +981,7 @@ def run_model_selection_algorithms_2(train_data, train_val_data, test_data, data
             genetic_algorithm,
             dataset, entity, train_data, train_val_data, test_data_ga,
             models_to_use, trained_models,
-            population_size=20, generations=20, meta_model_type='rf', mutation_rate=0.1,
+            population_size=20, generations=20, meta_model_type=meta_model, mutation_rate=0.1,
             explain=explain,
             metric=decision_metric,
             vus_win=vus_window(test_data_ga.entities[0].Y),
@@ -1011,7 +1013,7 @@ def run_model_selection_algorithms_2(train_data, train_val_data, test_data, data
         monte_carlo_future = executor.submit(
             run_monte_carlo_simulation,
             test_data_montecarlo, trained_models, models_to_use,
-            dataset, entity, 2, 0.1, explain=explain, metrics=decision_metric
+            dataset, entity, 5, 0.1, explain=explain, metrics=decision_metric
         )
 
         # Collect results
@@ -1356,14 +1358,16 @@ def perform_reoptimization_task(
          y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_2(
             train_data, train_val_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
             trained_models=trained_models, model_list=loaded_model_names,
-            test_data_gan=test_data_before, skip_gan=True, explain=explain
+            test_data_gan=test_data_before, skip_gan=True, explain=explain,
+            meta_model=meta_model_type
         )
     else:
         (best_thompson, robust_agg, full_aggregated, best_ensemble,
          individual_predictions_new, base_model_predictions_train_new, base_model_predictions_test_new,
          y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_1(
             train_data, train_val_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
-            model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True, explain=explain
+            model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True, explain=explain,
+            meta_model=meta_model_type
         )
     
     candidate_best_ensemble = best_ensemble.copy()
@@ -1398,6 +1402,7 @@ def run_app(algorithm_list, algorithm_list_instances):
     anomaly_type = args.get('anomaly_type', DEFAULT_ANOMALY_TYPE)  # Synthetic anomaly injected at stage 4
     anomaly_rate = args.get('anomaly_rate')  # None = the per-type defaults in anomaly_parameters.py
     decision_metric = args.get('decision_metrics', DEFAULT_DECISION_METRICS)  # Fitness the run maximises
+    meta_model = args.get('meta_model', DEFAULT_META_MODEL)  # Level-1 learner the GA stacks into
 
     # Which base detectors to select among. None (the default) means all of
     # them; only the families of the requested detectors get trained.
@@ -1647,7 +1652,7 @@ def run_app(algorithm_list, algorithm_list_instances):
                 train_data, train_val_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
                 trained_models=trained_models, model_list=loaded_model_names,
                 test_data_gan=test_data_before, explain=explain,
-                decision_metric=decision_metric
+                decision_metric=decision_metric, meta_model=meta_model
             )
         else:
             mode = f"PARTIAL: {','.join(sorted(stages))}" if is_partial else "SEQUENTIAL mode"
@@ -1657,7 +1662,7 @@ def run_app(algorithm_list, algorithm_list_instances):
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
                 train_data, train_val_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
                 model_list=loaded_model_names, test_data_gan=test_data_before, explain=explain,
-                stages=stages, decision_metric=decision_metric
+                stages=stages, decision_metric=decision_metric, meta_model=meta_model
             )
 
         # Calculate end-to-end time

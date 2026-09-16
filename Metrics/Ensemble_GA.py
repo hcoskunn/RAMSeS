@@ -941,10 +941,10 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
      #       f.write(f"Ensemble: {list(ensemble)}, f1 : {result[0]}, PR_AUC: {result[1]}, Fitness Score: {result[2]}\n")
 
     if explain and best_ensemble:
-        def _evaluate_fitness(subset):
+        def _evaluate_fitness_full(subset):
             key = tuple(sorted(subset))
             if key in evaluated_ensembles:
-                return evaluated_ensembles[key][2]
+                return evaluated_ensembles[key]
             res = fitness_function(list(subset), train_data, val_data, trained_models,
                                    individual_predictions, base_model_predictions_train,
                                    algorithm_list, base_model_predictions_val,
@@ -952,11 +952,20 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
                                    meta_model_type=meta_model_type,
                                    metric=metric, vus_win=val_vus_win)
             evaluated_ensembles[key] = res
-            return res[2]
+            return res
+
+        def _evaluate_fitness(subset):
+            return _evaluate_fitness_full(subset)[2]
 
         explain_ga_selection(best_ensemble, evaluated_ensembles, generation_populations,
                              algorithm_list, population_size, _evaluate_fitness,
-                             dataset, entity, explain=True)
+                             dataset, entity, explain=True,
+                             evaluate_fitness_full=_evaluate_fitness_full,
+                             base_fit=base_model_predictions_train, y_fit=y_true_train,
+                             base_eval=base_model_predictions_val, y_eval=y_true_val,
+                             base_test=base_model_predictions_test, y_test=y_true_test,
+                             meta_model_type=meta_model_type,
+                             metric=metric, vus_win=val_vus_win)
 
         explain_ga_combination(best_ensemble, algorithm_list,
                                base_model_predictions_train, base_model_predictions_test,
@@ -1026,6 +1035,147 @@ def compute_lofo_utility(
     for d in best_ensemble:
         reduced = [x for x in best_ensemble if x != d]
         out[d] = base - float(evaluate_fitness(reduced))
+    return out
+
+
+def measure_refit_noise(
+    ensemble: List[str],
+    algorithm_list: List[str],
+    base_fit: np.ndarray,
+    y_fit: np.ndarray,
+    base_eval: np.ndarray,
+    y_eval: np.ndarray,
+    base_test: Optional[np.ndarray] = None,
+    y_test: Optional[np.ndarray] = None,
+    repeats: int = 10,
+    meta_model_type: str = 'rf',
+    metric: str = DEFAULT_DECISION_METRICS,
+    vus_win: Optional[int] = None,
+) -> Dict[str, float]:
+    """
+    Spread of the fitness when the meta-learner is refitted on unchanged data.
+
+    The meta-learner is not seeded, so the same subset scores differently on
+    every refit. Nothing else varies across the repeats, so the spread is the
+    floor below which a fitness difference says nothing about the detectors.
+
+    Returns {'eps', 'eps_test', 'sigma', 'sigma_test', 'repeats'}, with eps at
+    two sigma. NaN when the ensemble is empty or every repeat failed.
+    """
+    nan = float('nan')
+    empty = {'eps': nan, 'eps_test': nan, 'sigma': nan, 'sigma_test': nan,
+             'repeats': 0}
+    if not ensemble:
+        return empty
+    evals, tests = [], []
+    for _ in range(max(1, repeats)):
+        try:
+            res = fitness_function(ensemble, None, None, None, None,
+                                   base_fit, algorithm_list, base_eval,
+                                   y_fit, y_eval, meta_model_type=meta_model_type,
+                                   metric=metric, vus_win=vus_win)
+        except Exception:
+            continue
+        if not np.isnan(res[2]):
+            evals.append(float(res[2]))
+        if base_test is not None and y_test is not None and res[5] is not None:
+            try:
+                f1_t, pr_t, _ = score_ensemble(res[5], ensemble, algorithm_list,
+                                               base_test, y_test)
+                combined = combine_metrics(metric, {'f1': f1_t, 'pr_auc': pr_t,
+                                                    'vus': float('nan')})
+                tests.append(float(combined if not np.isnan(combined) else f1_t))
+            except Exception:
+                pass
+    if not evals:
+        return empty
+    sigma = float(np.std(evals, ddof=1)) if len(evals) > 1 else 0.0
+    sigma_t = float(np.std(tests, ddof=1)) if len(tests) > 1 else nan
+    return {'eps': 2.0 * sigma, 'eps_test': 2.0 * sigma_t if not np.isnan(sigma_t) else nan,
+            'sigma': sigma, 'sigma_test': sigma_t, 'repeats': len(evals)}
+
+
+def compute_add_one_in(
+    best_ensemble: List[str],
+    excluded: List[str],
+    algorithm_list: List[str],
+    evaluate_fitness_full: Callable[[List[str]], tuple],
+    base_test: Optional[np.ndarray] = None,
+    y_test: Optional[np.ndarray] = None,
+) -> Dict[str, Dict[str, float]]:
+    """
+    Mirror of LOFO for detectors that were NOT selected.
+
+    For each excluded detector d:
+        delta[d] = fitness(best_ensemble + [d]) − fitness(best_ensemble)
+    on the fold the search optimised, and the same comparison on the test split
+    using the meta-model that evaluation already trained.
+
+    A positive delta implies the search never evaluated that combination: the
+    winner is the argmax over everything it did evaluate.
+    """
+    nan = float('nan')
+    out: Dict[str, Dict[str, float]] = {}
+    if not best_ensemble:
+        return {d: {'delta': nan, 'delta_test': nan} for d in excluded}
+
+    base_res = evaluate_fitness_full(list(best_ensemble))
+    base_fit = float(base_res[2])
+    base_test_score = nan
+    if base_test is not None and y_test is not None and base_res[5] is not None:
+        f1_t, pr_t, _ = score_ensemble(base_res[5], best_ensemble, algorithm_list,
+                                       base_test, y_test)
+        base_test_score = 0.5 * (f1_t + pr_t)
+
+    for d in excluded:
+        try:
+            res = evaluate_fitness_full(sorted(set(best_ensemble) | {d}))
+        except Exception:
+            out[d] = {'delta': nan, 'delta_test': nan}
+            continue
+        delta = float(res[2]) - base_fit
+        delta_test = nan
+        if not np.isnan(base_test_score) and res[5] is not None:
+            try:
+                f1_t, pr_t, _ = score_ensemble(res[5], sorted(set(best_ensemble) | {d}),
+                                               algorithm_list, base_test, y_test)
+                delta_test = 0.5 * (f1_t + pr_t) - base_test_score
+            except Exception:
+                pass
+        out[d] = {'delta': delta, 'delta_test': delta_test}
+    return out
+
+
+def compute_score_redundancy(
+    best_ensemble: List[str],
+    excluded: List[str],
+    algorithm_list: List[str],
+    base_eval: np.ndarray,
+) -> Dict[str, Dict[str, Any]]:
+    """
+    For each excluded detector, the ensemble member its scores most resemble.
+
+    Returns {d: {'redundancy': max |corr|, 'partner': that member}}. A constant
+    score column has no correlation, so both fields come back NaN/None and the
+    caller must not read redundancy into that.
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    index = {name: i for i, name in enumerate(algorithm_list)}
+    X = np.asarray(base_eval, dtype=float)
+    for d in excluded:
+        best_r, partner = float('nan'), None
+        if d in index and X.ndim == 2 and X.shape[0] > 1:
+            col_d = X[:, index[d]]
+            for m in best_ensemble:
+                if m not in index:
+                    continue
+                col_m = X[:, index[m]]
+                if np.std(col_d) == 0 or np.std(col_m) == 0:
+                    continue
+                r = abs(float(np.corrcoef(col_d, col_m)[0, 1]))
+                if not np.isnan(r) and (np.isnan(best_r) or r > best_r):
+                    best_r, partner = r, m
+        out[d] = {'redundancy': best_r, 'partner': partner}
     return out
 
 
@@ -1595,12 +1745,27 @@ def explain_ga_selection(
     dataset: str,
     entity: str,
     explain: bool = False,
+    evaluate_fitness_full: Optional[Callable[[List[str]], tuple]] = None,
+    base_fit: Optional[np.ndarray] = None,
+    y_fit: Optional[np.ndarray] = None,
+    base_eval: Optional[np.ndarray] = None,
+    y_eval: Optional[np.ndarray] = None,
+    base_test: Optional[np.ndarray] = None,
+    y_test: Optional[np.ndarray] = None,
+    meta_model_type: str = 'rf',
+    metric: str = DEFAULT_DECISION_METRICS,
+    vus_win: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     GA-ensemble selection explainability: explain *why* each detector ended up
     in best_ensemble, along two analytical axes (utility, stability). Produces
     three plots and a structured text report under
         myresults/GA_Ens/{dataset}/{entity}/
+
+    The fold matrices and `evaluate_fitness_full` are what the excluded-detector
+    layer needs: add-one-in wants the meta-model each evaluation trained, and the
+    redundancy and noise-floor measures read the folds directly. Without them
+    that layer is skipped and the rest is unchanged.
 
     Returns a dict with the computed structures when explain=True; None otherwise.
     """
@@ -1614,6 +1779,27 @@ def explain_ga_selection(
     survival = compute_survival_rates(generation_populations, algorithm_list, population_size)
     archetypes = classify_detector_archetypes(
         mean_marginal, survival, algorithm_list)
+
+    # Snapshot before add-one-in runs: it writes the augmented subsets into the
+    # same cache, which would make every detector read as already tried.
+    tried_before = set(evaluated_ensembles.keys())
+    excluded = [d for d in algorithm_list if d not in best_ensemble]
+    add_one_in: Dict[str, Dict[str, float]] = {}
+    redundancy: Dict[str, Dict[str, Any]] = {}
+    noise: Dict[str, float] = {}
+    if excluded and evaluate_fitness_full is not None and base_eval is not None:
+        noise = measure_refit_noise(
+            best_ensemble, algorithm_list, base_fit, y_fit, base_eval, y_eval,
+            base_test, y_test, meta_model_type=meta_model_type,
+            metric=metric, vus_win=vus_win)
+        add_one_in = compute_add_one_in(
+            best_ensemble, excluded, algorithm_list, evaluate_fitness_full,
+            base_test, y_test)
+        redundancy = compute_score_redundancy(
+            best_ensemble, excluded, algorithm_list, base_eval)
+        for d in excluded:
+            key = tuple(sorted(set(best_ensemble) | {d}))
+            add_one_in.setdefault(d, {})['tried_exact'] = key in tried_before
 
     plot_ga_utility(lofo, mean_marginal, best_ensemble, algorithm_list, dataset, entity)
     plot_ga_survival(survival, best_ensemble, dataset, entity)
@@ -1731,6 +1917,9 @@ def explain_ga_selection(
         "archetypes": archetypes,
         "n_subsets_evaluated": n_subsets,
         "n_generations": n_generations,
+        "add_one_in": add_one_in,
+        "redundancy": redundancy,
+        "noise": noise,
     }
 
     # ── Intermediate Representation (grounded LLM input; non-fatal) ─────────
@@ -1890,7 +2079,7 @@ def compute_meta_pfi(
     feature_names: List[str],
     score_fn: Callable[[np.ndarray, np.ndarray], float] = _best_threshold_f1,
     n_repeats: int = 10,
-    random_state: int = 0,
+    random_state: int = 42,
 ) -> Dict[str, float]:
     """
     Permutation feature importance of the meta-learner: importance of feature i =
@@ -2473,7 +2662,7 @@ def explain_ga_combination(
     # Subsample explained rows for SHAP speed (deterministic).
     n_test = X_test_f.shape[0]
     if n_test > max_explain:
-        rng = np.random.RandomState(0)
+        rng = np.random.RandomState(42)
         idx = rng.choice(n_test, size=max_explain, replace=False)
         X_explain = X_test_f[idx]
     else:

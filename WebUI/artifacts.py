@@ -38,7 +38,7 @@ STAGES: Tuple[Dict[str, Any], ...] = (
      "plot_group": "ga_combination", "order": 2},
     # One CLI token, two stages — the same split as ga_selection/ga_combination.
     # `thompson_ranking` explains mu^T mu, the criterion the detectors are
-    # ordered by; `thompson_sampling` explains mu^T x_t, the estimated expected reward that
+    # ordered by; `thompson_sampling` explains mu^T c_t, the estimated expected reward that
     # drove per-window selection. Neither keeps the plain name.
     #
     # `plot_group` is deliberately `ts_ranking`, not `thompson_ranking`:
@@ -188,7 +188,7 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "each one writes a report, generates a set of figures, and "
                      "a structured record of its findings."},
             {"text": "That record is what a local language model turns into the "
-                     "prose on each stage's card. It is given canonical "
+                     "prose on each stage's explanation. It is given canonical "
                      "sentences with the numbers already computed and rounded, "
                      "never raw output, so it composes and compresses rather "
                      "than calculating or inferring. Limitations are listed "
@@ -204,10 +204,11 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                  "call. The question is which subset of detectors to stack."},
     ), "subsections": (
         {"id": "ga-meta-learner",
-         "title": "Why the meta-learner is fixed", "blocks": (
-            {"text": "RAMSeS uses a Random Forest, chosen for a comparable "
-                     "fitness to an SVM at lower cost. Logistic regression, gradient "
-                     "boosting and SVM are also supported. It is not searched "
+         "title": "Why the meta-learner is fixed for the run", "blocks": (
+            {"text": "RAMSeS defaults to a Random Forest, chosen for a comparable "
+                     "fitness to an SVM at lower cost, and logistic regression, "
+                     "gradient boosting and SVM can be picked instead at run "
+                     "configuration. Whichever is chosen, it is not searched "
                      "over per subset, because doing so would raise the risk of "
                      "overfitting, destabilise the optimisation, and make "
                      "convergence harder to read. Fixing it restricts the search "
@@ -309,7 +310,7 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "difference between the two anomaly probabilities, so it "
                      "reads as what happens locally when this detector alone "
                      "reports higher. Accumulating those effects across the bins "
-                     "gives the curve the card draws. Because each bin only ever "
+                     "gives the curve the explanation draws. Because each bin only ever "
                      "asks about rows that occur there, the meta-learner is never "
                      "questioned about a combination of scores the data does not "
                      "contain. PFI and ALE both use every row of the split."},
@@ -345,11 +346,11 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                  "windows in the beginning."},
     ), "subsections": (
         {"id": "lints-bayesian", "title": "The context vector and the posterior", "blocks": (
-            {"text": "Every window t is turned into a context vector xₜ (its "
+            {"text": "Every window t is turned into a context vector cₜ (its "
                      "readings over the window's timesteps, one block of "
                      "entries per context feature). A detector's reward is "
                      "modelled as linear in that context: there is a weight "
-                     "vector θ that turns xₜ into the reward the detector earns "
+                     "vector θ that turns cₜ into the reward the detector earns "
                      "on that window, and no detector knows it. What each one "
                      "holds instead is a Gaussian belief about θ, written "
                      "θ ∼ 𝒩(μₜ, Σₜ). Its mean μₜ is the detector's current best "
@@ -362,23 +363,23 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "context, and they differ only in which weight vector "
                      "goes into it."},
             {"list": (
-                "The expected reward, θᵀxₜ, is what the detector earns on this "
+                "The expected reward, θᵀcₜ, is what the detector earns on this "
                 "window on average. It is the quantity the model is defined by, "
                 "and it can never be computed, because θ is unknown.",
-                "The estimated expected reward, μₜᵀxₜ, puts the belief's mean in "
+                "The estimated expected reward, μₜᵀcₜ, puts the belief's mean in "
                 "place of θ. It is the best estimate of the expected reward "
                 "available after everything observed so far, and it is the "
-                "number the Selection card plots and explains.",
-                "The sampled expected reward, θ̃ᵀxₜ, puts a single weight "
+                "number the Selection explanation plots and explains.",
+                "The sampled expected reward, θ̃ᵀcₜ, puts a single weight "
                 "vector θ̃ drawn from 𝒩(μₜ, Σₜ) in place of θ. It is the "
                 "expected reward that would hold if that draw had no uncertainty, "
                 "and it is what the next subsection picks on.",
             )},
             {"text": "Two consequences are worth stating plainly. First, the "
                      "estimated expected reward is an estimate and not the "
-                     "exact θᵀxₜ , though it sharpens as evidence accumulates:"
+                     "exact θᵀcₜ , though it sharpens as evidence accumulates:"
                      "the more often a detector is tried, the tighter Σₜ "
-                     "becomes and the closer μₜᵀxₜ sits to θᵀxₜ. "
+                     "becomes and the closer μₜᵀcₜ sits to θᵀcₜ. "
                      "Second, the prior starts at μ₀ = 0 and μ only moves in "
                      "windows where that detector was actually run, so a "
                      "detector that has rarely been tried has an estimated "
@@ -391,9 +392,9 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
             {"text": "With probability ε the framework picks a detector "
                      "uniformly at random. Otherwise it draws one weight vector "
                      "θ̃ from every detector's own 𝒩(μₜ, Σₜ) and picks the "
-                     "detector with the highest sampled expected reward θ̃ᵀxₜ. "
+                     "detector with the highest sampled expected reward θ̃ᵀcₜ. "
                      "The pick therefore runs on the draw, not on the estimated "
-                     "expected reward the card plots, and that is what makes it "
+                     "expected reward the explanation plots, and that is what makes it "
                      "uncertainty-aware: a detector that has rarely been tried "
                      "has a wide covariance and can win on a favourable draw, so "
                      "the run keeps testing plausible alternatives instead of "
@@ -407,8 +408,8 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "before model selection began, and rewarded with the run's "
                      "fitness, the weighted metrics chosen at run configuration. "
                      "Only the chosen detector's belief is updated, by Bayesian "
-                     "linear regression on the pair (xₜ, r): the covariance "
-                     "absorbs xₜxₜᵀ and the mean moves toward the observed "
+                     "linear regression on the pair (cₜ, r): the covariance "
+                     "absorbs cₜcₜᵀ and the mean moves toward the observed "
                      "reward. The detectors that were not picked learn nothing "
                      "from this window."},
         )},
@@ -423,9 +424,9 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "their final mean vector, ‖μ‖². This ranking is the branch's "
                      "output and is what goes into the final aggregation."},
         )},
-        {"id": "lints-two-views", "title": "μₜᵀxₜ versus ‖μ‖²", "blocks": (
+        {"id": "lints-two-views", "title": "μₜᵀcₜ versus ‖μ‖²", "blocks": (
             {"text": "The branch produces two different numbers, which is why it "
-                     "has two cards. μₜᵀxₜ is the estimated expected reward at a "
+                     "has two cards. μₜᵀcₜ is the estimated expected reward at a "
                      "given window: the branch's best guess at what that detector "
                      "would earn there, computed for every detector whether or "
                      "not it was picked, and moving as the series moves. It is "
@@ -444,17 +445,17 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
         {"id": "lints-note", "title": "Why contexts are normalised", "blocks": (
             {"text": "Context vectors are normalised to unit length before use. "
                      "Without it, a series with large sensor values or many "
-                     "context features (SMD carries 38) makes xₜxₜᵀ dominate "
+                     "context features (SMD carries 38) makes cₜcₜᵀ dominate "
                      "the covariance update and collapse Σ."},
         )},
-        {"id": "lints-explained", "title": "What the two cards explain",
+        {"id": "lints-explained", "title": "What the two sections explain",
          "blocks": (
             {"text": "Both numbers are explained, and they are explained "
                      "differently because they answer different questions. The "
-                     "Ranking card takes the final ‖μ‖² and splits it across the "
+                     "Ranking explanation takes the final ‖μ‖² and splits it across the "
                      "context features, so the question it answers is what a "
                      "detector's standing at the end of the run was built from. "
-                     "The Selection card works window by window: it splits μₜᵀxₜ "
+                     "The Selection explanation works window by window: it splits μₜᵀcₜ "
                      "the same way, adds a measure of how unusual each context "
                      "feature's contribution was at that window, divides the run "
                      "into stretches under one leader, and classifies every pick "
@@ -486,16 +487,16 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "windows as there are detectors in the pool, because each "
                      "detector starts with score zero."},
             {"formula":
-                "contribution(k, c)     = Σ_{i ∈ c} μ_k[i]²\n"
-                "Σ_c contribution(k, c) = ‖μ_k‖²\n"
-                "margin(a, b, c)        = contribution(a, c) − contribution(b, c)\n"
-                "Σ_c margin(a, b, c)    = ‖μ_a‖² − ‖μ_b‖²"},
-            {"text": "where k, a and b are detectors, c is a context feature, and i runs "
+                "contribution(k, p)     = Σ_{i ∈ p} μ_k[i]²\n"
+                "Σ_p contribution(k, p) = ‖μ_k‖²\n"
+                "margin(a, b, p)        = contribution(a, p) − contribution(b, p)\n"
+                "Σ_p margin(a, b, p)    = ‖μ_a‖² − ‖μ_b‖²"},
+            {"text": "where k, a and b are detectors, p is a context feature, and i runs "
                      "over the entries of that detector's final mean vector μ that "
-                     "belong to context feature c."},
+                     "belong to context feature p."},
         )},
         {"id": "lints-dynamics", "title": "The reward split and the selection states", "blocks": (
-            {"text": "This card explains the estimated expected reward μₜᵀxₜ, "
+            {"text": "This section explains the estimated expected reward μₜᵀcₜ, "
                      "the branch's best guess at what each detector would earn "
                      "on each window. The pick itself was made on a draw rather "
                      "than on this number, but the draw is centred on it, so it "
@@ -510,15 +511,15 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "can be negative. A context feature can therefore pull a "
                      "detector's estimated expected reward down on a given "
                      "window, and a negative contribution here means exactly "
-                     "that, where a small share on the Ranking card only ever "
+                     "that, where a small share on the Ranking explanation only ever "
                      "meant a small positive one."},
             {"formula":
-                "contribution(k, c)     = Σ_{i ∈ c} μ_k,ₜ[i] · xₜ[i]\n"
-                "Σ_c contribution(k, c) = μ_k,ₜᵀxₜ"},
-            {"text": "where k is a detector, c is a context feature, xₜ is the "
+                "contribution(k, p)     = Σ_{i ∈ p} μ_k,ₜ[i] · cₜ[i]\n"
+                "Σ_p contribution(k, p) = μ_k,ₜᵀcₜ"},
+            {"text": "where k is a detector, p is a context feature, cₜ is the "
                      "window's context vector, μ_k,ₜ is detector k's mean vector "
                      "as it stood at window t, and i runs over the entries "
-                     "belonging to context feature c."},
+                     "belonging to context feature p."},
             {"text": "A second and narrower measure is reported beside it: SHAP, "
                      "how far a context feature's contribution at this window "
                      "departs from what that context feature contributes at the "
@@ -546,10 +547,10 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
             {"text": "Finally, every choice the sampler made is classified, so "
                      "the run can be read as behaviour and not only as an "
                      "outcome. Exploitation means the detector picked was the "
-                     "one with the highest estimated expected reward μₜᵀxₜ, so "
+                     "one with the highest estimated expected reward μₜᵀcₜ, so "
                      "the draw agreed with the current best guess. Informed "
                      "exploration means the highest sampled expected reward "
-                     "θ̃ᵀxₜ belonged to some other detector, so uncertainty "
+                     "θ̃ᵀcₜ belonged to some other detector, so uncertainty "
                      "rather than that best guess decided it. Random exploration means "
                      "the ε step fired and the pick was made without consulting "
                      "either. A run that is mostly random exploration is one "
@@ -863,56 +864,59 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                  "on an independent draw of that noise. The labels do not "
                  "change, the ground truth stays exactly as it was and only the "
                  "signal degrades, so this measures whether a detector's "
-                 "standing survives a noisier version of the same series. Scores "
-                 "are averaged across trials, so a detector that happens to win "
-                 "only one trial does not rank high. The averaged scores are "
-                 "combined into the run's own fitness, and that one ordering "
-                 "enters the robustness consensus."},
+                 "standing survives a noisier version of the same series. The "
+                 "run does this five times. Within one trial every detector is "
+                 "scored on the same draw, so the trial is a fair comparison. "
+                 "Across trials the draw changes, so a detector that happens to "
+                 "win one trial does not necessarily rank high on the final ranking. "
+                 "The scores across trials are averaged, and the detectors are ranked "
+                 "by that average. The final Monte Carlo ranking is forwarded to the "
+                 "robustness aggregation."},
         {"text": "The noise level is the standard deviation of the injected "
-                 "Gaussian noise, fixed for the production ranking."},
+                 "Gaussian noise, and it is the same in every trial."},
     ), "subsections": (
-        {"id": "mc-explained", "title": "The noise sweep and its two views", "blocks": (
-            {"text": "The production test holds the noise level fixed, and at "
-                     "one fixed level independent trials carry no structure to "
-                     "explain. The explainability layer therefore sweeps that "
-                     "one parameter, running the same noise injection across a "
-                     "range of levels and repeating each several times, to show "
-                     "which detector wins under how much noise. This sweep is "
-                     "entirely separate: the production ranking that feeds rank "
-                     "aggregation is untouched."},
-            {"text": "Two views are produced over that sweep. The first is the "
-                     "score of every detector as noise grows, marking the "
-                     "crossovers where the lead changes hands. The second is a "
-                     "small decision tree fitted from noise level to winning "
-                     "detector, which turns those crossovers into explicit "
-                     "thresholds, together with per-detector trends summarising "
-                     "how steeply each degrades. Both views read the run's own "
-                     "fitness, so the sweep has one winner rather than one per "
-                     "metric. Each metric the fitness combines is also drawn on "
-                     "its own curve, under the browse button, so a reader can "
-                     "see which term moved the fitness."},
+        {"id": "mc-explained", "title": "Reading the ranking from its trials", "blocks": (
+            {"text": "The explanation is built from the same five trials the "
+                     "ranking averages, not from a separate experiment, so every "
+                     "number in it is one the ranking was actually computed "
+                     "from. It answers why the top detector leads on three "
+                     "counts: which components of the fitness function its advantage came "
+                     "from, whether it led the individual trials rather than "
+                     "only their average, and whether first place survives "
+                     "dropping any single trial and re-ranking on the remaining "
+                     "four."},
         )},
-        {"id": "mc-f1", "title": "Adaptive versus frozen thresholds", "blocks": (
-            {"text": "Re-choosing each detector's best threshold at every noise "
-                     "level measures the best it could possibly do, which hides "
-                     "the degradation a deployed detector would actually suffer, "
-                     "because in production one threshold is committed to. So "
-                     "the sweep also freezes each detector's threshold at the "
-                     "lowest noise level and holds it across the sweep. The gap "
-                     "between the two at high noise is the erosion the first "
-                     "view conceals."},
+        {"id": "mc-counts", "title": "How the three are computed", "blocks": (
+            {"text": "The first is a term-by-term comparison between the top "
+                     "detector and the runner-up. If the run's fitness is "
+                     "0.5 × F1 + 0.3 × PR-AUC + 0.2 × VUS, each of those three "
+                     "averages is compared on its own, which separates a top "
+                     "detector that led on every term from one whose lead on a "
+                     "single term covered a shortfall on another."},
+            {"text": "The second records which detector scored highest in each "
+                     "of the five trials. A detector can hold the best average "
+                     "without having led many trials, and the count makes that "
+                     "visible."},
+            {"text": "The third leaves one trial out, averages the fitness over "
+                     "the remaining four and re-ranks on that average. If the "
+                     "detector at the top changes, first place rested on the "
+                     "trial that was dropped; each of the five trials is dropped "
+                     "in turn, so every one of them is checked."},
         )},
-        {"id": "mc-not", "title": "Limits of the sweep", "blocks": (
-            {"text": "It scores with a fast point-wise metric rather than the "
-                     "range-based one the production ranking uses, so its "
-                     "numbers are not directly comparable to production values, "
-                     "and it exists to show shape rather than to rank. And the "
-                     "surrogates report a held-out, cross-validated fidelity "
-                     "next to their fit on the sweep itself. On flat curves cut "
-                     "into small folds the held-out figure can legitimately be "
-                     "worse than predicting the mean, and where most folds are "
-                     "degenerate the estimate is marked unavailable rather than "
-                     "reported as a number."},
+        {"id": "mc-spread", "title": "How far apart the ranked detectors are", "blocks": (
+            {"text": "Averaging five trials produces a strict order of every "
+                     "detector, but the trials do not always completely agree. The "
+                     "explanation therefore reports two numbers side by side: how far "
+                     "a detector's fitness moves between trials, and the average "
+                     "fitness difference between two neighbouring places in the final "
+                     "Monte Carlo ranking. Both are medians over the detectors, "
+                     "because a few large gaps at the bottom of a ranking would "
+                     "otherwise make the whole order look well separated."},
+            {"text": "Where the movement is the larger of the two, the places "
+                     "next to each other in the ranking are closer together than "
+                     "the noise that produced them. The full explanation adds, "
+                     "for each detector, the highest and lowest place it reached "
+                     "across the trials."},
         )},
     )},
     {"id": "rank-aggregation", "title": "Rank aggregation",
@@ -1018,12 +1022,12 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
                    "the highest score ‖μ‖²."),
     ),
     "thompson_sampling": (
-        ("Expected reward", "θᵀxₜ, is what the detector earns on this window on "
+        ("Expected reward", "θᵀcₜ, is what the detector earns on this window on "
                             "average. θ ∼ 𝒩(μₜ, Σₜ) is unknown."),
-        ("Estimated expected reward", "μₜᵀxₜ, is the best estimate of the expected "
+        ("Estimated expected reward", "μₜᵀcₜ, is the best estimate of the expected "
                                       "reward available after everything observed "
                                       "so far."),
-        ("Sampled expected reward", "θ̃ᵀxₜ, puts a single weight vector θ̃ drawn "
+        ("Sampled expected reward", "θ̃ᵀcₜ, puts a single weight vector θ̃ drawn "
                                     "from 𝒩(μₜ, Σₜ) in place of θ."),
         ("Regime", "At least three consecutive windows in which one detector held "
                    "the highest estimated expected reward."),
@@ -1059,9 +1063,8 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     ),
     "monte_carlo": (
         ("Noise level", "The standard deviation of the Gaussian noise injected "
-                        "into the data."),
-        ("Fitness", "The weighted combination of metrics the run configuration "
-                    "chose."),
+                        "into the data, the same in every trial."),
+        ("Trial", "One draw of that noise, on which every detector is scored."),
     ),
     "off_by_threshold": (
         ("Exclusive win", "A point the top-ranked detector classified correctly "

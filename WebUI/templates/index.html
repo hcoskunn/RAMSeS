@@ -35,13 +35,23 @@
           <input id="anomaly_rate" type="number" value="0.2" min="0.01" max="1" step="0.01"
                  style="width: 9ch;">
         </div>
-        <div class="field grow">
+      </div>
+      <p id="entity-error" class="small" style="margin:0; color: var(--error);" hidden></p>
+      <p id="anomaly-note" class="small muted" style="margin:0;"></p>
+    </section>
+
+    <section class="card stack">
+      <h2>Objective</h2>
+      <div class="row" style="gap: var(--sp-5); align-items: flex-end;">
+        <div class="field" style="width: 200px;">
+          <label for="meta_model">Meta-learner</label>
+          <select id="meta_model" name="meta_model"></select>
+        </div>
+        <div class="field">
           <label>Fitness metrics</label>
           <div id="decision_metrics" class="row small"></div>
         </div>
       </div>
-      <p id="entity-error" class="small" style="margin:0; color: var(--error);" hidden></p>
-      <p id="anomaly-note" class="small muted" style="margin:0;"></p>
       <p id="metric-formula" class="small muted" style="margin:0;"></p>
       <p id="metric-note" class="small muted" style="margin:0;"></p>
       <p id="metric-error" class="small" style="margin:0; color: var(--error);" hidden></p>

@@ -425,7 +425,7 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         except (TypeError, ValueError):
             spans.setdefault(lname, 0)
 
-    # This stage explains the estimated expected reward mu^T x_t, so its headline is the
+    # This stage explains the estimated expected reward mu^T c_t, so its headline is the
     # detector that held the highest estimated expected reward longest — not the ranking
     # by ||mu||^2, which is the sibling card's subject and was this atom's score.
     # Carrying it here left the one sentence answering "which detector had the
@@ -461,7 +461,8 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
             if len(ranked_spans) > 1:
                 runner, r_held = ranked_spans[1]
                 lead_val.update({"runner_up": runner, "runner_up_windows": r_held})
-                lead_txt += f" — {runner} held it in {r_held}"
+                lead_txt += (f"; the next most frequent leader was {runner}, "
+                             f"in {r_held} windows")
             lead_txt += "."
         evidence.append(make_atom("ts.output.top", "stage_output", str(top_model),
                                   lead_val, lead_txt, order=1))
@@ -648,8 +649,9 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         caveats.append(make_atom(
             "ts.caveat.single_channel", "caveat", "context features", int(n_context_features),
             "This dataset has a single context feature, so splitting a detector's "
-            "estimated expected reward across context features carries no information — that one "
-            "context feature necessarily accounts for all of it."))
+            "estimated expected reward across context features carries no "
+            "information: that one context feature necessarily accounts for all "
+            "of it."))
 
     # Not "why did it rank the winner first" any more: the ranking criterion has
     # its own stage (build_thompson_ranking_ir), and this one never explained it
@@ -681,7 +683,7 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
     selection dynamics.
 
     Thompson Sampling ranks detectors by ||mu_k||^2, but build_thompson_ir
-    explains mu^T x_t — the estimated expected reward that drove per-window selection. This
+    explains mu^T c_t — the estimated expected reward that drove per-window selection. This
     builder explains the ranking itself: ||mu||^2 splits exactly into one
     non-negative contribution per context feature, and the winner's margin over the
     runner-up splits exactly into one signed term per context feature.
@@ -931,9 +933,9 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
     if n_context_features is not None and int(n_context_features) == 1:
         caveats.append(make_atom(
             "tsr.caveat.single_channel", "caveat", "context features", int(n_context_features),
-            "This dataset has a single context feature, so splitting the score across "
-            "context features carries no information — that one context feature necessarily "
-            "accounts for all of it."))
+            "This dataset has a single context feature, so splitting the score "
+            "across context features carries no information: that one context "
+            "feature necessarily accounts for all of it."))
 
     question = ("Why did Thompson Sampling rank the detectors as it did — which "
                 "context features drove each detector's ranking score up, and how much "
@@ -964,6 +966,33 @@ _GA_SEL_BUCKET_CODES = {"both": "HH", "utility": "HL", "stability": "LH",
                         "marginal": "LL"}
 
 
+def exclusion_reason(delta: Any, delta_test: Any, redundancy: Any,
+                     eps: Any, eps_test: Any, r_hi: Any) -> str:
+    """Closed enum for why a high-utility, high-stability detector was left out.
+
+    A positive delta means the search never evaluated that combination — the
+    winner is the argmax over everything it did — so the two delta-positive
+    codes carry that fact implicitly.
+    """
+    if _is_nan(delta):
+        return "not_available"
+    floor = 0.0 if _is_nan(eps) else float(eps)
+    if delta < -floor:
+        return "rejected"
+    if abs(delta) <= floor:
+        if not _is_nan(redundancy) and not _is_nan(r_hi) and redundancy >= r_hi:
+            return "redundant"
+        return "neutral"
+    if _is_nan(delta_test):
+        return "fold_only_unverified"
+    return "fold_only" if delta_test <= (0.0 if _is_nan(eps_test) else float(eps_test)) \
+        else "outperformed"
+
+
+EXCLUSION_REASONS = ("rejected", "redundant", "neutral", "fold_only",
+                     "fold_only_unverified", "outperformed", "not_available")
+
+
 def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> Dict[str, Any]:
     best = list(result.get("best_ensemble", []))
     lofo: Dict[str, float] = result.get("lofo", {})
@@ -971,6 +1000,16 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
     archetypes: Dict[str, Dict[str, Any]] = result.get("archetypes", {})
     detectors = list(archetypes.keys())
     util = {d: mm.get(d, {}).get("contribution", float("nan")) for d in detectors}
+    add_one_in: Dict[str, Dict[str, Any]] = result.get("add_one_in", {}) or {}
+    redundancy: Dict[str, Dict[str, Any]] = result.get("redundancy", {}) or {}
+    noise: Dict[str, float] = result.get("noise", {}) or {}
+    eps = noise.get("eps", float("nan"))
+    eps_test = noise.get("eps_test", float("nan"))
+    r_values = [v.get("redundancy", float("nan")) for v in redundancy.values()]
+    r_finite = [r for r in r_values if not _is_nan(r)]
+    # The entity's own p90, floored at 0.95: detector scores correlate highly as
+    # a rule, so a fixed cutoff would call almost any pair duplicates.
+    r_hi = max(0.95, float(np.percentile(r_finite, 90))) if r_finite else float("nan")
 
     def _flags(d: str) -> Tuple[Any, Any]:
         """Relative (median-split) high/low utility & stability flags. Prefers
@@ -998,6 +1037,9 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
 
     def _them(names: Sequence[str]) -> str:
         return "it" if len(names) == 1 else "them"
+
+    def _they(names: Sequence[str]) -> str:
+        return "it" if len(names) == 1 else "they"
 
     evidence: List[Dict[str, Any]] = []
     required: List[str] = []
@@ -1036,8 +1078,8 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
             return (f"{_oxford(names)} {w} chosen for high utility, despite lower "
                     f"stability.")
         if b == "stability":
-            return (f"{_oxford(names)} {w} chosen for high stability — the genetic "
-                    f"algorithm kept {th} in most generations — despite low utility.")
+            return (f"{_oxford(names)} {w} chosen for high stability (the genetic "
+                    f"algorithm kept {th} in most generations) despite low utility.")
         return (f"{_oxford(names)} {w} low on both utility and stability, and "
                 f"removing {th} barely changes fitness; the genetic algorithm "
                 f"retained {th} in its best-scoring subset.")
@@ -1103,20 +1145,66 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
             exc_nodata.append(d)
             continue
         u_high, s_high = _flags(d)
-        if u_high:                    # high-utility yet not selected — the anomaly
+        if u_high and s_high:
+            # Every atom here shares one profile, so the REASON leads and the
+            # profile trails. Fronting the profile — the shape that fixed these
+            # atoms when they still carried both HH and HL — would now open
+            # every one of them identically, which is what made a narrator merge
+            # them and hand one detector another's facts.
             eid = f"ga_sel.excluded.{d}"
-            # The profile LEADS the sentence. Three excluded atoms in a row all
-            # opened "X was left out …" and differed only in the high/low tail,
-            # so a narrator merged them and gave one detector another's profile.
-            # Fronting the distinguishing clause is the same reshape that fixed
-            # the `needed` atoms; it also stops the reader meeting the verdict
-            # before the property that makes it surprising.
-            stab = "high stability" if s_high else "low stability"
+            aoi = add_one_in.get(d, {})
+            red = redundancy.get(d, {})
+            delta = aoi.get("delta", float("nan"))
+            delta_test = aoi.get("delta_test", float("nan"))
+            r = red.get("redundancy", float("nan"))
+            partner = red.get("partner")
+            reason = exclusion_reason(delta, delta_test, r, eps, eps_test, r_hi)
+            if reason == "redundant" and not partner:
+                reason = "neutral"
+            dv, dt = _fmt(delta, 4), _fmt(delta_test, 4)
+            texts = {
+                "rejected":
+                    f"Adding {d} to the chosen ensemble lowered fitness by {dv}, so "
+                    f"despite high utility and high stability it was left out.",
+                "redundant":
+                    f"{d}'s scores duplicate {partner}, which is in the ensemble, at a "
+                    f"correlation of {_fmt(r, 3)}; adding it moved fitness by only {dv}, "
+                    f"so despite high utility and high stability it was left out.",
+                "neutral":
+                    f"Adding {d} to the chosen ensemble moved fitness by only {dv}, so "
+                    f"despite high utility and high stability it was left out.",
+                "fold_only":
+                    f"Adding {d} raised fitness by {dv} on the validation fold the "
+                    f"search optimised but moved the test-split fitness by {dt}, so "
+                    f"leaving it out avoided overfitting the ensemble to that fold.",
+                "fold_only_unverified":
+                    f"Adding {d} raised fitness by {dv} on the validation fold the "
+                    f"search optimised; the test split could not be scored, so the "
+                    f"gain is unconfirmed.",
+                "outperformed":
+                    f"Adding {d} raised fitness by {dv} on the validation fold and by "
+                    f"{dt} on the test split; the genetic algorithm never evaluated "
+                    f"the ensemble with {d} added.",
+                "not_available":
+                    f"{d} had high utility and high stability, but the fitness of the "
+                    f"ensemble with it added could not be computed.",
+            }
             evidence.append(make_atom(
                 eid, "excluded_detector", d,
-                dict(_num(d), u_high=True, s_high=bool(s_high),
-                     archetype="HH" if s_high else "HL"),
-                f"{d} had high utility and {stab}, but was still left out.",
+                dict(_num(d), u_high=True, s_high=True, archetype="HH",
+                     reason=reason, delta_add=_val(delta, 4),
+                     delta_add_test=_val(delta_test, 4),
+                     redundancy=_val(r, 3), redundant_with=partner,
+                     tried_exact=aoi.get("tried_exact")),
+                texts[reason], order=order))
+            required.append(eid)
+            order += 10
+        elif u_high:                  # high utility, low stability
+            eid = f"ga_sel.excluded.{d}"
+            evidence.append(make_atom(
+                eid, "excluded_detector", d,
+                dict(_num(d), u_high=True, s_high=False, archetype="HL"),
+                f"{d} had high utility but low stability, so it was left out.",
                 order=order))
             required.append(eid)
             order += 10
@@ -1127,10 +1215,10 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
     for gid, names, code, txt in (
         ("ga_sel.excluded.stable", exc_stable, "LH",
          lambda ns: f"{_oxford(ns)} {_have(ns)} low utility and high stability, "
-                    f"and {_were(ns)} left out."),
+                    f"so {_they(ns)} {_were(ns)} left out."),
         ("ga_sel.excluded.plain", exc_plain, "LL",
          lambda ns: f"{_oxford(ns)} {_have(ns)} low utility and low stability, "
-                    f"and {_were(ns)} left out."),
+                    f"so {_they(ns)} {_were(ns)} left out."),
         # No utility data means no profile to assert, so no code to check.
         ("ga_sel.excluded.nodata", exc_nodata, None,
          lambda ns: f"{_oxford(ns)} {_were(ns)} left out with no marginal-"
@@ -1148,6 +1236,12 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
             order += 10
 
     caveats: List[Dict[str, Any]] = []
+    if not _is_nan(eps):
+        caveats.append(make_atom(
+            "ga_sel.caveat.refit_noise", "caveat", "fitness", _val(eps, 4),
+            f"Refitting the meta-learner on unchanged data moves the fitness by "
+            f"about {_fmt(eps, 4)}, so differences smaller than that are not "
+            f"meaningful."))
     if n < 2:
         caveats.append(make_atom(
             "ga_sel.caveat.lofo_na", "caveat", "lofo", None,
@@ -1281,7 +1375,7 @@ def _rank_phrase(ranks: Sequence[Any]) -> str:
 
 
 def _mark_heaviest(names: Sequence[str], heaviest: Optional[str]) -> List[str]:
-    return [f"{n} — the detector carrying the most weight —" if n == heaviest else n
+    return [f"{n} (the detector carrying the most weight)" if n == heaviest else n
             for n in names]
 
 
@@ -1445,8 +1539,8 @@ def build_ga_combination_ir(dataset: str, entity: str, result: Dict[str, Any]) -
 
     caveats = [
         make_atom("ga_comb.caveat.methods", "caveat", "attribution", None,
-                  "Absolute SHAP and ALE are label-free — they explain the "
-                  "meta-learner's own output — while PFI is label-based, measuring "
+                  "Absolute SHAP and ALE are label-free, explaining the "
+                  "meta-learner's own output, while PFI is label-based, measuring "
                   "the fitness drop when a detector's scores are shuffled."),
         make_atom("ga_comb.caveat.aggregation", "caveat", "markov", None,
                   "The overall weighting is the stationary distribution of a Markov "
@@ -1575,8 +1669,8 @@ def build_rank_aggregation_ir(dataset: str, entity: str, stage_name: str, iterat
         caveats.append(make_atom(
             f"{prefix}.caveat.two_sources", "caveat", "loo", None,
             "With exactly two sources, influence (leave-one-out) and the combined "
-            "(Borda) rank are undefined — dropping one leaves a single source — so "
-            "agreement is the only meaningful diagnostic here."))
+            "(Borda) rank are undefined, because dropping one leaves a single "
+            "source, so agreement is the only meaningful diagnostic here."))
         question = (f"Which of the two sources did the {stage_word} consensus "
                     f"follow more closely?")
         # Footer is a pure glossary DEFINITION only; the two-source rationale
@@ -1691,167 +1785,274 @@ def build_rank_aggregation_ir(dataset: str, entity: str, stage_name: str, iterat
     return ir
 
 
-def _mc_region_phrase(regions: Sequence[Any]) -> str:
-    """Render win regions as prose. Ranges are written 'from A to B', never
-    'A-B': the verifier's number extraction is sign-aware, so a hyphenated
-    range would be read as the negative number -B and flagged unsupported."""
-    spans = [(a, b) for a, b in regions if a != b]
-    points = [a for a, b in regions if a == b]
-    parts: List[str] = []
-    if spans:
-        parts.append(_oxford([f"from {_fmt(a)} to {_fmt(b)}" for a, b in spans]))
-    if points:
-        pts = _oxford([_fmt(p) for p in points])
-        # Isolated grid points read as bare values; only prefix them with "at"
-        # when they follow spans, so the two kinds stay distinguishable.
-        parts.append(f"at {pts}" if spans else pts)
-    return "at noise levels " + ", and ".join(parts)
+_MC_METRIC_LABELS = {"f1": "F1", "pr_auc": "PR-AUC", "vus": "VUS"}
+
+# How many detectors get a placement sentence of their own; the rest are in the
+# figures and the report.
+MC_RANK_RANGE_ATOMS = 6
+
+
+def _mc_place(k: Any) -> str:
+    """1 -> 'first', 2 -> 'second', ... Placements read as words in prose."""
+    words = {1: "first", 2: "second", 3: "third", 4: "fourth", 5: "fifth",
+             6: "sixth", 7: "seventh", 8: "eighth", 9: "ninth", 10: "tenth"}
+    if k is None or _is_nan(k):
+        return str(k)
+    k = int(k)
+    return words.get(k, f"{k}{ {1: 'st', 2: 'nd', 3: 'rd'}.get(k if k < 20 else k % 10, 'th') }")
+
+
+def _mc_count(n: Any) -> str:
+    words = {0: "none", 1: "one", 2: "two", 3: "three", 4: "four", 5: "five",
+             6: "six", 7: "seven", 8: "eight", 9: "nine", 10: "ten"}
+    return words.get(int(n), str(int(n)))
 
 
 def build_monte_carlo_ir(dataset: str, entity: str, result: Dict[str, Any],
                          ranked: Optional[List[str]] = None) -> Dict[str, Any]:
-    curves = result.get("curves", {})
-    winner = result.get("winner", {})
-    permodel = result.get("permodel", {})
+    """Explain the Monte Carlo ranking from the trials it averages.
+
+    Every atom names its own subject in full. The summariser drops atoms by type
+    and the narrator may reorder what is left, so a sentence that says "it" or
+    leaves a rival unlabelled loses its referent in the default view.
+    """
+    order = list(result.get("order") or [])
+    n_trials = int(result.get("n_trials", 0) or 0)
     formula = result.get("fitness_formula") or "the fitness"
+    level = result.get("noise_level")
+    wins = result.get("wins") or {}
+    rank_ranges = result.get("rank_ranges") or {}
+    spreads = result.get("spreads") or {}
+    win = result.get("winner") or {}
+    loo = result.get("leave_one_out") or {}
 
     evidence: List[Dict[str, Any]] = []
     required: List[str] = []
+    top = (ranked[0] if ranked else (order[0] if order else None))
     output = {
-        "production_ranking_top_k": _top_k(ranked or []),
-        "top_pick": (ranked[0] if ranked else NOT_AVAILABLE),
+        "ranking_top_k": _top_k(ranked or order),
+        "top_pick": (top if top else NOT_AVAILABLE),
+        "n_trials": n_trials,
     }
-    prod_top = ranked[0] if ranked else None
-    if prod_top:
+
+    if top:
         evidence.append(make_atom(
-            "mc.output.top", "stage_output", str(prod_top),
-            {"top_pick": prod_top, "fitness": formula},
-            f"In the production Monte Carlo test, {prod_top} ranked first by "
-            f"fitness ({formula}).", order=0))
+            "mc.output.top", "stage_output", str(top),
+            {"top_pick": top, "fitness": formula, "n_trials": n_trials},
+            f"{top} ranked first in the Monte Carlo test, by fitness "
+            f"({formula}) averaged over the {_mc_count(n_trials)} trials.",
+            order=0))
         required.append("mc.output.top")
 
-    # ONE atom per detector. Crossover atoms are dropped entirely — a crossover
-    # is the derivative of the win regions, so emitting both floods the prose
-    # with "at 0.042 ... at 0.053 ..." without adding a single fact the regions
-    # do not already carry.
-    regions_by_model: Dict[str, List[Any]] = {
-        m: regions for m, regions in sorted((curves.get("win_regions") or {}).items())
-        if regions}
-
-    wr_all = (winner.get("win_rates") or {}) if isinstance(winner, dict) else {}
-
-    def _region_order(m: str) -> Any:
-        cov = sum(abs(b - a) for a, b in regions_by_model[m])
-        return (-float(wr_all.get(m, 0.0) or 0.0), -cov, m)
-
-    for i, m in enumerate(sorted(regions_by_model, key=_region_order)):
-        regions = regions_by_model[m]
-        wid = f"mc.win_region.{m}"
+    if n_trials:
+        lvl = "" if level is None else f" at noise level {_fmt(level)}"
         evidence.append(make_atom(
-            wid, "win_region", m,
-            {"fitness": [(_val(a), _val(b)) for a, b in regions]},
-            f"{m} won {_mc_region_phrase(regions)}.", order=30 + i))
-        if i < HEAD_REQUIRED:
-            required.append(wid)
+            "mc.trials", "trial_setup", str(n_trials),
+            {"n_trials": n_trials, "noise_level": _val(level)},
+            f"The Monte Carlo ranking averages {_mc_count(n_trials)} independent "
+            f"draws of the same Gaussian noise{lvl}; every detector was scored on "
+            f"the same draw within each trial.", order=5))
+        required.append("mc.trials")
 
-    conf: Dict[str, Any] = {}
-    if winner.get("feasible"):
-        cv_acc = winner.get("cv_accuracy", float("nan"))
-        conf["winner_surrogate"] = {
-            "train_accuracy": _val(winner.get("train_accuracy"), 3),
-            "cv_accuracy": _val(cv_acc, 3),
-            "grade": fidelity_grade(cv_acc),
-        }
-        wr = winner.get("win_rates", {})
-        winners = sorted(((m, r) for m, r in wr.items() if r > 0),
-                         key=lambda kv: kv[1], reverse=True)
-        # One over the cut is named rather than summarised: "the remaining 1.0%
-        # went to 1 further detector" spends a clause withholding a name it has
-        # room for. The tail therefore always stands for two or more.
-        cut = len(winners) if len(winners) <= TOP_K + 1 else TOP_K
-        top_wr, rest = winners[:cut], winners[cut:]
-        if top_wr:
-            wr_txt = ", ".join(f"{m} {_fmt(100.0 * r, 1)}%" for m, r in top_wr)
-            # These are shares of the same trials, so they sum to 100% across
-            # ALL winners. Listing only the top few left a reader adding up 96%
-            # and looking for the bug; the tail is now stated instead of simply
-            # missing. Kept as one clause rather than naming the stragglers,
-            # which is what the cut is for.
-            tail = sum(r for _, r in rest)
-            tail_txt = ""
-            if rest:
-                tail_txt = (f"; the remaining {_fmt(100.0 * tail, 1)}% went to "
-                            f"{len(rest)} further detectors")
-            evidence.append(make_atom(
-                "mc.surrogate.win_rates", "surrogate_win_rates", "winner_surrogate",
-                {"listed": [(m, _val(r, 3)) for m, r in top_wr],
-                 "n_other": len(rest), "other_share": _val(tail, 3)},
-                f"The noise-sweep trials were won by: {wr_txt}{tail_txt}.",
-                order=20))
-            required.append("mc.surrogate.win_rates")
+    # ── Why the ranking has the winner it has ───────────────────────────────
+    if win.get("winner") and win.get("runner_up"):
+        w, r = str(win["winner"]), str(win["runner_up"])
+        terms = win.get("terms") or []
+        led = [t for t in terms if float(t.get("delta", 0.0)) > 0]
+        lost = [t for t in terms if float(t.get("delta", 0.0)) <= 0]
+        pairs = [f"{_MC_METRIC_LABELS.get(t['metric'], t['metric'])} "
+                 f"{_fmt(t['winner'], 4)} against {_fmt(t['runner_up'], 4)}"
+                 for t in terms]
+        if terms and not lost:
+            # Leading on every term and covering a deficit on one with a lead on
+            # another are different reasons to rank first, so they are different
+            # sentences rather than one hedged one.
+            body = (f"{w} scored higher than {r} on every term of the fitness: "
+                    f"{_oxford(pairs)}.")
+        elif led and lost:
+            gain = _oxford([f"{_MC_METRIC_LABELS.get(t['metric'], t['metric'])} "
+                            f"by {_fmt(abs(t['delta']), 4)}" for t in led])
+            deficit = _oxford([f"{_MC_METRIC_LABELS.get(t['metric'], t['metric'])} "
+                               f"by {_fmt(abs(t['delta']), 4)}" for t in lost])
+            body = (f"{w} scored below {r} on {deficit}, but {w}'s lead on "
+                    f"{gain} more than covered that deficit.")
+        else:
+            body = (f"{w} did not lead {r} on any single term of the fitness: "
+                    f"{_oxford(pairs)}.")
+        evidence.append(make_atom(
+            "mc.winner.components", "winner_components", w,
+            {"winner": w, "runner_up": r,
+             "terms": [{"metric": t["metric"], "winner": _val(t["winner"], 4),
+                        "runner_up": _val(t["runner_up"], 4),
+                        "delta": _val(t["delta"], 4)} for t in terms],
+             "led_every_term": bool(win.get("led_every_term"))},
+            body, order=10))
+        required.append("mc.winner.components")
 
-            # A comparison between two facts belongs to neither of them, so
-            # without this the narrative listed both and left the disagreement
-            # for the reader to spot.
-            sweep_top = top_wr[0][0]
-            if prod_top:
-                agree = str(sweep_top) == str(prod_top)
-                evidence.append(make_atom(
-                    "mc.sweep_verdict", "sweep_verdict", str(sweep_top),
-                    {"agree": agree, "production_top": prod_top,
-                     "sweep_top": sweep_top,
-                     "sweep_top_win_rate": _val(top_wr[0][1], 3),
-                     "production_top_win_rate": _val(wr.get(prod_top, 0.0), 3)},
-                    f"The sweep and the production run "
-                    f"{'agree' if agree else 'do not agree'}: {sweep_top} won "
-                    f"most of the noise trials"
-                    + (" and the production run ranked it first too." if agree else
-                       f", while it was {prod_top} that the production run "
-                       f"ranked first."),
-                    order=10))
-                required.append("mc.sweep_verdict")
-    # The winner-surrogate RULES are deliberately not emitted as evidence:
-    # the tree is fitted on (noise level -> winner), so "the winner is X
-    # when noise <= Y" restates the win regions above in weaker, fitted
-    # form. Its held-out fidelity stays in `confidence` above.
+        ahead = int(win.get("ahead_in_trials", 0) or 0)
+        if ahead == n_trials and n_trials:
+            margin_txt = (f"{w} scored above the runner-up {r} in all "
+                          f"{_mc_count(n_trials)} trials, by between "
+                          f"{_fmt(win.get('margin_min'), 4)} and "
+                          f"{_fmt(win.get('margin_max'), 4)} of fitness.")
+        else:
+            margin_txt = (f"{w} scored above the runner-up {r} in "
+                          f"{_mc_count(ahead)} of the {_mc_count(n_trials)} "
+                          f"trials, and leads {r} by "
+                          f"{_fmt(win.get('margin_mean'), 4)} of fitness on "
+                          f"average.")
+        evidence.append(make_atom(
+            "mc.winner.margin", "winner_margin", w,
+            {"winner": w, "runner_up": r,
+             "margin_mean": _val(win.get("margin_mean"), 4),
+             "margin_min": _val(win.get("margin_min"), 4),
+             "margin_max": _val(win.get("margin_max"), 4),
+             "ahead_in_trials": ahead, "n_trials": n_trials},
+            margin_txt, order=15))
+        required.append("mc.winner.margin")
 
-    # Per-model held-out R² as confidence data, each graded for trust. When a
-    # majority of a model's CV folds had (near-)constant test targets the
-    # held-out estimate is not assessable — grade it not_available but keep the
-    # computed number visible for transparency.
-    permodel_cv: Dict[str, Any] = {}
-    degenerate_models: List[str] = []
-    for m, pm in sorted(permodel.items()):
-        n_splits = int(pm.get("cv_n_splits", 0) or 0)
-        n_deg = int(pm.get("cv_degenerate_folds", 0) or 0)
-        majority_degenerate = n_splits > 0 and n_deg > n_splits / 2
-        entry = {"cv_r2": _val(pm.get("cv_r2"), 3),
-                 "n_splits": n_splits, "n_degenerate_folds": n_deg,
-                 "grade": NOT_AVAILABLE if majority_degenerate
-                          else fidelity_grade(pm.get("cv_r2"))}
-        permodel_cv[m] = entry
-        if majority_degenerate:
-            degenerate_models.append(m)
-    if permodel_cv:
-        conf["permodel_cv_r2"] = permodel_cv
+    if top and n_trials:
+        won = int(wins.get(top, 0) or 0)
+        others = sorted(((m, c) for m, c in wins.items()
+                         if c > 0 and str(m) != str(top)),
+                        key=lambda kv: -kv[1])
+        if won == n_trials:
+            cons = (f"{top} scored highest in all {_mc_count(n_trials)} trials, "
+                    f"so the first place of {top} is not an artefact of averaging "
+                    f"them.")
+        elif others:
+            took = _oxford([f"{m} took {_mc_count(c)}" for m, c in others])
+            cons = (f"{top} scored highest in {_mc_count(won)} of the "
+                    f"{_mc_count(n_trials)} trials; {took}.")
+        else:
+            cons = (f"{top} scored highest in {_mc_count(won)} of the "
+                    f"{_mc_count(n_trials)} trials.")
+        evidence.append(make_atom(
+            "mc.winner.consistency", "winner_consistency", str(top),
+            {"top_pick": top, "trials_won": won, "n_trials": n_trials,
+             "other_winners": {str(m): int(c) for m, c in others}},
+            cons, order=20))
+        required.append("mc.winner.consistency")
 
-    # Both the run-invariant notes — the sweep is explain-only, and it scores
-    # with a fast point-wise proxy not comparable to production — now live in
-    # the info footer (appended verbatim, not scored). Only run-specific caveats
-    # (e.g. degenerate CV folds for this entity) stay in the caveats list.
+    defeats = result.get("defeats") or {}
+    challengers = defeats.get("challengers") or []
+    if challengers:
+        w = str(defeats.get("winner"))
+        n_def = int(defeats.get("n_defeats", 0) or 0)
+        lo, hi = defeats.get("margin_min"), defeats.get("margin_max")
+        by = (f"by {_fmt(hi, 4)}" if n_def == 1 or _fmt(lo, 4) == _fmt(hi, 4)
+              else f"by between {_fmt(lo, 4)} and {_fmt(hi, 4)}")
+        names = _oxford([str(c["detector"]) for c in challengers])
+        places = _oxford([_mc_place(c["place"]) for c in challengers])
+        noun, verb = (("detector", "was") if len(challengers) == 1
+                      else ("detectors", "were"))
+        those = "that trial" if n_def == 1 else "those trials"
+        evidence.append(make_atom(
+            "mc.winner.beaten_by", "winner_beaten_by", w,
+            {"winner": w, "n_defeats": n_def, "n_trials": n_trials,
+             "margin_min": _val(lo, 4), "margin_max": _val(hi, 4),
+             "challengers": [{"detector": str(c["detector"]),
+                              "place": int(c["place"]),
+                              "trials": int(c["trials"])} for c in challengers],
+             "events": [{"trial": int(e["trial"]), "detector": str(e["detector"]),
+                         "margin": _val(e["margin"], 4)}
+                        for e in defeats.get("events", [])]},
+            f"{w} was outscored in {_mc_count(n_def)} of the "
+            f"{_mc_count(n_trials)} trials, {by} of fitness. The {noun} that "
+            f"beat {w} in {those} {verb} {names}, which finished {places} in "
+            f"the Monte Carlo ranking.", order=22))
+        required.append("mc.winner.beaten_by")
+
+    if loo.get("n_trials"):
+        w = str(loo.get("winner"))
+        if loo.get("stable"):
+            loo_txt = (f"The first place of {w} does not rest on any single "
+                       f"trial: dropping any one of the {_mc_count(n_trials)} "
+                       f"trials and re-ranking still puts {w} first.")
+        else:
+            flips = _oxford([f"dropping trial {f['trial']} puts {f['winner']} "
+                             f"first instead" for f in loo.get("flips", [])])
+            loo_txt = (f"The first place of {w} rests on individual trials: "
+                       f"{flips}.")
+        evidence.append(make_atom(
+            "mc.winner.leave_one_trial", "leave_one_trial", str(loo.get("winner")),
+            {"winner": loo.get("winner"), "stable": bool(loo.get("stable")),
+             "flips": [{"trial": int(f["trial"]), "winner": str(f["winner"])}
+                       for f in loo.get("flips", [])]},
+            loo_txt, order=25))
+        required.append("mc.winner.leave_one_trial")
+
+    spread = result.get("median_spread")
+    gap = result.get("median_gap")
+    if not _is_nan(spread) and not _is_nan(gap):
+        evidence.append(make_atom(
+            "mc.spread_vs_margin", "spread_comparison", "fitness",
+            {"median_spread": _val(spread, 4), "median_gap": _val(gap, 4),
+             "n_trials": n_trials},
+            f"A detector's fitness moved by {_fmt(spread, 4)} between trials for "
+            f"the typical detector, while the typical pair of neighbouring "
+            f"places in the Monte Carlo ranking is separated by "
+            f"{_fmt(gap, 4)}.", order=35))
+        required.append("mc.spread_vs_margin")
+
+    # ── Per detector, for the extended view ─────────────────────────────────
+    movers = [m for m in order
+              if m in rank_ranges and rank_ranges[m][0] != rank_ranges[m][1]]
+    movers.sort(key=lambda m: (-(rank_ranges[m][1] - rank_ranges[m][0]),
+                               order.index(m)))
+    # Sorting by range alone drops the winner behind detectors that swung
+    # further, and how far first place itself moved is the placement this stage
+    # exists to explain.
+    if top in movers:
+        movers.insert(0, movers.pop(movers.index(top)))
+    for i, m in enumerate(movers[:MC_RANK_RANGE_ATOMS]):
+        lo, hi = rank_ranges[m]
+        evidence.append(make_atom(
+            f"mc.rank_range.{m}", "rank_range", str(m),
+            {"best_place": int(lo), "worst_place": int(hi),
+             "spread": _val(spreads.get(m), 4), "n_trials": n_trials},
+            f"{m} placed as high as {_mc_place(lo)} and as low as "
+            f"{_mc_place(hi)} across the {_mc_count(n_trials)} trials.",
+            order=50 + i))
+
     caveats: List[Dict[str, Any]] = []
-    if degenerate_models:
+    if top and n_trials and int(wins.get(top, 0) or 0) != n_trials:
         caveats.append(make_atom(
-            "mc.caveat.cv_degenerate", "caveat", "confidence", degenerate_models,
-            f"For {', '.join(degenerate_models)} most cross-validation folds had "
-            f"(near-)constant fitness across the sweep, so the held-out R² is not a "
-            f"meaningful fidelity estimate (marked not_available); the number is "
-            f"kept only for transparency."))
-    question = ("Which detector handles the injected noise best across "
-                "different noise levels?")
+            "mc.caveat.unresolved", "caveat", "ranking", str(top),
+            f"{top} is ranked first on the average of the {_mc_count(n_trials)} "
+            f"trials but did not score highest in all of them, so the first "
+            f"place of {top} is weaker evidence than the ranking alone suggests."))
+
+    # Detectors that scored identically in every trial cannot be separated by
+    # this stage at all, and neighbouring identical entries read as a decided
+    # order they are not.
+    ties: List[List[str]] = []
+    means = result.get("means") or {}
+    seen: Dict[Any, List[str]] = {}
+    fitness = result.get("fitness")
+    if fitness is not None and len(order) > 1:
+        names = list(result.get("model_names") or [])
+        for m in order:
+            if m not in names:
+                continue
+            key = tuple(np.round(np.asarray(fitness)[:, names.index(m)], 12))
+            seen.setdefault(key, []).append(str(m))
+        ties = [g for g in seen.values() if len(g) > 1]
+    if ties:
+        groups = _oxford([_oxford(g) for g in ties])
+        caveats.append(make_atom(
+            "mc.caveat.ties", "caveat", "ranking", [g for g in ties],
+            f"Some detectors scored identically in every trial ({groups}), so "
+            f"the order between the detectors within each of those groups is "
+            f"arbitrary rather than measured."))
+
+    question = (f"How did the detectors perform in each of the "
+                f"{_mc_count(n_trials)} noise trials the Monte Carlo ranking "
+                f"averages?") if n_trials else \
+               "How did the detectors perform in the trials the Monte Carlo ranking averages?"
 
     return _envelope("monte_carlo", dataset, entity, output, evidence, caveats,
-                     required, confidence=conf, question=question)
+                     required, question=question)
 
 
 # Clause-shaped labels used inside a surrogate condition ("… when <label> is
@@ -2073,16 +2274,16 @@ def _build_exclusive_win_ir(stage: str, prefix: str, dataset: str, entity: str,
         caveats.append(make_atom(
             f"{prefix}.caveat.support", "caveat", "support", {k0: n0},
             f"The rule for {k0} rests on only {n0} exclusive-win "
-            f"point{'' if n0 == 1 else 's'} — fewer than the {N_CV_FOLDS} "
-            f"cross-validation folds — so its held-out fidelity is unstable; "
+            f"point{'' if n0 == 1 else 's'}, fewer than the {N_CV_FOLDS} "
+            f"cross-validation folds, so its held-out fidelity is unstable; "
             f"treat it as indicative."))
     elif low_support:
         caveats.append(make_atom(
             f"{prefix}.caveat.support", "caveat", "support",
             {k0: n0 for k0, n0 in low_support},
             f"The rules for {_oxford([k0 for k0, _ in low_support])} each rest "
-            f"on fewer than {N_CV_FOLDS} exclusive-win points — fewer than the "
-            f"{N_CV_FOLDS} cross-validation folds — so their held-out fidelity "
+            f"on fewer than {N_CV_FOLDS} exclusive-win points, fewer than the "
+            f"{N_CV_FOLDS} cross-validation folds, so their held-out fidelity "
             f"is unstable; treat them as indicative."))
 
     # ── One atom per rival group: its rule(s) AND its win count together ──

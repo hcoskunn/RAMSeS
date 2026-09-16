@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional
 
 from Utils.pipeline_spec import (ALL_DETECTORS, ALL_STAGES,
                                  DEFAULT_ANOMALY_TYPE, DEFAULT_DECISION_METRICS,
+                                 DEFAULT_META_MODEL,
                                  format_decision_metrics, OFFLINE_ITERATION,
                                  parse_decision_metrics)
 from WebUI import artifacts, markers, paths
@@ -68,6 +69,10 @@ def build_argv(params: Dict[str, Any]) -> List[str]:
             spec = DEFAULT_DECISION_METRICS
         if spec != DEFAULT_DECISION_METRICS:
             argv += ["--decision_metric", format_decision_metrics(spec)]
+
+    meta_model = str(params.get("meta_model") or "").strip().lower()
+    if meta_model and meta_model != DEFAULT_META_MODEL:
+        argv += ["--meta_model", meta_model]
 
     if params.get("iteration") is not None:
         argv += ["--iteration", str(int(params["iteration"]))]

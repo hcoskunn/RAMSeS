@@ -81,26 +81,39 @@ def _rank_agg_result(two_sources=False):
             "kendall_only": kendall}
 
 
-def _mc_result():
-    curves = {
-        "grid_levels": np.array([0.0, 0.1, 0.2]),
-        "win_regions": {"A": [(0.0, 0.1)], "B": [(0.2, 0.2)]},
-        "crossovers": [{"noise": 0.2, "from_model": "A", "to_model": "B"}],
-        "breakdown_points": {"A": None, "B": 0.0},
-    }
-    return {
-        "curves": curves, "curves_fixed": curves,
-        "winner": {"feasible": True, "train_accuracy": 0.95, "cv_accuracy": 0.85,
-                   "win_rates": {"A": 0.6, "B": 0.4},
-                   "rules": [{"conditions": [{"feature": "noise_level", "op": "<=",
-                                              "threshold": 0.15}],
-                              "outcome": "A", "n_samples": 10}],
-                   "rules_text": "", "classes": ["A", "B"], "root_threshold": 0.15},
-        "permodel": {"A": {"cv_r2": 0.7, "trend": "robust"},
-                     "B": {"cv_r2": float("nan"), "trend": "fragile"}},
+def _mc_result(**over):
+    """What summarize_trials produces: A wins every trial, B and C trade places."""
+    fitness = np.array([[0.90, 0.60, 0.55],
+                        [0.91, 0.55, 0.60],
+                        [0.90, 0.60, 0.55]])
+    result = {
+        "model_names": ["A", "B", "C"],
+        "order": ["A", "B", "C"],
+        "n_trials": 3,
+        "fitness": fitness,
+        "means": {"A": 0.9033, "B": 0.5833, "C": 0.5667},
+        "ranks": np.array([[1, 2, 3], [1, 3, 2], [1, 2, 3]]),
+        "wins": {"A": 3, "B": 0, "C": 0},
+        "rank_ranges": {"A": (1, 1), "B": (2, 3), "C": (2, 3)},
+        "spreads": {"A": 0.01, "B": 0.05, "C": 0.05},
+        "median_spread": 0.05,
+        "median_gap": 0.16,
+        "leave_one_out": {"winner": "A", "n_trials": 3, "flips": [], "stable": True},
+        "winner": {"winner": "A", "runner_up": "B",
+                   "terms": [{"metric": "f1", "winner": 0.95, "runner_up": 0.60,
+                              "delta": 0.35},
+                             {"metric": "pr_auc", "winner": 0.85, "runner_up": 0.57,
+                              "delta": 0.28}],
+                   "led_every_term": True,
+                   "margin_mean": 0.32, "margin_min": 0.30, "margin_max": 0.36,
+                   "ahead_in_trials": 3,
+                   "margins": [0.30, 0.36, 0.30]},
+        "metrics": ["f1", "pr_auc"],
         "fitness_formula": "0.5 * F1 + 0.5 * PR-AUC",
-        "n_trials": 30,
+        "noise_level": 0.1,
     }
+    result.update(over)
+    return result
 
 
 class _FakeInfoClf:  # placeholder object; builder must not touch it when rules exist
@@ -809,12 +822,11 @@ class TestBuilders(unittest.TestCase):
             "A was chosen for both high utility and high stability.")
         self.assertIn("B was low on both utility and stability",
                       by_id["ga_sel.included.marginal"]["text"])
-        # The profile LEADS the sentence. Three excluded atoms in a row all
-        # opened "X was left out …" and differed only in the high/low tail, so a
-        # narrator merged them and handed one detector another's profile.
+        # Low stability IS the reason an HL detector was left out, so the clause
+        # is causal rather than concessive.
         self.assertEqual(
             by_id["ga_sel.excluded.C"]["text"],
-            "C had high utility and low stability, but was still left out.")
+            "C had high utility but low stability, so it was left out.")
         # Utility/stability numbers stay in `value`, never in the prose.
         self.assertEqual(
             by_id["ga_sel.included.both"]["value"]["per_detector"]["A"],
@@ -864,13 +876,97 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(by_id["ga_sel.included.stability"]["value"]["archetype"], "LH")
         # Excluded: high-utility anomaly individual; the rest grouped by profile.
         self.assertEqual(by_id["ga_sel.excluded.Xh"]["text"],
-                         "Xh had high utility and low stability, but was still left out.")
+                         "Xh had high utility but low stability, so it was left out.")
         self.assertEqual(by_id["ga_sel.excluded.stable"]["value"]["detectors"], ["Xs"])
         self.assertEqual(by_id["ga_sel.excluded.plain"]["value"]["detectors"], ["Xp"])
         # Excluded groups lead with the profile too, for the same reason.
         self.assertEqual(by_id["ga_sel.excluded.plain"]["text"],
-                         "Xp had low utility and low stability, and was left out.")
+                         "Xp had low utility and low stability, so it was left out.")
         self.assertEqual(by_id["ga_sel.excluded.nodata"]["value"]["detectors"], ["Xn"])
+
+    def _hh_excluded(self, **over):
+        """Fixture with one HH detector left out, so the reason cascade runs."""
+        res = _ga_selection_result()
+        res["archetypes"]["C"] = {"utility": 0.15, "stability_mean": 0.9,
+                                  "relative": {"archetype": "HH"},
+                                  "absolute": {"archetype": "HH"}}
+        res["noise"] = {"eps": 0.02, "eps_test": 0.01}
+        res["add_one_in"] = {"C": {"delta": 0.0, "delta_test": 0.0,
+                                   "tried_exact": True}}
+        res["redundancy"] = {"C": {"redundancy": 0.5, "partner": "A"}}
+        res["add_one_in"]["C"].update(over.pop("add_one_in", {}))
+        res["redundancy"]["C"].update(over.pop("redundancy", {}))
+        return res
+
+    def _reason_atom(self, **over):
+        doc = ir.build_ga_selection_ir("DS", "e1", self._hh_excluded(**over))
+        return {a["id"]: a for a in doc["evidence"]}["ga_sel.excluded.C"]
+
+    def test_exclusion_reason_covers_every_code(self):
+        """Every branch of the cascade is reachable and returns a listed code."""
+        cases = {
+            "not_available": (float("nan"), 0.0, 0.5),
+            "rejected": (-0.5, 0.0, 0.5),
+            "redundant": (0.0, 0.0, 0.99),
+            "neutral": (0.0, 0.0, 0.5),
+            "fold_only": (0.5, -0.1, 0.5),
+            "outperformed": (0.5, 0.5, 0.5),
+            "fold_only_unverified": (0.5, float("nan"), 0.5),
+        }
+        seen = set()
+        for expected, (dv, dt, r) in cases.items():
+            got = ir.exclusion_reason(dv, dt, r, 0.02, 0.01, 0.95)
+            self.assertEqual(got, expected, f"{dv}/{dt}/{r}")
+            seen.add(got)
+        self.assertEqual(seen, set(ir.EXCLUSION_REASONS))
+
+    def test_positive_delta_never_reads_as_neutral(self):
+        """eps is the floor: a gain inside it is neutral, outside it is not."""
+        self.assertEqual(ir.exclusion_reason(0.01, -1, 0.0, 0.02, 0.01, 0.95), "neutral")
+        self.assertEqual(ir.exclusion_reason(0.03, -1, 0.0, 0.02, 0.01, 0.95), "fold_only")
+
+    def test_redundant_names_its_partner_in_the_text(self):
+        atom = self._reason_atom(redundancy={"redundancy": 0.99, "partner": "A"})
+        self.assertEqual(atom["value"]["reason"], "redundant")
+        # Both names sit in the text, so the verifier's conjunctive rule obliges
+        # the narrative to carry the partner as well as the subject.
+        self.assertIn("duplicate A", atom["text"])
+        self.assertIn("C", atom["text"])
+
+    def test_redundant_without_a_partner_falls_back_to_neutral(self):
+        """A constant score column has no partner, so nothing may be duplicated."""
+        atom = self._reason_atom(redundancy={"redundancy": float("nan"),
+                                             "partner": None})
+        self.assertEqual(atom["value"]["reason"], "neutral")
+        self.assertNotIn("duplicate", atom["text"])
+
+    def test_outperformed_states_the_search_never_tried_it(self):
+        atom = self._reason_atom(add_one_in={"delta": 0.5, "delta_test": 0.5})
+        self.assertEqual(atom["value"]["reason"], "outperformed")
+        self.assertIn("never evaluated", atom["text"])
+
+    def test_fold_only_frames_the_exclusion_as_avoiding_overfitting(self):
+        atom = self._reason_atom(add_one_in={"delta": 0.5, "delta_test": -0.1})
+        self.assertEqual(atom["value"]["reason"], "fold_only")
+        self.assertIn("avoided overfitting", atom["text"])
+
+    def test_tried_exact_is_recorded_but_never_stated(self):
+        """Provenance belongs in the record, not in a sentence the narrator
+        has to carry — the reason clause is what distinguishes these atoms."""
+        atom = self._reason_atom()
+        self.assertIs(atom["value"]["tried_exact"], True)
+        for phrase in ("never tried", "already evaluated", "the search evaluated"):
+            self.assertNotIn(phrase, atom["text"])
+
+    def test_refit_noise_caveat_states_the_floor(self):
+        doc = ir.build_ga_selection_ir("DS", "e1", self._hh_excluded())
+        caveat = {a["id"]: a for a in doc["caveats"]}["ga_sel.caveat.refit_noise"]
+        self.assertIn("0.0200", caveat["text"])
+
+    def test_no_refit_noise_caveat_without_a_measurement(self):
+        doc = ir.build_ga_selection_ir("DS", "e1", _ga_selection_result())
+        self.assertNotIn("ga_sel.caveat.refit_noise",
+                         {a["id"] for a in doc["caveats"]})
 
     def test_competition_rank_tolerates_float_noise(self):
         """Markov scores that are mathematically tied come back from
@@ -1130,62 +1226,171 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("placing 1st of 2 for influence and 1st of 2 for agreement",
                       lead["text"])
 
-    def test_monte_carlo_lean(self):
-        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B"])
+    def test_monte_carlo_explains_the_ranking_from_its_trials(self):
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B", "C"])
         _check_envelope(self, doc, "monte_carlo")
         blob = json.dumps(doc)
-        # Lean IR: no breakdown / trend / tau content.
-        self.assertNotIn("breakdown", blob)
-        self.assertNotIn("robust\"", blob)
-        self.assertNotIn("fragile", blob)
+        # No sweep content survives: this stage no longer runs one. The single
+        # noise level the trials share stays — it is a fact about them.
+        for gone in ("win_region", "surrogate", "crossover", "breakdown",
+                     "noise_levels"):
+            self.assertNotIn(gone, blob, gone)
         ids = {a["id"] for a in doc["evidence"]}
-        # One win-region atom per DETECTOR; the crossover and surrogate-rule
-        # atoms are gone — a crossover is the derivative of the regions and the
-        # rules restate them in fitted form.
-        self.assertIn("mc.win_region.A", ids)
-        self.assertNotIn("mc.win_region.f1.A", ids)
-        self.assertNotIn("mc.crossover.f1.0", ids)
-        self.assertNotIn("mc.surrogate.rule.0", ids)
-        # One production winner, named with the fitness it won on.
+        self.assertLessEqual(
+            {"mc.output.top", "mc.trials", "mc.winner.components",
+             "mc.winner.margin", "mc.winner.consistency",
+             "mc.winner.leave_one_trial", "mc.spread_vs_margin"},
+            ids)
         lead = next(a for a in doc["evidence"] if a["id"] == "mc.output.top")
         self.assertEqual(
             lead["text"],
-            "In the production Monte Carlo test, A ranked first by fitness "
-            "(0.5 * F1 + 0.5 * PR-AUC).")
-        self.assertIn("mc.surrogate.win_rates", doc["required_atom_ids"])
-        # All winners fit inside the top-K cut here, so there is no tail clause.
-        wr = next(a for a in doc["evidence"] if a["id"] == "mc.surrogate.win_rates")
-        self.assertEqual(
-            wr["text"],
-            "The noise-sweep trials were won by: A 60.0%, B 40.0%.")
-        self.assertEqual(wr["value"]["n_other"], 0)
-        conf = doc["confidence"]
-        self.assertEqual(conf["winner_surrogate"]["grade"], "high")
-        # Per-model cv R² is graded confidence data, number kept visible.
-        self.assertEqual(conf["permodel_cv_r2"]["B"]["cv_r2"], ir.NOT_AVAILABLE)
-        self.assertEqual(conf["permodel_cv_r2"]["A"]["cv_r2"], 0.7)
-        self.assertIn("grade", conf["permodel_cv_r2"]["A"])
+            "A ranked first in the Monte Carlo test, by fitness "
+            "(0.5 * F1 + 0.5 * PR-AUC) averaged over the three trials.")
+        # Nothing is fitted here, so there is no fidelity to report.
+        self.assertEqual(doc["confidence"], {})
 
-    def test_mc_majority_degenerate_cv_r2_graded_not_available(self):
+    def test_mc_atoms_carry_no_em_dashes(self):
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(
+            wins={"A": 1, "B": 1, "C": 1},
+            defeats={"winner": "A", "n_defeats": 2,
+                     "margin_min": 0.0002, "margin_max": 0.0031,
+                     "challengers": [{"detector": "B", "place": 2, "trials": 1},
+                                     {"detector": "C", "place": 3, "trials": 1}],
+                     "events": []}), ["A", "B", "C"])
+        for atom in doc["evidence"] + doc["caveats"]:
+            self.assertNotIn("—", atom["text"], atom["id"])
+
+    def test_mc_every_atom_names_its_own_subject(self):
+        """The summariser drops atoms by type and the narrator reorders what is
+        left, so a sentence that says "it" loses its referent in the card."""
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B", "C"])
+        for atom in doc["evidence"] + doc["caveats"]:
+            first = atom["text"].split(",")[0].split(" ")[0]
+            self.assertNotIn(first.lower(), ("it", "they", "this", "that"),
+                             atom["id"])
+            self.assertNotIn(" it ", f" {atom['text']} ", atom["id"])
+
+    def test_mc_winner_that_led_every_trial_is_stated_as_such(self):
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B", "C"])
+        cons = next(a for a in doc["evidence"]
+                    if a["id"] == "mc.winner.consistency")
+        self.assertIn("all three trials", cons["text"])
+        self.assertEqual(cons["value"]["trials_won"], 3)
+        # A winner that swept the trials raises no caveat.
+        self.assertNotIn("mc.caveat.unresolved",
+                         {c["id"] for c in doc["caveats"]})
+
+    def test_mc_winner_that_lost_trials_is_caveated(self):
+        doc = ir.build_monte_carlo_ir(
+            "DS", "e1", _mc_result(wins={"A": 2, "B": 1, "C": 0}), ["A", "B", "C"])
+        cons = next(a for a in doc["evidence"]
+                    if a["id"] == "mc.winner.consistency")
+        self.assertIn("A scored highest in two of the three trials", cons["text"])
+        self.assertIn("B took one", cons["text"])
+        cav = next(c for c in doc["caveats"] if c["id"] == "mc.caveat.unresolved")
+        self.assertIn("A", cav["text"])
+
+    def test_mc_a_covered_deficit_reads_differently_from_a_clean_sweep(self):
+        """Leading on every term and covering a deficit with another term are
+        different reasons to rank first."""
+        clean = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B", "C"])
+        clean_text = next(a for a in clean["evidence"]
+                          if a["id"] == "mc.winner.components")["text"]
+        self.assertIn("on every term of the fitness", clean_text)
+
+        mixed = _mc_result()
+        mixed["winner"] = dict(mixed["winner"], led_every_term=False, terms=[
+            {"metric": "f1", "winner": 0.95, "runner_up": 0.60, "delta": 0.35},
+            {"metric": "pr_auc", "winner": 0.50, "runner_up": 0.57, "delta": -0.07}])
+        doc = ir.build_monte_carlo_ir("DS", "e1", mixed, ["A", "B", "C"])
+        text = next(a for a in doc["evidence"]
+                    if a["id"] == "mc.winner.components")["text"]
+        self.assertIn("A scored below B on PR-AUC", text)
+        self.assertIn("more than covered", text)
+
+    def test_mc_the_detectors_that_beat_the_winner_carry_their_own_place(self):
+        """The runner-up by mean need not be one of them, so a challenger's own
+        place in the ranking is what says how far the top reaches down."""
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(
+            wins={"A": 1, "B": 1, "C": 1},
+            defeats={"winner": "A", "n_defeats": 2,
+                     "margin_min": 0.0002, "margin_max": 0.0031,
+                     "challengers": [{"detector": "B", "place": 2, "trials": 1},
+                                     {"detector": "C", "place": 3, "trials": 1}],
+                     "events": [{"trial": 2, "detector": "B", "margin": 0.0031},
+                                {"trial": 3, "detector": "C", "margin": 0.0002}]}),
+            ["A", "B", "C"])
+        atom = next(a for a in doc["evidence"] if a["id"] == "mc.winner.beaten_by")
+        self.assertEqual(
+            atom["text"],
+            "A was outscored in two of the three trials, by between 0.0002 and "
+            "0.0031 of fitness. The detectors that beat A in those trials were "
+            "B and C, which finished second and third in the Monte Carlo ranking.")
+        self.assertIn("mc.winner.beaten_by", doc["required_atom_ids"])
+
+    def test_mc_a_single_defeat_reads_in_the_singular(self):
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(
+            wins={"A": 2, "B": 1},
+            defeats={"winner": "A", "n_defeats": 1,
+                     "margin_min": 0.0031, "margin_max": 0.0031,
+                     "challengers": [{"detector": "B", "place": 2, "trials": 1}],
+                     "events": [{"trial": 2, "detector": "B", "margin": 0.0031}]}),
+            ["A", "B", "C"])
+        atom = next(a for a in doc["evidence"] if a["id"] == "mc.winner.beaten_by")
+        self.assertIn("by 0.0031 of fitness", atom["text"])
+        self.assertIn("The detector that beat A in that trial was B, which "
+                      "finished second", atom["text"])
+
+    def test_mc_a_winner_that_swept_is_never_said_to_be_beaten(self):
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B", "C"])
+        self.assertNotIn("mc.winner.beaten_by",
+                         {a["id"] for a in doc["evidence"]})
+
+    def test_mc_leave_one_trial_out_names_the_trial_that_flips_it(self):
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(leave_one_out={
+            "winner": "A", "n_trials": 3, "stable": False,
+            "flips": [{"trial": 2, "winner": "B"}]}), ["A", "B", "C"])
+        atom = next(a for a in doc["evidence"]
+                    if a["id"] == "mc.winner.leave_one_trial")
+        self.assertIn("dropping trial 2 puts B first instead", atom["text"])
+        self.assertFalse(atom["value"]["stable"])
+
+    def test_mc_rank_ranges_are_only_for_detectors_that_moved(self):
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B", "C"])
+        ids = {a["id"] for a in doc["evidence"]}
+        self.assertIn("mc.rank_range.B", ids)
+        self.assertIn("mc.rank_range.C", ids)
+        # A held first place in every trial, so it has no range to report.
+        self.assertNotIn("mc.rank_range.A", ids)
+        # They are the extended view, never required.
+        self.assertNotIn("mc.rank_range.B", doc["required_atom_ids"])
+
+    def test_mc_the_winner_keeps_a_rank_range_slot(self):
+        """Sorted by range alone the winner loses its slot to wilder detectors,
+        and how far first place moved is what the stage is explaining."""
+        wide = {"A": (1, 3), "B": (2, 9), "C": (2, 9), "D": (2, 9),
+                "E": (2, 9), "F": (2, 9), "G": (2, 9)}
+        names = list(wide)
+        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(
+            order=names, model_names=names, rank_ranges=wide,
+            fitness=np.tile(np.arange(len(names), 0, -1, dtype=float), (3, 1)),
+            wins={"A": 3, "B": 2}), names)
+        ranges = [a for a in doc["evidence"] if a["type"] == "rank_range"]
+        self.assertEqual(len(ranges), ir.MC_RANK_RANGE_ATOMS)
+        # First slot, ahead of every detector with a wider range.
+        first = min(ranges, key=lambda a: a["order"])
+        self.assertEqual(first["id"], "mc.rank_range.A")
+
+    def test_mc_identical_detectors_are_caveated_not_ordered(self):
         result = _mc_result()
-        # A: 4 of 5 folds degenerate → number kept, graded not_available.
-        # B: 1 of 5 → graded normally.
-        result["permodel"] = {
-            "A": {"cv_r2": 0.6, "cv_n_splits": 5, "cv_degenerate_folds": 4},
-            "B": {"cv_r2": 0.9, "cv_n_splits": 5, "cv_degenerate_folds": 1},
-        }
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
-        conf = doc["confidence"]["permodel_cv_r2"]
-        self.assertEqual(conf["A"]["cv_r2"], 0.6)          # number stays visible
-        self.assertEqual(conf["A"]["grade"], ir.NOT_AVAILABLE)
-        self.assertEqual(conf["A"]["n_degenerate_folds"], 4)
-        self.assertEqual(conf["B"]["cv_r2"], 0.9)
-        self.assertEqual(conf["B"]["grade"], "high")
-        # A caveat names the majority-degenerate model.
-        cav = next(c for c in doc["caveats"] if c["id"] == "mc.caveat.cv_degenerate")
-        self.assertIn("A", cav["value"])
-        self.assertNotIn("B", cav["value"])
-        self.assertIn("not a meaningful fidelity estimate", cav["text"])
+        result["fitness"] = np.array([[0.90, 0.60, 0.60],
+                                      [0.91, 0.60, 0.60],
+                                      [0.90, 0.60, 0.60]])
+        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B", "C"])
+        cav = next(c for c in doc["caveats"] if c["id"] == "mc.caveat.ties")
+        self.assertIn("B", cav["text"])
+        self.assertIn("C", cav["text"])
+        self.assertIn("arbitrary rather than measured", cav["text"])
 
     def test_off_by_support_gate(self):
         low = ir.build_off_by_ir("DS", "e1", _off_by_result(n_wins=2), ["A", "B"])
@@ -1375,89 +1580,6 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("the point was labelled normal", edge["text"])
         self.assertNotIn("real anomaly", edge["text"])
 
-    def test_mc_win_rates_account_for_the_detectors_the_cut_drops(self):
-        """The shares are of the same trials, so they sum to 100% across ALL
-        winners. Listing only the top few left a reader adding up 96% and
-        hunting for the bug, so the tail is stated rather than simply absent."""
-        result = _mc_result()
-        result["winner"]["win_rates"] = {
-            "A": 0.39, "B": 0.20, "C": 0.13, "D": 0.12, "E": 0.12,   # top 5
-            "F": 0.03, "G": 0.01,                                    # cut
-        }
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
-        wr = next(a for a in doc["evidence"] if a["id"] == "mc.surrogate.win_rates")
-        self.assertIn("the remaining 4.0% went to 2 further detectors", wr["text"])
-        self.assertEqual(wr["value"]["n_other"], 2)
-        self.assertEqual(wr["value"]["other_share"], 0.04)
-        # The cut detectors are still not named — that is what the cut is for.
-        self.assertNotIn("F", [m for m, _ in wr["value"]["listed"]])
-        # Listed shares plus the tail reach 100%.
-        self.assertAlmostEqual(
-            sum(r for _, r in wr["value"]["listed"]) + wr["value"]["other_share"],
-            1.0, places=6)
-
-    def test_mc_sweep_verdict_is_one_atom(self):
-        """The sweep and the production run both rank by the same fitness, so
-        there is exactly one comparison to make. Three metrics meant three
-        verdicts, and a reader had to work out which of them was the finding."""
-        result = _mc_result()
-        # Sweep picks A (60%); production ranks B first.
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["B", "A"])
-        atoms = {a["id"]: a for a in doc["evidence"]}
-        self.assertEqual([i for i in atoms if "sweep_verdict" in i],
-                         ["mc.sweep_verdict"])
-        verdict = atoms["mc.sweep_verdict"]
-        self.assertEqual(verdict["value"],
-                         {"agree": False, "production_top": "B", "sweep_top": "A",
-                          "sweep_top_win_rate": 0.6,
-                          "production_top_win_rate": 0.4})
-        self.assertEqual(
-            verdict["text"],
-            "The sweep and the production run do not agree: A won most of the "
-            "noise trials, while it was B that the production run ranked first.")
-        self.assertIn("mc.sweep_verdict", doc["required_atom_ids"])
-
-    def test_mc_sweep_verdict_states_agreement_too(self):
-        """Who won the sweep is the answer either way, so the atom is emitted
-        whether or not it matches production."""
-        doc = ir.build_monte_carlo_ir("DS", "e1", _mc_result(), ["A", "B"])
-        verdict = next(a for a in doc["evidence"] if a["id"] == "mc.sweep_verdict")
-        self.assertTrue(verdict["value"]["agree"])
-        self.assertEqual(
-            verdict["text"],
-            "The sweep and the production run agree: A won most of the noise "
-            "trials and the production run ranked it first too.")
-
-    def test_mc_win_rates_names_the_sixth_rather_than_summarising_it(self):
-        """A tail of one spends a clause withholding a name it has room for."""
-        result = _mc_result()
-        result["winner"]["win_rates"] = {
-            "A": 0.39, "B": 0.20, "C": 0.13, "D": 0.12, "E": 0.12, "F": 0.04}
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
-        wr = next(a for a in doc["evidence"] if a["id"] == "mc.surrogate.win_rates")
-        self.assertIn("F 4.0%", wr["text"])
-        self.assertNotIn("further detector", wr["text"])
-        self.assertEqual(wr["value"]["n_other"], 0)
-        self.assertEqual([m for m, _ in wr["value"]["listed"]],
-                         ["A", "B", "C", "D", "E", "F"])
-
-    def test_mc_winner_surrogate_rules_not_emitted_but_fidelity_kept(self):
-        # The winner-surrogate tree restates the win regions in fitted form, so
-        # its rules are no longer evidence — but its held-out fidelity stays.
-        result = _mc_result()
-        result["winner"]["rules"] = [
-            {"conditions": [{"feature": "noise_level", "op": "<=", "threshold": 0.05}],
-             "outcome": "A", "n_samples": 50},
-            {"conditions": [{"feature": "noise_level", "op": ">", "threshold": 0.15}],
-             "outcome": "B", "n_samples": 30},
-        ]
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
-        self.assertEqual(
-            [a for a in doc["evidence"] if a["type"] == "surrogate_rule"], [])
-        self.assertNotIn("noise-sweep winner is", json.dumps(doc))
-        self.assertEqual(doc["confidence"]["winner_surrogate"]["grade"], "high")
-        self.assertEqual(doc["confidence"]["winner_surrogate"]["cv_accuracy"], 0.85)
-
     def test_simplify_conditions_tightest_bounds(self):
         conds = [
             {"feature": "noise_level", "op": "<=", "threshold": 0.0368},
@@ -1494,24 +1616,6 @@ class TestBuilders(unittest.TestCase):
                  {"conditions": [{"feature": "b", "op": ">", "threshold": 2.0}],
                   "outcome": "x", "n_samples": 1}]
         self.assertEqual(ir.merge_single_feature_rules(multi), multi)
-
-    def test_mc_win_regions_compress_isolated_points(self):
-        # NOTE: the fixture shares one curves dict across F1 and PR-AUC, so
-        # each detector reports the same ranges under both metrics.
-        result = _mc_result()
-        result["curves"]["win_regions"] = {"A": [(0.0, 0.1), (0.15, 0.15)],
-                                           "B": [(0.2, 0.2)]}
-        doc = ir.build_monte_carlo_ir("DS", "e1", result, ["A", "B"])
-        a_atom = next(x for x in doc["evidence"] if x["id"] == "mc.win_region.A")
-        # Spans read "from A to B" — never "A-B", which the sign-aware number
-        # extractor would parse as the negative number -B.
-        self.assertIn("A won at noise levels from 0.000 to 0.100, and at 0.150",
-                      a_atom["text"])
-        self.assertNotIn("0.000-0.100", a_atom["text"])
-        # Points-only reads as bare levels, with no dangling "at ... at".
-        b_atom = next(x for x in doc["evidence"] if x["id"] == "mc.win_region.B")
-        self.assertIn("B won at noise levels 0.200", b_atom["text"])
-        self.assertNotIn("from", b_atom["text"])
 
     def test_determinism(self):
         a = json.dumps(ir.build_ga_combination_ir("DS", "e1", _ga_combination_result()),

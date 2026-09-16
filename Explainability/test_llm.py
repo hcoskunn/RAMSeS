@@ -850,7 +850,7 @@ class TestClient(unittest.TestCase):
         self.assertEqual(out, "narrative text")
         self.assertEqual(captured["model"], "test-model")
         self.assertEqual(captured["temperature"], 0.0)
-        self.assertEqual(captured["seed"], 0)
+        self.assertEqual(captured["seed"], 42)
         self.assertEqual(captured["messages"][0],
                          {"role": "system", "content": "SYS"})
         self.assertEqual(captured["messages"][1]["content"], "USER")

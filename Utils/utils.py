@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from Utils.config import Config
 from Utils.pipeline_spec import (parse_anomaly_rate, parse_anomaly_type,
                                  parse_decision_metrics, parse_detectors,
-                                 parse_stages)
+                                 parse_meta_model, parse_stages)
 from pathlib import Path
 import os
 from loguru import logger
@@ -120,6 +120,14 @@ def get_args_from_cmdline():
                              "weighted mean, and it is what the GA, Thompson Sampling "
                              "and the final ensemble-vs-single comparison all maximise.")
 
+    parser.add_argument('--meta_model',
+                        type=str,
+                        default=None,
+                        help="Level-1 learner the genetic algorithm stacks the chosen "
+                             "detectors' scores into: rf (Random Forest, the default), "
+                             "lr (Logistic Regression), gbm (Gradient Boosting) or svm. "
+                             "Fixed for the run rather than searched per subset.")
+
     parser.add_argument('--overwrite',
                         type=str,
                         default=None,
@@ -200,6 +208,7 @@ def get_args_from_cmdline():
         args['anomaly_type'] = parse_anomaly_type(cmd_args.anomaly_type)
         args['anomaly_rate'] = parse_anomaly_rate(cmd_args.anomaly_rate)
         args['decision_metrics'] = parse_decision_metrics(cmd_args.decision_metric)
+        args['meta_model'] = parse_meta_model(cmd_args.meta_model)
     except ValueError as e:
         parser.error(str(e))
 

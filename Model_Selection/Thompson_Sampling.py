@@ -82,11 +82,11 @@ def sample_model(models: Dict[str, Any], means: Dict[str, np.ndarray], covarianc
     - means (Dict[str, np.ndarray]): Dictionary of means for each model.
     - covariances (Dict[str, np.ndarray]): Dictionary of covariances for each model.
     - epsilon (float): Epsilon value for the Epsilon-Greedy strategy.
-    - context (np.ndarray): The current context vector x_t (flattened data window). Used to
-      compute the SAMPLED expected reward theta_tilde^T * x_t for each model, which is the
+    - context (np.ndarray): The current context vector c_t (flattened data window). Used to
+      compute the SAMPLED expected reward theta_tilde^T * c_t for each model, which is the
       correct Linear Thompson Sampling selection criterion. This is the expected reward
       under one weight vector drawn from the posterior, not the estimated expected reward
-      mu^T * x_t the cards plot.
+      mu^T * c_t the cards plot.
 
     Returns:
     - Tuple[str, bool]: (chosen model name, was_random) where was_random is True iff the
@@ -104,7 +104,7 @@ def sample_model(models: Dict[str, Any], means: Dict[str, np.ndarray], covarianc
         try:
             # Draw a full sample theta_tilde ~ N(mu, Sigma)
             theta_tilde = multivariate_normal.rvs(mean=mean.flatten(), cov=covariances[model_name])
-            # Sampled expected reward: theta_tilde^T * x_t  (the "Linear" in LinTS)
+            # Sampled expected reward: theta_tilde^T * c_t  (the "Linear" in LinTS)
             samples[model_name] = float(np.dot(theta_tilde, x))
         except ValueError as e:
             logger.error(f"Error sampling model {model_name}: {e}")
@@ -211,7 +211,7 @@ def compute_estimated_expected_rewards(means: Dict[str, np.ndarray], context: np
     Returns
     -------
     Dict[str, float]
-        Keys are model names; values are scalar estimated expected rewards mu_k^T * x_t.
+        Keys are model names; values are scalar estimated expected rewards mu_k^T * c_t.
         Values can be negative (standardised data, uninitialised means).
     """
     return {m: float(np.dot(mu.flatten(), context.flatten())) for m, mu in means.items()}
@@ -228,7 +228,7 @@ def classify_selection(
     States
     ------
     - "random"               : ε-greedy random pick fired (exploration floor).
-    - "exploitation"         : chosen model equals argmax_k (mu_k^T * x_t) over current
+    - "exploitation"         : chosen model equals argmax_k (mu_k^T * c_t) over current
                                (pre-update) posterior means; the agent picked what it
                                already believed was best.
     - "informed_exploration" : chosen by maximising the SAMPLED expected reward, which
@@ -260,7 +260,7 @@ def classify_selection(
 def compute_shap_values(mean: np.ndarray, context: np.ndarray, baseline: np.ndarray) -> np.ndarray:
     """
     Per-feature SHAP attribution for a linear model whose estimated expected
-    reward is mean^T x_t.
+    reward is mean^T c_t.
 
     Closed form for linear models (matches shap.LinearExplainer with
     feature_dependence='independent'):
@@ -319,15 +319,15 @@ def aggregate_shap_per_context_feature(shap_values: np.ndarray, n_context_featur
 def reward_contribution_per_context_feature(mean: np.ndarray, context: np.ndarray,
                                     n_context_features: int) -> np.ndarray:
     """
-    Split the estimated expected reward mu^T x_t into one contribution per context feature.
+    Split the estimated expected reward mu^T c_t into one contribution per context feature.
 
-    contrib(c) = sum over context feature c's timesteps of mu_i * x_i, so the parts sum
-    to mu^T x_t EXACTLY — the model has no intercept, so there is no remainder.
+    contrib(p) = sum over context feature p's timesteps of mu_i * c_i, so the parts sum
+    to mu^T c_t EXACTLY — the model has no intercept, so there is no remainder.
 
     This is the honest answer to "how much does this context feature contribute to this
     detector's estimated expected reward". SHAP answers a different question: it measures
     each context feature's deviation from a TYPICAL window, so it explains only
-    mu^T x_t - mu^T baseline and discards the constant mu^T baseline, which is
+    mu^T c_t - mu^T baseline and discards the constant mu^T baseline, which is
     usually the bulk of the prediction. Worse for any averaged view, the signed
     SHAP average over all windows is identically zero by construction, because
     the baseline IS the mean of those windows.
@@ -1019,7 +1019,7 @@ def plot_estimated_expected_rewards(
             ax.axvline(x=shift['window'], color='black', linestyle='--', linewidth=0.9, alpha=0.7)
 
     ax.set_xlabel('Window')
-    ax.set_ylabel('Estimated Expected Reward (mu_k^T * x_t)')
+    ax.set_ylabel('Estimated Expected Reward (mu_k^T * c_t)')
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
     # One column, matching plot_ranking_score_trace: two columns of up to 107
     # detectors is wider than the axes it sits beside, and the eye has to track
@@ -1141,7 +1141,7 @@ def _top_k_models_by_estimated_expected_reward(
     means_per_context: Optional[List[Dict[str, np.ndarray]]] = None,
 ) -> List[str]:
     """
-    Return the top-k models by estimated expected reward mu·x_t averaged over the given
+    Return the top-k models by estimated expected reward mu·c_t averaged over the given
     contexts.
 
     means_per_context : the beliefs held at each context, aligned with
@@ -1440,7 +1440,7 @@ def plot_shap_comparison(
     )
 
 
-_REWARD_YLABEL = r'Contribution to estimated expected reward  $\mu^\top x_t$'
+_REWARD_YLABEL = r'Contribution to estimated expected reward  $\mu^\top c_t$'
 
 
 def _plot_per_regime(
@@ -1524,7 +1524,7 @@ def plot_shap_per_regime(
 
     all_models : bool
         When False (default) each regime's plot shows the top_k_models by
-        estimated expected reward (mu·x_t) averaged over that regime's windows; saved under
+        estimated expected reward (mu·c_t) averaged over that regime's windows; saved under
         shap_per_regime_{iterations}/. When True every model is shown; saved
         under shap_per_regime_all_{iterations}/.
     """
@@ -1640,7 +1640,7 @@ def plot_shap_average_all(
     all_models : bool
         When True (default) every model is shown, saved as
         shap_average_all_{iterations}.png. When False only the top_k_models by
-        estimated expected reward (mu·x_t) averaged over the whole run are shown, saved as
+        estimated expected reward (mu·c_t) averaged over the whole run are shown, saved as
         shap_average_top3_{iterations}.png.
     """
     if not shap_payload or shap_payload.get("n_channels", 0) <= 0:
@@ -2047,7 +2047,7 @@ def explain_thompson_sampling(
 
 # ── Ranking-criterion explainability (||mu_k||^2) ────────────────────────────
 #
-# The stage above explains mu^T x_t — the estimated expected reward that drives per-window
+# The stage above explains mu^T c_t — the estimated expected reward that drives per-window
 # selection. Everything below explains the quantity the detectors are actually
 # ranked by, mu^T mu, which is context-free and therefore decomposes over
 # context features on its own, with no baseline and no SHAP.

@@ -1,17 +1,15 @@
 import numpy as np
 import copy
 import os
-from typing import Any, Callable, Dict, List, Optional, Tuple
-from Metrics.metrics import (range_based_precision_recall_f1_auc, prauc, f1_score,
-                             f1_soft_score, rank_key, vus_score, vus_window)
+from typing import Any, Dict, List, Optional
+from Metrics.metrics import (range_based_precision_recall_f1_auc,
+                             rank_key, vus_score, vus_window)
 from Utils.model_selection_utils import evaluate_model, ScoringTimeout
 from Utils.pipeline_spec import (DEFAULT_DECISION_METRICS, combine_metrics,
-                                 decision_metric_formula, metric_weights,
-                                 metrics_required)
+                                 decision_metric_formula, metrics_required)
 from loguru import logger
 import matplotlib.pyplot as plt
 from Explainability import ir
-from Model_Selection.Sensitivity_robustness import surrogate_fidelity
 
 # Keys `summarize_results` adds beside the per-model entries. Everything that
 # walks the summary skips these, so a ranking cannot leak into a loop that
@@ -40,7 +38,10 @@ def monte_carlo_simulation(test_data, trained_models, model_names, dataset, enti
         noise_level: Level of noise to add to the data.
 
     Returns:
-        A dictionary containing aggregated performance metrics for each model.
+        (results, per_trial). `results` holds one score list per model and metric;
+        `per_trial` holds the same numbers as trial x model matrices, which is
+        what the explainability layer reads. Both are empty when the data is
+        infeasible.
     """
     # Validation: Check if data is too small for Monte Carlo testing
     labels = test_data.entities[0].labels
@@ -54,14 +55,14 @@ def monte_carlo_simulation(test_data, trained_models, model_names, dataset, enti
     
     if data_size < min_data_size:
         logger.warning(f"Monte Carlo simulation skipped: data size {data_size} < minimum {min_data_size}")
-        return {}
-    
+        return {}, {}
+
     # Check if we have both classes
     unique_labels = np.unique(labels)
     if len(unique_labels) < 2:
         logger.warning(f"Monte Carlo simulation skipped: only one class present in labels (unique values: {unique_labels})")
-        return {}
-    
+        return {}, {}
+
     results = {model_name: {'f1_scores': [], 'pr_auc_scores': [], 'vus_scores': []}
                for model_name in model_names}
     # Noise does not change the series length, so one window covers every
@@ -93,20 +94,54 @@ def monte_carlo_simulation(test_data, trained_models, model_names, dataset, enti
             if want_vus:
                 results[model_name]['vus_scores'].append(vus_score(y_scores, y_true, vus_win))
 
-    return results
+    return results, build_trial_matrices(results, n_simulations, metrics)
+
+
+def build_trial_matrices(results, n_simulations: int,
+                         metrics=DEFAULT_DECISION_METRICS) -> Dict[str, Any]:
+    """Per-model score lists -> trial x model matrices, plus the per-trial fitness.
+
+    A model that timed out is dropped from `results` wholesale, so every list
+    that survives has one entry per trial and the columns stay aligned: column j
+    of every matrix is the same detector and row i is the same noise draw.
+    """
+    models = [m for m, v in results.items()
+              if len(v.get('f1_scores') or []) == n_simulations]
+    if not models or n_simulations < 1:
+        return {}
+    want = metrics_required(metrics)
+
+    def column(model: str, key: str) -> List[float]:
+        vals = results[model].get(key) or []
+        if len(vals) != n_simulations:
+            return [float('nan')] * n_simulations
+        return [float(v) for v in vals]
+
+    f1 = np.array([column(m, 'f1_scores') for m in models], dtype=float).T
+    pr = np.array([column(m, 'pr_auc_scores') for m in models], dtype=float).T
+    vus = np.array([column(m, 'vus_scores') for m in models], dtype=float).T
+    fitness = np.empty_like(f1)
+    for i in range(f1.shape[0]):
+        for j in range(f1.shape[1]):
+            fitness[i, j] = combine_metrics(
+                metrics, {'f1': f1[i, j], 'pr_auc': pr[i, j], 'vus': vus[i, j]},
+                renormalise=False)
+    return {"model_names": models, "n_trials": int(n_simulations),
+            "F1": f1, "PR": pr, "VUS": vus, "FIT": fitness, "metrics": want}
 
 
 def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, entity, n_simulations=100,
                                noise_level=0.1, explain=False, metrics=DEFAULT_DECISION_METRICS):
     """Run the entire Monte Carlo simulation process."""
     # Run Monte Carlo simulation
-    results = monte_carlo_simulation(test_data, trained_models, model_names, dataset, entity, n_simulations,
-                                     noise_level, metrics=metrics)
+    results, per_trial = monte_carlo_simulation(
+        test_data, trained_models, model_names, dataset, entity, n_simulations,
+        noise_level, metrics=metrics)
 
     # Handle empty results (when data is too small or invalid)
     if not results:
         logger.warning("Monte Carlo simulation returned empty results")
-        return [], []
+        return []
 
     # Summarize results
     summary = summarize_results(results, metrics=metrics)
@@ -114,7 +149,7 @@ def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, 
     # Handle empty summary
     if not summary or 'ranked' not in summary:
         logger.warning("Monte Carlo summary is empty or incomplete")
-        return [], []
+        return []
 
     # Print summary and rankings
     print("Summary of Monte Carlo Simulation:")
@@ -132,7 +167,8 @@ def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, 
         ranked_models.append(model_name)
 
     # Save summary
-    save_summary(summary, dataset, entity, metrics=metrics)
+    save_summary(summary, dataset, entity, metrics=metrics, per_trial=per_trial,
+                 noise_level=noise_level)
 
     # One F1/PR-AUC histogram pair per detector, no longer drawn. Eleven figures
     # per entity that say separately what the noise curves say together, and the
@@ -141,12 +177,13 @@ def run_monte_carlo_simulation(test_data, trained_models, model_names, dataset, 
     # so a single detector's distribution can still be minted by hand.
     # plot_monte_carlo_results(results, summary, model_names, dataset, entity)
 
-    # Explainability (separate, explain-only noise sweep; production ranking above is unchanged)
+    # Explainability reads the trials the ranking was built from; it runs no
+    # experiment of its own, so it cannot disagree with the ranking it explains.
     if explain:
         try:
-            explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
+            explain_monte_carlo(per_trial, ranked_models, dataset, entity,
                                 explain=True, metrics=metrics,
-                                production_ranking=ranked_models)
+                                noise_level=noise_level)
         except Exception as e:
             logger.error(f"Monte Carlo explainability failed (non-fatal): {e}")
 
@@ -230,7 +267,8 @@ def plot_monte_carlo_results(results, summary, model_names, dataset, entity):
         # plt.show()
 
 
-def save_summary(summary, dataset, entity, metrics=DEFAULT_DECISION_METRICS):
+def save_summary(summary, dataset, entity, metrics=DEFAULT_DECISION_METRICS,
+                 per_trial=None, noise_level=None):
     """Save the summary of Monte Carlo simulation to a file."""
     directory = f'myresults/robustness/MonteCarlo/{dataset}/{entity}/'
     os.makedirs(directory, exist_ok=True)
@@ -254,757 +292,364 @@ def save_summary(summary, dataset, entity, metrics=DEFAULT_DECISION_METRICS):
         for rank, model_name in enumerate(summary['ranked'], 1):
             f.write(f"{rank}. {model_name}\n")
 
+        if per_trial:
+            fit = per_trial["FIT"]
+            models = per_trial["model_names"]
+            level = "" if noise_level is None else f" at noise level {noise_level}"
+            f.write(f"\nFitness per trial ({per_trial['n_trials']} independent "
+                    f"noise draws{level}):\n")
+            header = "".join(f"{'trial ' + str(i + 1):>10}"
+                             for i in range(per_trial["n_trials"]))
+            f.write(f"  {'model':<22}{header}\n")
+            for name in summary['ranked']:
+                if name not in models:
+                    continue
+                col = fit[:, models.index(name)]
+                cells = "".join(f"{v:>10.4f}" for v in col)
+                f.write(f"  {name:<22}{cells}\n")
+
+
 
 # ════════════════════════════════════════════════════════════════════════════
 #  Monte Carlo Robustness Explainability
 #
-#  The production MC test holds noise_level fixed (0.1) — nothing structured
-#  varies, so an explainer must exercise the test's one by-design knob. This
-#  EXPLAIN-ONLY layer sweeps `noise_level` across a range (reusing the test's own
-#  add_noise_to_data), records per-trial (noise_level → per-model F1/PR-AUC), and
-#  explains the result two complementary ways, both 1-D over noise_level:
-#    (A) performance-vs-noise curves (crossovers, win-regions, breakdown points,
-#        ranking stability),
-#    (B) a 1-D decision-tree surrogate (noise→winner threshold rules + per-model
-#        degradation regressors).
-#  The production ranking (fixed noise) is untouched.
+#  The ranking averages several independent draws of the same noise, and this
+#  layer explains it from those draws — no second experiment, no proxy metric,
+#  so every number here is one the ranking was actually built from. It answers
+#  why the winner leads (which fitness terms earned it, whether it led the
+#  trials rather than only their mean, whether first place survives dropping any
+#  one trial) and how far down the ranking that reasoning still holds.
 # ════════════════════════════════════════════════════════════════════════════
 
-# 21 points, not 20: `linspace(0, 0.2, 20)` steps by 0.0105 and lands on values
-# like 0.0421 and 0.1789, so every axis label and every reported breakdown point
-# was an artefact of the point count. 21 gives an exact 0.01 step — 0.00, 0.01,
-# … 0.20 — which is readable and quotable.
-DEFAULT_NOISE_LEVELS = np.linspace(0.0, 0.2, 21)
-
-# (fitness token, sweep matrix, figure label) for the components the fitness is
-# built from. Their curves are drawn beside the fitness curve, which is what the
-# stage actually ranks on: the sweep has already computed the matrices, so this
-# costs one pass of numpy per metric and answers "which term moved the fitness".
-_FITNESS_COMPONENTS = (("f1", "F1", "F1"),
-                       ("pr_auc", "PR", "PR-AUC"),
-                       ("vus", "VUS", "VUS"))
-
-
-def _mc_data_feasible(test_data) -> bool:
-    """Same infeasibility guards as monte_carlo_simulation (data <50 pts / single-class)."""
-    labels = test_data.entities[0].labels
-    if labels.ndim == 1:
-        labels = labels.reshape(1, -1)
-    data_size = labels.shape[1] if labels.ndim > 1 else labels.shape[0]
-    if data_size < 50:
-        return False
-    if len(np.unique(labels)) < 2:
-        return False
-    return True
-
-
-def _best_f1_and_cut(y_true: np.ndarray, y_scores: np.ndarray) -> Tuple[float, float]:
-    """Best point-wise F1 over the data-driven quantile thresholds of y_scores, and
-    the threshold (score cut) that achieves it. Returns (best_f1, best_cut); best_cut
-    is NaN if no threshold yields F1 > 0 (e.g. a degenerate/constant score)."""
-    best_f1, best_cut = 0.0, float('nan')
-    for _t in np.unique(np.quantile(y_scores, np.linspace(0.0, 1.0, 21))):
-        _f1 = f1_score((y_scores >= _t).astype(int), y_true)[0]
-        if _f1 > best_f1:
-            best_f1 = float(_f1); best_cut = float(_t)
-    return best_f1, best_cut
-
-
-def _f1_at_cut(y_true: np.ndarray, y_scores: np.ndarray, cut: float) -> float:
-    """Point-wise F1 at a FIXED score threshold `cut` (no re-optimization). NaN cut → NaN."""
-    if cut is None or np.isnan(cut):
-        return float('nan')
-    return float(f1_score((y_scores >= cut).astype(int), y_true)[0])
-
-
-def monte_carlo_noise_sweep(
-    test_data, trained_models, model_names,
-    noise_levels=None, repeats: int = 5, random_state: int = 0,
-    evaluate_fn: Optional[Callable[[str, float], Tuple[float, float]]] = None,
-    metrics=DEFAULT_DECISION_METRICS,
-) -> Optional[Dict[str, Any]]:
-    """
-    Explain-only sweep over the MC test's own `noise_level`. For each level × each
-    repeat: add Gaussian noise (via add_noise_to_data) to a deep copy, evaluate
-    every model, record the row.
-
-    Scoring uses FAST point-wise metrics (PR-AUC + best-F1 over data-driven quantile
-    thresholds of each trial's own score distribution), NOT the slow range-based
-    metric the production MC uses: this sweep does hundreds of evaluations, and the
-    range-based windowing metric (~30 s/call on long series) would make it take many
-    hours. The production ranking path is untouched.
-
-    Two F1 variants are recorded per trial (PR-AUC is threshold-free, so it has only one):
-      • F1       — ADAPTIVE best threshold, re-optimized at every noise level (measures
-                   best-achievable separability vs noise).
-      • F1_fixed — FIXED operating point: each model's best threshold is chosen once at
-                   the LOWEST noise level and held constant across the sweep (measures how
-                   a committed decision threshold degrades as noise shifts the scores).
-    The grid is sorted ascending so its first level is the baseline where thresholds freeze.
-
-    Only the metrics the run's fitness names are computed; the others come back as
-    NaN columns, so the arrays stay rectangular and nothing downstream has to branch.
-
-    FIT and FIT_fixed combine those components into the run's own fitness, which is
-    what everything downstream explains: one ranking per stage, weighted as the run
-    configuration asked for.
-
-    evaluate_fn(model_name, level) -> (f1, pr[, f1_fixed[, vus]]) is injectable for
-    tests; when given, real noising/evaluation is skipped (a 2-tuple sets
-    f1_fixed = f1, and vus = NaN). Per-model failures → NaN.
-
-    Returns {noise (n=L*R,), grid_levels (L,), F1 (n×M), F1_fixed (n×M), PR (n×M),
-    VUS (n×M), metrics, model_names}, or None when the data is too small /
-    single-class.
-    """
-    if not _mc_data_feasible(test_data):
-        return None
-    grid = np.sort(np.asarray(DEFAULT_NOISE_LEVELS if noise_levels is None else noise_levels, dtype=float))
-    rng = np.random.RandomState(random_state)
-
-    want = metrics_required(metrics)
-    want_f1, want_pr, want_vus = 'f1' in want, 'pr_auc' in want, 'vus' in want
-    vus_win = vus_window(test_data.entities[0].Y) if want_vus else None
-    noise_col: List[float] = []
-    F1: List[List[float]] = []
-    F1_fixed: List[List[float]] = []
-    PR: List[List[float]] = []
-    VUS: List[List[float]] = []
-    # Per-model threshold frozen at the baseline (lowest) noise level.
-    baseline_cuts: Dict[str, float] = {}
-    for i, level in enumerate(grid):
-        is_baseline = (i == 0)
-        logger.info(f"MC explain sweep: noise {level:.3f} ({i + 1}/{len(grid)}), {repeats} repeats")
-        for _ in range(repeats):
-            noisy = None
-            if evaluate_fn is None:
-                np.random.seed(int(rng.randint(0, 2 ** 31 - 1)))
-                noisy = copy.deepcopy(test_data)
-                noisy.entities[0].Y = add_noise_to_data(noisy.entities[0].Y, float(level))
-            row_f1: List[float] = []
-            row_f1_fixed: List[float] = []
-            row_pr: List[float] = []
-            row_vus: List[float] = []
-            for m in model_names:
-                try:
-                    if evaluate_fn is not None:
-                        vals = evaluate_fn(m, float(level))
-                        f1v, prv = float(vals[0]), float(vals[1])
-                        f1_fixedv = float(vals[2]) if len(vals) > 2 else f1v
-                        vusv = float(vals[3]) if len(vals) > 3 else float('nan')
-                    else:
-                        model = trained_models.get(m)
-                        if not model:
-                            row_f1.append(float('nan')); row_f1_fixed.append(float('nan'))
-                            row_pr.append(float('nan')); row_vus.append(float('nan')); continue
-                        ev = evaluate_model(noisy, model, m)
-                        y_true = ev['anomaly_labels'].flatten()
-                        y_scores = np.asarray(ev['entity_scores'].flatten(), dtype=float)
-                        # Fast point-wise scoring (see docstring): PR-AUC + best-F1 over
-                        # DATA-DRIVEN quantile thresholds of THIS trial's own score
-                        # distribution (not a fixed 0.1–0.9 grid — detectors emit
-                        # un-normalised scores on different scales, and a fixed grid
-                        # would miss any whose scores saturate high (NN) or low).
-                        if want_pr:
-                            try:
-                                prv = float(prauc(y_true, y_scores))
-                            except Exception:
-                                prv = float('nan')
-                        else:
-                            prv = float('nan')
-                        if want_f1:
-                            f1v, cut = _best_f1_and_cut(y_true, y_scores)
-                            # Freeze each model's best threshold at the baseline level,
-                            # then reuse it at every level for the fixed-operating-point F1.
-                            if is_baseline and m not in baseline_cuts:
-                                baseline_cuts[m] = cut
-                            f1_fixedv = _f1_at_cut(y_true, y_scores,
-                                                   baseline_cuts.get(m, float('nan')))
-                        else:
-                            f1v = f1_fixedv = float('nan')
-                        vusv = (vus_score(y_scores, y_true, vus_win) if want_vus
-                                else float('nan'))
-                    row_f1.append(float(f1v)); row_f1_fixed.append(float(f1_fixedv))
-                    row_pr.append(float(prv)); row_vus.append(float(vusv))
-                except Exception as e:
-                    logger.error(f"MC explain sweep: model {m} failed at noise {level}: {e}")
-                    row_f1.append(float('nan')); row_f1_fixed.append(float('nan'))
-                    row_pr.append(float('nan')); row_vus.append(float('nan'))
-            noise_col.append(float(level)); F1.append(row_f1)
-            F1_fixed.append(row_f1_fixed); PR.append(row_pr); VUS.append(row_vus)
-
-    F1 = np.asarray(F1, dtype=float)
-    F1_fixed = np.asarray(F1_fixed, dtype=float)
-    PR = np.asarray(PR, dtype=float)
-    VUS = np.asarray(VUS, dtype=float)
-    return {
-        "noise": np.asarray(noise_col, dtype=float),
-        "grid_levels": grid,
-        "F1": F1,
-        "F1_fixed": F1_fixed,
-        "PR": PR,
-        "VUS": VUS,
-        "FIT": _combine_matrix(metrics, {"f1": F1, "pr_auc": PR, "vus": VUS}),
-        "FIT_fixed": _combine_matrix(metrics, {"f1": F1_fixed, "pr_auc": PR, "vus": VUS}),
-        "metrics": want,
-        "model_names": list(model_names),
-    }
-
-
-def _combine_matrix(metrics, parts: Dict[str, np.ndarray]) -> np.ndarray:
-    """Per-trial component matrices -> the run's fitness, same shape.
-
-    The weights are already normalised, so this is `combine_metrics` with
-    `renormalise=False`: a NaN component propagates rather than narrowing that
-    one cell's fitness to the terms that happened to survive.
-    """
-    out = None
-    for m, w in metric_weights(metrics).items():
-        term = w * parts[m]
-        out = term if out is None else out + term
-    return out
-
-
-# ── Method A: curves, crossover, breakdown, ranking stability (pure) ─────────
-
-def compute_noise_curves(noise, grid_levels, score_matrix, model_names,
-                         breakdown_threshold: float = 0.5) -> Dict[str, Any]:
-    """
-    Per noise level: per-model mean+std score, the top model, the crossover points
-    where the top model changes, per-model win-regions (contiguous noise intervals
-    where the model leads), and per-model breakdown point (smallest level whose mean
-    score < breakdown_threshold; None if it never breaks down).
-    """
-    grid = np.asarray(grid_levels, dtype=float)
-    L = len(grid)
-    M = len(model_names)
-    per_model_mean = np.full((M, L), np.nan)
-    per_model_std = np.full((M, L), np.nan)
-    for li, lvl in enumerate(grid):
-        mask = np.isclose(noise, lvl)
-        if not np.any(mask):
-            continue
-        sub = score_matrix[mask]
-        with np.errstate(invalid='ignore'):
-            per_model_mean[:, li] = np.nanmean(sub, axis=0)
-            per_model_std[:, li] = np.nanstd(sub, axis=0)
-
-    winner_per_level: List[Optional[str]] = []
-    for li in range(L):
-        col = per_model_mean[:, li]
-        winner_per_level.append(None if np.all(np.isnan(col))
-                                else model_names[int(np.nanargmax(col))])
-
-    crossovers: List[Dict[str, Any]] = []
-    for li in range(1, L):
-        a, b = winner_per_level[li - 1], winner_per_level[li]
-        if a is not None and b is not None and a != b:
-            crossovers.append({"noise": float(grid[li]), "from_model": a, "to_model": b})
-
-    win_regions: Dict[str, List[Tuple[float, float]]] = {m: [] for m in model_names}
-    li = 0
-    while li < L:
-        w = winner_per_level[li]
-        if w is None:
-            li += 1; continue
-        lj = li
-        while lj + 1 < L and winner_per_level[lj + 1] == w:
-            lj += 1
-        win_regions[w].append((float(grid[li]), float(grid[lj])))
-        li = lj + 1
-
-    breakdown: Dict[str, Optional[float]] = {}
-    for mi, m in enumerate(model_names):
-        bp = None
-        for li in range(L):
-            v = per_model_mean[mi, li]
-            if not np.isnan(v) and v < breakdown_threshold:
-                bp = float(grid[li]); break
-        breakdown[m] = bp
-
-    return {
-        "grid_levels": grid,
-        "per_model_mean": per_model_mean,
-        "per_model_std": per_model_std,
-        "winner_per_level": winner_per_level,
-        "crossovers": crossovers,
-        "win_regions": win_regions,
-        "breakdown_points": breakdown,
-    }
-
-
-def _ranks_from_means(means: np.ndarray) -> np.ndarray:
-    """Rank vector (0 = best) from a per-model mean-score vector; NaN treated as worst."""
-    order = np.argsort(-np.nan_to_num(means, nan=-np.inf))
-    ranks = np.empty(len(means), dtype=float)
-    for pos, idx in enumerate(order):
-        ranks[idx] = pos
+def rank_per_trial(fit: np.ndarray) -> np.ndarray:
+    """Trial x model fitness -> trial x model rank, 1 = best. NaN sorts last."""
+    n_trials, n_models = fit.shape
+    ranks = np.zeros((n_trials, n_models), dtype=int)
+    for i in range(n_trials):
+        row = fit[i]
+        order = sorted(range(n_models),
+                       key=lambda j: rank_key(row[j]), reverse=True)
+        for place, j in enumerate(order, 1):
+            ranks[i, j] = place
     return ranks
 
 
-def compute_ranking_stability(noise, grid_levels, score_matrix, model_names) -> Dict[str, Any]:
+def leave_one_trial_out(fit: np.ndarray, models: List[str]) -> Dict[str, Any]:
+    """Re-rank with each trial removed in turn; report which removals move first place.
+
+    The same question LOFO asks of the ensemble: is the published claim a
+    property of the detectors, or of the particular sample it was computed from.
     """
-    Per level: rank models by mean score and compute Kendall-τ vs the global
-    aggregate ranking (over all trials). τ≈1 = stable ranking; lower = volatile.
+    n_trials = fit.shape[0]
+    winner = models[int(np.argmax(np.nanmean(fit, axis=0)))]
+    flips: List[Dict[str, Any]] = []
+    for i in range(n_trials):
+        kept = [t for t in range(n_trials) if t != i]
+        alt = models[int(np.argmax(np.nanmean(fit[kept], axis=0)))]
+        if alt != winner:
+            flips.append({"trial": i + 1, "winner": alt})
+    return {"winner": winner, "n_trials": n_trials, "flips": flips,
+            "stable": not flips}
+
+
+def winner_defeats(fit: np.ndarray, models: List[str],
+                   order: List[int]) -> Dict[str, Any]:
+    """The trials the top-ranked detector did not lead, and who led them instead.
+
+    The runner-up by mean need not be any of these: a detector can finish second
+    overall without ever topping a trial. Each challenger carries its own place
+    in the published ranking, because one beaten by the detector ranked second
+    and one beaten by the detector ranked ninth are different findings.
     """
-    from scipy.stats import kendalltau
-    grid = np.asarray(grid_levels, dtype=float)
-    with np.errstate(invalid='ignore'):
-        global_rank = _ranks_from_means(np.nanmean(score_matrix, axis=0))
-    taus: List[float] = []
-    for lvl in grid:
-        mask = np.isclose(noise, lvl)
-        if not np.any(mask):
-            taus.append(float('nan')); continue
-        with np.errstate(invalid='ignore'):
-            lvl_rank = _ranks_from_means(np.nanmean(score_matrix[mask], axis=0))
-        tau, _ = kendalltau(global_rank, lvl_rank)
-        taus.append(float(tau) if tau is not None and not np.isnan(tau) else float('nan'))
-    return {"grid_levels": grid, "tau_per_level": np.asarray(taus, dtype=float)}
-
-
-# ── Method B: 1-D decision-tree surrogate (lazy sklearn) ─────────────────────
-
-def _fit_noise_winner(noise, score_matrix, model_names, max_depth: int = 3, random_state: int = 0):
-    """Fit DecisionTreeClassifier(noise → argmax-model). Returns (clf_or_None, info)."""
-    from collections import Counter
-    noise = np.asarray(noise, dtype=float)
-    rows: List[float] = []
-    winners: List[str] = []
-    for i in range(score_matrix.shape[0]):
-        r = score_matrix[i]
-        if np.all(np.isnan(r)):
+    if not order:
+        return {}
+    win_j = order[0]
+    place = {j: p for p, j in enumerate(order, 1)}
+    events: List[Dict[str, Any]] = []
+    for i in range(fit.shape[0]):
+        lead_j = int(np.argmax(fit[i]))
+        if lead_j == win_j:
             continue
-        rows.append(noise[i]); winners.append(model_names[int(np.nanargmax(r))])
-    if not rows:
-        return None, {"feasible": False, "rules_text": "", "win_rates": {},
-                      "train_accuracy": float('nan'), "classes": [], "root_threshold": None}
-    cnt = Counter(winners)
-    n = len(winners)
-    win_rates = {m: cnt.get(m, 0) / n for m in model_names}
-    classes = sorted(cnt)
-    if len(classes) == 1:
-        return None, {"feasible": True,
-                      "rules_text": f"Always {classes[0]} (single winner across the sweep).",
-                      "win_rates": win_rates, "train_accuracy": 1.0,
-                      "cv_accuracy": 1.0, "cv_accuracy_std": 0.0, "cv_method": "n/a (single class)",
-                      "classes": classes, "root_threshold": None}
-    from sklearn.tree import DecisionTreeClassifier, export_text
-    X = np.asarray(rows, dtype=float).reshape(-1, 1)
-    y = np.asarray(winners)
-    clf = DecisionTreeClassifier(max_depth=max_depth, random_state=random_state)
-    clf.fit(X, y)
-    acc = float(clf.score(X, y))
-    # In-sample accuracy (above) is what the exported tree/rules were fit to
-    # reproduce; it is not, by itself, evidence that the tree generalizes
-    # rather than having fit noise in this particular sweep. Report a
-    # cross-validated estimate alongside it (see surrogate_fidelity.py).
-    cv = surrogate_fidelity.held_out_classifier_fidelity(
-        X, y, max_depth=max_depth, random_state=random_state)
-    rules = export_text(clf, feature_names=["noise_level"])
-    root_thr = float(clf.tree_.threshold[0]) if clf.tree_.node_count > 1 else None
-    # Structured (machine-readable) rules for the IR layer; non-fatal if the
-    # Explainability package is unavailable in a stripped-down environment.
-    try:
-        rules_structured = ir.tree_to_rules(clf, ["noise_level"])
-    except Exception:
-        rules_structured = []
-    return clf, {"feasible": True, "rules_text": rules, "rules": rules_structured,
-                 "win_rates": win_rates,
-                 "train_accuracy": acc,
-                 "cv_accuracy": cv["cv_accuracy"], "cv_accuracy_std": cv["cv_accuracy_std"],
-                 "cv_method": cv["method"], "cv_note": cv["note"],
-                 "classes": classes, "root_threshold": root_thr}
+        events.append({"trial": i + 1, "detector": models[lead_j],
+                       "place": place[lead_j],
+                       "margin": float(fit[i, lead_j] - fit[i, win_j])})
+    if not events:
+        return {"winner": models[win_j], "n_defeats": 0, "events": [],
+                "challengers": []}
+    challengers = []
+    for j in order:
+        hits = [e for e in events if e["detector"] == models[j]]
+        if hits:
+            challengers.append({"detector": models[j], "place": place[j],
+                                "trials": len(hits)})
+    margins = [e["margin"] for e in events]
+    return {"winner": models[win_j], "n_defeats": len(events),
+            "events": events, "challengers": challengers,
+            "margin_min": float(min(margins)), "margin_max": float(max(margins))}
 
 
-def train_noise_winner_surrogate(noise, score_matrix, model_names,
-                                 max_depth: int = 3, random_state: int = 0) -> Dict[str, Any]:
-    """Public wrapper returning just the winner-surrogate info dict (see _fit_noise_winner)."""
-    _, info = _fit_noise_winner(noise, score_matrix, model_names, max_depth, random_state)
-    return info
+def winner_decomposition(per_trial: Dict[str, Any], order: List[int]) -> Dict[str, Any]:
+    """How the winner's fitness advantage over the runner-up is made up.
 
-
-def train_noise_permodel_surrogates(noise, score_matrix, model_names,
-                                    max_depth: int = 3, random_state: int = 0) -> Dict[str, Any]:
+    Reports each fitness term separately, because leading on every term and
+    covering a deficit on one with a lead on another are different reasons to
+    rank first.
     """
-    Per model: DecisionTreeRegressor(noise → score). Returns per model the in-sample
-    R² (fit quality on the swept points), a cross-validated R² (held-out
-    generalization estimate — see surrogate_fidelity.py / Molnar 2022), the
-    trend ('robust' if Pearson corr of noise vs score ≥ 0 else 'fragile'), and
-    the regressor's predicted score at the lowest and highest swept noise.
-    """
-    from sklearn.tree import DecisionTreeRegressor
-    noise = np.asarray(noise, dtype=float)
-    lo = float(np.min(noise)); hi = float(np.max(noise))
-    out: Dict[str, Any] = {}
-    for mi, m in enumerate(model_names):
-        col = score_matrix[:, mi]
-        mask = ~np.isnan(col)
-        if int(mask.sum()) < 2:
-            out[m] = {"trend": "N/A", "corr": float('nan'), "score_low": float('nan'),
-                      "score_high": float('nan'), "r2": float('nan'),
-                      "cv_r2": float('nan'), "cv_method": "n/a",
-                      "cv_n_splits": 0, "cv_degenerate_folds": 0}
-            continue
-        X = noise[mask].reshape(-1, 1)
-        ys = col[mask]
-        reg = DecisionTreeRegressor(max_depth=max_depth, random_state=random_state)
-        reg.fit(X, ys)
-        r2 = float(reg.score(X, ys))
-        cv = surrogate_fidelity.held_out_regressor_fidelity(
-            X, ys, max_depth=max_depth, random_state=random_state)
-        if np.std(noise[mask]) > 0 and np.std(ys) > 0:
-            corr = float(np.corrcoef(noise[mask], ys)[0, 1])
-        else:
-            corr = 0.0
-        out[m] = {"trend": "robust" if corr >= 0 else "fragile", "corr": corr,
-                  "score_low": float(reg.predict([[lo]])[0]),
-                  "score_high": float(reg.predict([[hi]])[0]), "r2": r2,
-                  "cv_r2": cv.get("cv_r2", float('nan')), "cv_method": cv.get("method", "n/a"),
-                  "cv_mse": cv.get("cv_mse", float('nan')),
-                  "cv_n_splits": cv.get("n_splits", 0),
-                  "cv_degenerate_folds": cv.get("n_degenerate_folds", 0)}
-    return out
+    if len(order) < 2:
+        return {}
+    models = per_trial["model_names"]
+    win_j, run_j = order[0], order[1]
+    parts = {"f1": per_trial["F1"], "pr_auc": per_trial["PR"], "vus": per_trial["VUS"]}
+    terms = []
+    for name in per_trial["metrics"]:
+        mat = parts[name]
+        w = float(np.nanmean(mat[:, win_j]))
+        r = float(np.nanmean(mat[:, run_j]))
+        terms.append({"metric": name, "winner": w, "runner_up": r, "delta": w - r})
+    fit = per_trial["FIT"]
+    margins = fit[:, win_j] - fit[:, run_j]
+    return {
+        "winner": models[win_j],
+        "runner_up": models[run_j],
+        "terms": terms,
+        "led_every_term": all(t["delta"] > 0 for t in terms),
+        "margin_mean": float(np.nanmean(margins)),
+        "margin_min": float(np.nanmin(margins)),
+        "margin_max": float(np.nanmax(margins)),
+        "ahead_in_trials": int(np.sum(margins > 0)),
+        "margins": [float(v) for v in margins],
+    }
+
+
+def summarize_trials(per_trial: Dict[str, Any],
+                     ranked: Optional[List[str]] = None) -> Optional[Dict[str, Any]]:
+    """Every structure the Monte Carlo explanation is built from. Pure."""
+    if not per_trial or not per_trial.get("model_names"):
+        return None
+    models = list(per_trial["model_names"])
+    fit = np.asarray(per_trial["FIT"], dtype=float)
+    means = np.nanmean(fit, axis=0)
+    # The ranking the stage published, so the explanation orders detectors the
+    # way the card does; the means are the fallback when it was not passed in.
+    if ranked:
+        order = [models.index(m) for m in ranked if m in models]
+        order += [j for j in range(len(models)) if j not in order]
+    else:
+        order = sorted(range(len(models)), key=lambda j: rank_key(means[j]),
+                       reverse=True)
+
+    ranks = rank_per_trial(fit)
+    spreads = np.nanmax(fit, axis=0) - np.nanmin(fit, axis=0)
+    wins = {models[j]: int(np.sum(ranks[:, j] == 1)) for j in range(len(models))}
+    rank_ranges = {models[j]: (int(ranks[:, j].min()), int(ranks[:, j].max()))
+                   for j in range(len(models))}
+
+    ordered_means = [means[j] for j in order]
+    gaps = [abs(a - b) for a, b in zip(ordered_means, ordered_means[1:])]
+
+    return {
+        "model_names": models,
+        "order": [models[j] for j in order],
+        "n_trials": int(per_trial["n_trials"]),
+        "fitness": fit,
+        "means": {models[j]: float(means[j]) for j in range(len(models))},
+        "ranks": ranks,
+        "wins": wins,
+        "rank_ranges": rank_ranges,
+        "spreads": {models[j]: float(spreads[j]) for j in range(len(models))},
+        # Medians, not means: the gaps between neighbouring places are heavily
+        # skewed by the few large ones at the bottom of the ranking, and a mean
+        # gap there reads as though the whole order were well separated.
+        "median_spread": float(np.nanmedian(spreads)),
+        "median_gap": float(np.nanmedian(gaps)) if gaps else float('nan'),
+        "leave_one_out": leave_one_trial_out(fit, models),
+        "defeats": winner_defeats(fit, models, order),
+        "winner": winner_decomposition(per_trial, order),
+        "metrics": list(per_trial["metrics"]),
+    }
 
 
 # ── Plots ────────────────────────────────────────────────────────────────────
 
+# Enough lines to read the crossings without the legend swallowing the axes.
+BUMP_CHART_MODELS = 10
+
+
 def _mc_explain_rcparams() -> None:
-    plt.rcParams.update({
-        "font.family": "serif", "axes.labelsize": 12, "axes.titlesize": 13,
-        "legend.fontsize": 9, "xtick.labelsize": 10, "ytick.labelsize": 10,
-    })
+    plt.rcParams.update({"figure.autolayout": False, "axes.grid": True,
+                         "grid.alpha": 0.3})
 
 
-def plot_noise_curves(curves, model_names, metric_name, dataset, entity, plain: bool = False,
-                      show_title: bool = True) -> None:
-    """Per-model score vs noise_level.
-
-    plain=False (default): mean±std band + win-region shading + crossover markers +
-        breakdown markers → ..._noise_curves_{tag}.png.
-    plain=True: only the per-model mean lines (no bands/shading/markers) →
-        ..._noise_curves_{tag}_plain.png.
-    """
-    _mc_explain_rcparams()
-    grid = curves["grid_levels"]
-    mean = curves["per_model_mean"]
-    std = curves["per_model_std"]
-    colour_map = {m: plt.cm.tab20(i / max(len(model_names), 1)) for i, m in enumerate(model_names)}
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    for mi, m in enumerate(model_names):
-        ax.plot(grid, mean[mi], label=m, color=colour_map[m], linewidth=1.4)
-        if not plain:
-            ax.fill_between(grid, mean[mi] - std[mi], mean[mi] + std[mi],
-                            color=colour_map[m], alpha=0.12, lw=0)
-
-    if not plain:
-        # Win-region shading, crossover markers, and breakdown markers.
-        for m, regions in curves["win_regions"].items():
-            for (a, b) in regions:
-                ax.axvspan(a, b, color=colour_map.get(m, "#cccccc"), alpha=0.06, lw=0)
-        for cx in curves["crossovers"]:
-            ax.axvline(cx["noise"], color="black", linestyle="--", linewidth=0.8, alpha=0.6)
-        for m, bp in curves["breakdown_points"].items():
-            if bp is not None:
-                ax.scatter([bp], [0.5], marker="v", color=colour_map.get(m, "#888888"),
-                           s=25, zorder=5)
-
-    ax.set_xlabel("noise_level (Gaussian std)")
-    ax.set_ylabel(f"{metric_name}" + ("" if plain else " (mean ± std over repeats)"))
-    if show_title:
-        ax.set_title(f"Monte Carlo · {metric_name} vs noise level "
-                     + ("(per-model means)" if plain
-                        else "(shaded = win-region; ▼ = breakdown)"))
-    ax.set_ylim(bottom=0)
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-    ax.legend(loc="upper left", ncol=2, frameon=False, bbox_to_anchor=(1.01, 1), borderaxespad=0)
-    plt.tight_layout(pad=1.2)
-    directory = f"myresults/robustness/MonteCarlo/{dataset}/{entity}/"
+def _mc_dir(dataset, entity) -> str:
+    directory = f'myresults/robustness/MonteCarlo/{dataset}/{entity}/'
     os.makedirs(directory, exist_ok=True)
-    tag = metric_name.replace("-", "").replace(" ", "")
-    suffix = "_plain" if plain else ""
-    plt.savefig(f"{directory}/{dataset}_{entity}_MonteCarlo_noise_curves_{tag}{suffix}.png",
-                format="png", dpi=300, bbox_inches="tight")
-    plt.close()
+    return directory
 
 
-def plot_ranking_stability(stab, dataset, entity, fitness_label: str = "fitness") -> None:
-    """Kendall-τ of each noise level's fitness ranking vs the aggregate ranking."""
+def plot_trial_ranks(summary: Dict[str, Any], dataset, entity,
+                     top_k: int = BUMP_CHART_MODELS) -> None:
+    """Rank of each detector in each trial; crossing lines are unsettled places."""
     _mc_explain_rcparams()
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    if stab:
-        ax.plot(stab["grid_levels"], stab["tau_per_level"], marker="o",
-                markersize=3, label=f"{fitness_label} ranking", color="#1f77b4",
-                linewidth=1.4)
-    ax.axhline(1.0, color="grey", linestyle=":", linewidth=0.8)
-    ax.set_xlabel("noise_level (Gaussian std)")
-    ax.set_ylabel("Kendall τ vs aggregate ranking")
-    ax.set_ylim(-1.05, 1.08)
-    ax.set_title("Monte Carlo · ranking stability vs noise level")
-    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
-    ax.legend(loc="lower left", frameon=False)
-    plt.tight_layout(pad=1.2)
-    directory = f"myresults/robustness/MonteCarlo/{dataset}/{entity}/"
-    os.makedirs(directory, exist_ok=True)
-    plt.savefig(f"{directory}/{dataset}_{entity}_MonteCarlo_ranking_stability.png",
-                format="png", dpi=300, bbox_inches="tight")
-    plt.close()
+    models, ranks = summary["model_names"], summary["ranks"]
+    shown = summary["order"][:top_k]
+    n_trials = summary["n_trials"]
+    x = np.arange(1, n_trials + 1)
+    fig, ax = plt.subplots(figsize=(max(6.0, 1.4 * n_trials + 3), 6))
+    for name in shown:
+        y = ranks[:, models.index(name)]
+        ax.plot(x, y, marker='o', linewidth=1.8, markersize=5, label=name)
+    ax.set_xlabel("Trial")
+    ax.set_ylabel("Rank by fitness")
+    ax.set_xticks(x)
+    ax.invert_yaxis()
+    ax.legend(loc='upper left', frameon=False, bbox_to_anchor=(1.01, 1),
+              borderaxespad=0, fontsize=8)
+    fig.savefig(f"{_mc_dir(dataset, entity)}/{dataset}_{entity}_MonteCarlo_trial_ranks.png",
+                dpi=200, bbox_inches='tight')
+    plt.close(fig)
 
 
-def plot_surrogate_tree(clf, metric_name, dataset, entity) -> None:
-    """plot_tree of the small noise→winner classifier. No-op when clf is None."""
-    if clf is None:
-        return
-    from sklearn.tree import plot_tree
+def plot_trial_scores(summary: Dict[str, Any], matrix: np.ndarray, tag: str,
+                      xlabel: str, dataset, entity) -> None:
+    """One row per detector: its score in every trial, beside the mean the ranking uses."""
     _mc_explain_rcparams()
-    fig, ax = plt.subplots(figsize=(11, 6))
-    plot_tree(clf, feature_names=["noise_level"], class_names=list(clf.classes_),
-              filled=True, rounded=True, fontsize=8, ax=ax)
-    ax.set_title(f"Monte Carlo · winner surrogate ({metric_name}): noise_level → winning model")
-    plt.tight_layout(pad=1.2)
-    directory = f"myresults/robustness/MonteCarlo/{dataset}/{entity}/"
-    os.makedirs(directory, exist_ok=True)
-    tag = metric_name.replace("-", "").replace(" ", "")
-    plt.savefig(f"{directory}/{dataset}_{entity}_MonteCarlo_surrogate_tree_{tag}.png",
-                format="png", dpi=300, bbox_inches="tight")
-    plt.close()
+    models = summary["model_names"]
+    order = summary["order"]
+    fig, ax = plt.subplots(figsize=(7.5, max(3.0, 0.32 * len(order) + 1.2)))
+    for row, name in enumerate(order):
+        col = matrix[:, models.index(name)]
+        y = len(order) - row
+        ax.scatter(col, [y] * len(col), s=26, alpha=0.65, color='#4C72B0',
+                   zorder=3)
+        ax.scatter([np.nanmean(col)], [y], marker='|', s=420, linewidths=2.0,
+                   color='#C44E52', zorder=4)
+    ax.set_yticks(range(1, len(order) + 1))
+    ax.set_yticklabels(list(reversed(order)), fontsize=8)
+    ax.set_xlabel(xlabel)
+    ax.grid(True, axis='x', linestyle='--', linewidth=0.5, alpha=0.6)
+    ax.grid(False, axis='y')
+    fig.savefig(f"{_mc_dir(dataset, entity)}/{dataset}_{entity}_MonteCarlo_trial_{tag}.png",
+                dpi=200, bbox_inches='tight')
+    plt.close(fig)
 
 
-# ── Orchestrator + report ────────────────────────────────────────────────────
+# Figure tag and axis label per fitness component, drawn under the browse button
+# beside the fitness figure so a reader can see which term moved.
+_COMPONENT_FIGURES = (("f1", "F1", "F1", "F1"),
+                      ("pr_auc", "PR", "PRAUC", "PR-AUC"),
+                      ("vus", "VUS", "VUS", "VUS"))
 
-def explain_monte_carlo(test_data, trained_models, model_names, dataset, entity,
-                        noise_levels=None, repeats: int = 5, random_state: int = 0,
+
+def explain_monte_carlo(per_trial: Dict[str, Any],
+                        ranked: Optional[List[str]] = None,
+                        dataset: str = "", entity: str = "",
                         explain: bool = False,
-                        evaluate_fn: Optional[Callable[[str, float], Tuple[float, float]]] = None,
-                        production_ranking: Optional[List[str]] = None,
                         metrics=DEFAULT_DECISION_METRICS,
+                        noise_level: Optional[float] = None,
                         ) -> Optional[Dict[str, Any]]:
     """
-    Monte Carlo robustness explainability: sweep the test's `noise_level`, then
-    explain with performance-vs-noise curves + ranking stability (Method A) and a
-    1-D decision-tree surrogate (Method B). Both read the run's own fitness, so
-    the stage has one winner rather than one per metric. Writes a report + plots
-    under myresults/robustness/MonteCarlo/{dataset}/{entity}/.
+    Monte Carlo robustness explainability, read off the trials the ranking
+    averages. Writes a report + figures under
+    myresults/robustness/MonteCarlo/{dataset}/{entity}/ and emits the IR.
 
     Returns the computed structures when explain=True; None otherwise (and None,
-    with a logged note, when the sweep is infeasible).
+    with a logged note, when there are no usable trials).
     """
     if not explain:
         return None
-    sweep = monte_carlo_noise_sweep(test_data, trained_models, model_names,
-                                    noise_levels=noise_levels, repeats=repeats,
-                                    random_state=random_state, evaluate_fn=evaluate_fn,
-                                    metrics=metrics)
-    if sweep is None:
-        logger.warning("Monte Carlo explainability skipped: data too small / single-class.")
+    summary = summarize_trials(per_trial, ranked)
+    if summary is None:
+        logger.warning("Monte Carlo explainability skipped: no usable trials.")
         return None
 
-    noise = sweep["noise"]; grid = sweep["grid_levels"]
-    models = sweep["model_names"]
-    FIT = sweep["FIT"]; FIT_fixed = sweep["FIT_fixed"]
-    want = metrics_required(metrics)
-    want_f1 = 'f1' in want
     fitness_formula = decision_metric_formula(metrics)
+    summary["fitness_formula"] = fitness_formula
+    summary["noise_level"] = noise_level
 
-    curves = compute_noise_curves(noise, grid, FIT, models)
-    # Only F1 carries a threshold, so freezing one is meaningful only when the
-    # fitness names it.
-    curves_fixed = compute_noise_curves(noise, grid, FIT_fixed, models) if want_f1 else {}
-    stab = compute_ranking_stability(noise, grid, FIT, models)
-    # A one-term fitness IS that metric, so its component curve would be the
-    # same data drawn a second time under another name.
-    component_curves = {} if len(want) < 2 else {
-        label: compute_noise_curves(noise, grid, sweep[key], models)
-        for token, key, label in _FITNESS_COMPONENTS if token in want}
+    plot_trial_ranks(summary, dataset, entity)
+    plot_trial_scores(summary, summary["fitness"], "fitness",
+                      f"Fitness ({fitness_formula})", dataset, entity)
+    parts = {"f1": per_trial["F1"], "pr_auc": per_trial["PR"], "vus": per_trial["VUS"]}
+    if len(summary["metrics"]) > 1:
+        for token, _, tag, label in _COMPONENT_FIGURES:
+            if token in summary["metrics"]:
+                plot_trial_scores(summary, parts[token], tag, label, dataset, entity)
 
-    # Surrogates (need sklearn). Degrade gracefully if unavailable.
-    clf = None
-    winner = {"feasible": False}
-    permodel = {}
-    surrogate_note = ""
-    try:
-        clf, winner = _fit_noise_winner(noise, FIT, models)
-        permodel = train_noise_permodel_surrogates(noise, FIT, models)
-    except ImportError:
-        surrogate_note = "scikit-learn unavailable — surrogate (Method B) skipped."
-        logger.warning(f"MC explainability: {surrogate_note}")
+    _write_mc_report(summary, dataset, entity)
 
-    # Filenames carry "Fitness", not the metric names, so they stay stable
-    # whatever the run configuration chose.
-    for _curves, _label in ((curves, "Fitness"), (curves_fixed, "Fitness_fixed")):
-        if _curves:
-            plot_noise_curves(_curves, models, _label, dataset, entity)
-            # The plain fitness curve is the one the card leads with, and the card
-            # titles it itself.
-            plot_noise_curves(_curves, models, _label, dataset, entity, plain=True,
-                              show_title=_label != "Fitness")
-    # Components are plain only: they browse beside the fitness curve rather
-    # than leading, and the annotated version of each is the same data with
-    # win-regions drawn over it.
-    for _label, _curves in component_curves.items():
-        plot_noise_curves(_curves, models, _label, dataset, entity, plain=True)
-    plot_ranking_stability(stab, dataset, entity, fitness_label="fitness")
-    plot_surrogate_tree(clf, "Fitness", dataset, entity)
-
-    directory = f"myresults/robustness/MonteCarlo/{dataset}/{entity}/"
-    os.makedirs(directory, exist_ok=True)
-    report_path = os.path.join(directory, f"{dataset}_{entity}_MonteCarlo_explainability.txt")
-    n_trials = len(noise)
-    with open(report_path, "w") as f:
-        f.write("=== Monte Carlo Robustness Explainability ===\n")
-        f.write(f"Dataset: {dataset}  |  Entity: {entity}\n")
-        f.write(f"Models ({len(models)}): {', '.join(models)}\n")
-        f.write(f"Noise sweep: {len(grid)} levels in "
-                f"[{grid.min():.3f}, {grid.max():.3f}] × {repeats} repeats = {n_trials} trials\n")
-        f.write(f"Fitness: {fitness_formula}\n")
-        f.write("(Explain-only sweep over the test's own noise_level; the production MC "
-                "ranking at fixed noise is unchanged.)\n\n")
-
-        def _methodA(curves, stab, metric):
-            f.write(f"--- Method A · {metric} curves ---\n")
-            f.write("Crossovers (noise → new top model):\n")
-            if curves["crossovers"]:
-                for cx in curves["crossovers"]:
-                    f.write(f"    noise {cx['noise']:.3f}: {cx['from_model']} → {cx['to_model']}\n")
-            else:
-                f.write("    none (one model leads across the whole sweep)\n")
-            f.write("Per-model win-region in noise_level:\n")
-            for m in models:
-                regs = curves["win_regions"][m]
-                if regs:
-                    rs = ", ".join(f"[{a:.3f},{b:.3f}]" for a, b in regs)
-                    f.write(f"    {m:<12} {rs}\n")
-            f.write("Per-model breakdown noise (mean score first < 0.5):\n")
-            for m in models:
-                bp = curves["breakdown_points"][m]
-                f.write(f"    {m:<12} {'never' if bp is None else f'{bp:.3f}'}\n")
-            taus = stab["tau_per_level"]
-            mean_tau = float(np.nanmean(taus)) if np.any(~np.isnan(taus)) else float('nan')
-            if np.any(~np.isnan(taus)):
-                worst = int(np.nanargmin(taus))
-                worst_band = f"{stab['grid_levels'][worst]:.3f} (τ={taus[worst]:+.3f})"
-            else:
-                worst_band = "N/A"
-            f.write(f"Ranking stability: mean τ={mean_tau:+.3f}; most volatile at noise {worst_band}\n\n")
-
-        _methodA(curves, stab, "fitness")
-
-        def _methodB(winner, permodel, metric):
-            f.write(f"--- Method B · winner surrogate ({metric}) ---\n")
-            if surrogate_note:
-                f.write(f"    {surrogate_note}\n\n"); return
-            if not winner.get("feasible"):
-                f.write("    not feasible (no valid trials).\n\n"); return
-            f.write(f"Train accuracy (in-sample fit): {winner['train_accuracy']:.3f}\n")
-            cv_acc = winner.get("cv_accuracy", float('nan'))
-            if not np.isnan(cv_acc):
-                f.write(f"Held-out accuracy ({winner.get('cv_method', 'cv')}, "
-                        f"{winner.get('cv_accuracy_std', float('nan')):.3f} std): {cv_acc:.3f}\n")
-            elif winner.get("cv_note"):
-                f.write(f"Held-out accuracy: not estimated ({winner['cv_note']})\n")
-            wr = winner["win_rates"]
-            top = sorted(wr.items(), key=lambda kv: kv[1], reverse=True)
-            f.write("Win rates: " + ", ".join(f"{m} {p:.2f}" for m, p in top if p > 0) + "\n")
-            f.write("Threshold rules (noise_level → winner):\n")
-            for line in winner["rules_text"].rstrip().splitlines():
-                f.write(f"    {line}\n")
-            f.write(f"\n--- Method B · per-model degradation ({metric}) ---\n")
-            f.write(f"      {'model':<12} {'trend':>8} {'score@low':>10} {'score@high':>11} "
-                    f"{'R² (train)':>11} {'R² (held-out)':>22}\n")
-            f.write("      " + "-" * 65 + "\n")
-            for m in models:
-                pm = permodel.get(m, {})
-                tr = pm.get("trend", "N/A")
-                sl = pm.get("score_low", float('nan'))
-                sh = pm.get("score_high", float('nan'))
-                r2 = pm.get("r2", float('nan'))
-                cv_r2 = pm.get("cv_r2", float('nan'))
-                cv_mse = pm.get("cv_mse", float('nan'))
-                cv_ns = pm.get("cv_n_splits", 0)
-                cv_deg = pm.get("cv_degenerate_folds", 0)
-                if not np.isnan(cv_r2):
-                    # Majority-degenerate folds → the estimate is unassessable;
-                    # keep the number visible but flag it (matches the IR grade).
-                    if cv_ns and cv_deg > cv_ns / 2:
-                        cv_str = f"{cv_r2:.3f} ({cv_deg}/{cv_ns} deg,N/A)"
-                    elif cv_deg:
-                        cv_str = f"{cv_r2:.3f} ({cv_deg}/{cv_ns} deg)"
-                    else:
-                        cv_str = f"{cv_r2:.3f}"
-                elif not np.isnan(cv_mse):
-                    cv_str = f"MSE={cv_mse:.3f}"
-                elif pm.get("cv_method") == "constant_target":
-                    cv_str = "N/A (flat)"
-                else:
-                    cv_str = "N/A"
-                f.write(f"      {m:<12} {tr:>8} "
-                        f"{(f'{sl:.3f}' if not np.isnan(sl) else 'N/A'):>10} "
-                        f"{(f'{sh:.3f}' if not np.isnan(sh) else 'N/A'):>11} "
-                        f"{(f'{r2:.3f}' if not np.isnan(r2) else 'N/A'):>11} "
-                        f"{cv_str:>22}\n")
-            f.write("      R² (train) is the in-sample fit; R² (held-out) is a cross-validated\n"
-                    "      estimate (see surrogate_fidelity.py) and is the number that should be\n"
-                    "      read as the surrogate's actual fidelity. '(k/n deg)' marks folds with\n"
-                    "      near-constant targets (force_finite-scored); majority-degenerate\n"
-                    "      estimates are flagged N/A — kept visible but not to be trusted.\n")
-            f.write("\n")
-
-        _methodB(winner, permodel, "fitness")
-
-        # ── Fixed-operating-point degradation ──────────────────────────────
-        # The F1 above (Methods A/B) RE-OPTIMIZES each model's threshold at every
-        # noise level (best-achievable separability). Here the threshold is frozen
-        # once at the lowest noise level and held fixed across the sweep — how a
-        # committed operating point actually degrades as noise shifts the scores.
-        if want_f1:
-            f.write("--- Fixed-operating-point degradation (F1 term frozen at lowest noise) ---\n")
-            f.write("Contrast with the adaptive fitness above (F1's threshold re-optimized at every level).\n")
-            f.write(f"      {'model':<12} {'fit@low':>8} {'fit@high(adapt)':>16} "
-                    f"{'fit@high(fixed)':>16} {'masked drop':>12}\n")
-            f.write("      " + "-" * 66 + "\n")
-            ad_mean = curves["per_model_mean"]
-            fx_mean = curves_fixed["per_model_mean"]
-
-            def _fnum(v):
-                return f"{v:.3f}" if not np.isnan(v) else "N/A"
-
-            for mi, m in enumerate(models):
-                f_low = ad_mean[mi, 0]
-                f_hi_ad = ad_mean[mi, -1]
-                f_hi_fx = fx_mean[mi, -1]
-                masked = (f_hi_ad - f_hi_fx) if not (np.isnan(f_hi_ad) or np.isnan(f_hi_fx)) else float('nan')
-                f.write(f"      {m:<12} {_fnum(f_low):>8} {_fnum(f_hi_ad):>16} "
-                        f"{_fnum(f_hi_fx):>16} {_fnum(masked):>12}\n")
-            f.write("'masked drop' = adaptive fitness − fixed fitness at the highest noise: the "
-                    "operating-point degradation the adaptive (re-optimized) view hides.\n\n")
-
-        f.write("Note: Method A relates the noise level to which model leads (curves, "
-                "crossovers, win-regions, breakdown, ranking stability). Method B is a 1-D "
-                "decision tree — it formalizes the curve crossovers as explicit noise "
-                "thresholds and quantifies each model's degradation. The fixed-operating-point "
-                "section instead freezes each threshold at baseline to expose committed-cutoff "
-                "robustness.\n")
-
-    result = {
-        "sweep": sweep,
-        "curves": curves, "curves_fixed": curves_fixed,
-        "component_curves": component_curves,
-        "stability": stab,
-        "winner": winner,
-        "permodel": permodel,
-        "metrics": want,
-        "fitness_formula": fitness_formula,
-        "n_trials": n_trials,
-    }
-
-    # ── Intermediate Representation (grounded LLM input; non-fatal) ─────────
     try:
         ir.write_stage_ir(
-            ir.build_monte_carlo_ir(dataset, entity, result,
-                                    list(production_ranking or [])),
+            ir.build_monte_carlo_ir(dataset, entity, summary, list(ranked or [])),
             dataset, entity, "ir_monte_carlo")
     except Exception as e:
         logger.error(f"Monte Carlo IR emission failed (non-fatal): {e}")
 
-    return result
+    return summary
+
+
+def _write_mc_report(summary: Dict[str, Any], dataset, entity) -> None:
+    path = os.path.join(_mc_dir(dataset, entity),
+                        f'{dataset}_{entity}_MonteCarlo_explainability.txt')
+    models, order = summary["model_names"], summary["order"]
+    fit, ranks = summary["fitness"], summary["ranks"]
+    n_trials = summary["n_trials"]
+    level = summary.get("noise_level")
+
+    with open(path, 'w') as f:
+        f.write("=== Monte Carlo Robustness Explainability ===\n")
+        f.write(f"Dataset: {dataset}  |  Entity: {entity}\n")
+        f.write(f"Detectors ({len(models)}): {', '.join(order)}\n")
+        f.write(f"Trials: {n_trials} independent draws of the same Gaussian noise"
+                + (f" at level {level}\n" if level is not None else "\n"))
+        f.write(f"Fitness: {summary['fitness_formula']}\n")
+        f.write("(Read off the trials the ranking averages; no separate experiment.)\n\n")
+
+        f.write("--- Ranking in each trial ---\n")
+        for i in range(n_trials):
+            places = sorted(range(len(models)), key=lambda j: ranks[i, j])
+            f.write(f"  Trial {i + 1}: "
+                    + ", ".join(f"{p}. {models[j]}"
+                                for p, j in enumerate(places, 1)) + "\n")
+        f.write("\n")
+
+        f.write("--- Fitness per detector ---\n")
+        head = "".join(f"{'trial ' + str(i + 1):>10}" for i in range(n_trials))
+        f.write(f"  {'detector':<22}{head}{'mean':>10}{'spread':>9}{'ranks':>10}{'wins':>6}\n")
+        f.write("  " + "-" * (22 + 10 * n_trials + 35) + "\n")
+        for name in order:
+            col = fit[:, models.index(name)]
+            lo, hi = summary["rank_ranges"][name]
+            cells = "".join(f"{v:>10.4f}" for v in col)
+            f.write(f"  {name:<22}{cells}{summary['means'][name]:>10.4f}"
+                    f"{summary['spreads'][name]:>9.4f}"
+                    f"{(f'{lo}-{hi}' if lo != hi else str(lo)):>10}"
+                    f"{summary['wins'][name]:>6}\n")
+        f.write("\n")
+
+        w = summary["winner"]
+        if w:
+            f.write("--- Why the ranking has this winner ---\n")
+            f.write(f"  {w['winner']} leads the runner-up {w['runner_up']} by "
+                    f"{w['margin_mean']:.4f} on average.\n")
+            for term in w["terms"]:
+                f.write(f"    {term['metric']:<8} {w['winner']} {term['winner']:.4f}"
+                        f"  vs  {w['runner_up']} {term['runner_up']:.4f}"
+                        f"  ({term['delta']:+.4f})\n")
+            f.write(f"  Ahead in {w['ahead_in_trials']} of {n_trials} trials, by "
+                    f"between {w['margin_min']:.4f} and {w['margin_max']:.4f}.\n")
+            lo = summary["leave_one_out"]
+            if lo["stable"]:
+                f.write("  Leave-one-trial-out: first place is unchanged whichever "
+                        "single trial is dropped.\n\n")
+            else:
+                f.write("  Leave-one-trial-out: "
+                        + "; ".join(f"dropping trial {fl['trial']} gives "
+                                    f"{fl['winner']} first place"
+                                    for fl in lo["flips"]) + ".\n\n")
+
+        f.write("--- Trial-to-trial movement against the published gaps ---\n")
+        f.write(f"  Median fitness spread between trials: {summary['median_spread']:.4f}\n")
+        f.write(f"  Median gap between neighbouring places: {summary['median_gap']:.4f}\n")
+        f.write("\nWhere the spread exceeds the gap, neighbouring places in the ranking "
+                "are closer together than the same detector's own movement between "
+                "trials. The per-detector rank column above shows which places changed.\n")

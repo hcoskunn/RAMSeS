@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional
 # Utils/__init__.py is empty and pipeline_spec is stdlib-only, so this import
 # stays cheap — it does not drag torch/matplotlib in the way Utils.utils would.
 from Utils.pipeline_spec import (ALL_DETECTORS, DATASET_LABELS, DECISION_METRICS,
-                                 DETECTOR_FAMILIES,
-                                 DETECTOR_GROUPS, GROUP_LABELS,
+                                 DEFAULT_META_MODEL, DETECTOR_FAMILIES,
+                                 DETECTOR_GROUPS, GROUP_LABELS, META_MODELS,
                                  MULTIVARIATE_FAMILIES, UNIVARIATE_FAMILIES,
                                  dataset_label, family_of,
                                  group_of)
@@ -421,6 +421,8 @@ def catalog(refresh: bool = False) -> Dict[str, Any]:
             {"token": "pr_auc", "label": "PR-AUC", "symbol": DECISION_METRICS["pr_auc"]},
             {"token": "vus", "label": "VUS-ROC", "symbol": DECISION_METRICS["vus"]},
         ],
+        "meta_models": [{"token": k, "label": v} for k, v in META_MODELS.items()],
+        "default_meta_model": DEFAULT_META_MODEL,
         # `note` warns about types measured to behave poorly; see README.
         "anomaly_types": [
             {"token": "spikes", "label": "Spikes (scattered points)"},

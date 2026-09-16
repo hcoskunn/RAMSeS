@@ -48,7 +48,7 @@ def _resolve_fold_plan(n_samples: int, requested_splits: int, min_class_count: i
     return n_samples, "leave_one_out"
 
 
-def held_out_classifier_fidelity(X, y, max_depth: int = 3, random_state: int = 0,
+def held_out_classifier_fidelity(X, y, max_depth: int = 3, random_state: int = 42,
                                  n_splits: int = 5) -> Dict[str, Any]:
     """Cross-validated accuracy of DecisionTreeClassifier(max_depth) on (X, y).
 
@@ -91,7 +91,7 @@ def held_out_classifier_fidelity(X, y, max_depth: int = 3, random_state: int = 0
             "note": ""}
 
 
-def held_out_regressor_fidelity(X, y, max_depth: int = 3, random_state: int = 0,
+def held_out_regressor_fidelity(X, y, max_depth: int = 3, random_state: int = 42,
                                 n_splits: int = 5) -> Dict[str, Any]:
     """Cross-validated R^2 of DecisionTreeRegressor(max_depth) on (X, y)."""
     X = np.asarray(X, dtype=float)

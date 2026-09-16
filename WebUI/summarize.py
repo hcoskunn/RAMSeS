@@ -59,11 +59,10 @@ _CARRY_MIN_COVERAGE = 0.5
 # from the IR in a section of their own.
 _STAGE_SUMMARY: Dict[str, Dict[str, Any]] = {
     "ga_selection": {"mode": "drop", "drop": ("excluded_detector", "excluded_group")},
-    # Cutting at a count of atoms put the per-noise walk in the summary: the
+    # Cutting at a count of atoms put the per-detector walk in the summary: the
     # narrator merges, so five facts arrived as three sentences and the cut
     # landed two sentences into the walk. Dropping by type does not care.
-    # "monte_carlo": {"mode": "lead", "lead_trailing": ("win_region",)},
-    "monte_carlo": {"mode": "drop", "drop": ("win_region",)},
+    "monte_carlo": {"mode": "drop", "drop": ("rank_range",)},
     # One sentence per rival, all of the same atom type, so there is nothing to
     # drop BY TYPE that would not take every rival with it — dropping the two
     # importance families (which is what these did) left eleven near-identical
