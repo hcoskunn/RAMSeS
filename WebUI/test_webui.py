@@ -1592,6 +1592,22 @@ class TestPlots(unittest.TestCase):
         self.assertIn("survival", names)
         self.assertNotIn("ensemble_scores", names)
 
+    def test_the_smoothed_reward_curve_is_not_offered(self):
+        """Regimes are read off the raw signal, and a smoothed curve puts a
+        different detector on top on roughly a quarter of the windows, so the
+        shading drawn over it would disagree with what the reader sees."""
+        self._touch("Thomposon/SKAB/7/expected_rewards_50.png")
+        self._touch("Thomposon/SKAB/7/expected_rewards_smoothed_50.png")
+        headline, gallery = self.plots._thompson("SKAB", "7")
+        every = headline + gallery
+        self.assertNotIn("expected_rewards_smoothed_50.png",
+                         [f.get("name") for f in every if "name" in f])
+        for figure in every:
+            self.assertNotIn("variants", figure)
+        rewards = next(f for f in headline
+                       if f.get("name") == "expected_rewards_50.png")
+        self.assertIn("contested", rewards["caption"])
+
     def test_regime_plots_key_on_the_zero_based_index(self):
         self._touch("Thomposon/SKAB/7/expected_rewards_50.png")
         self._touch("Thomposon/SKAB/7/shap_per_regime_50/regime_00_w0-4_NN_3.png")
