@@ -374,10 +374,9 @@ def _ts_context_feature_label(idx: Any, context_feature_names: Optional[Sequence
 def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
                       final_ranking: List[Tuple[str, float]],
                       regimes: List[Dict[str, Any]],
-                      shifts: List[Dict[str, Any]],
-                      blip_count: int,
                       state_fractions: Dict[str, float],
                       final_state: str,
+                      contested: Optional[Sequence[Tuple[int, int]]] = None,
                       state_counts: Optional[Dict[str, int]] = None,
                       context_feature_names: Optional[Sequence[str]] = None,
                       n_context_features: Optional[int] = None) -> Dict[str, Any]:
@@ -490,18 +489,37 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
             f"{m} led {c} regime{'' if c == 1 else 's'}, spanning "
             f"{spans.get(m, 0)} window{'' if spans.get(m, 0) == 1 else 's'}"
             for m, c in ordered])
-        blips = int(blip_count or 0)
-        blip_txt = ("" if not blips else
-                    f" {blips} brief blip window{'' if blips == 1 else 's'} "
-                    f"did not last long enough to count as a regime.")
+        covered = sum(int(r.get("duration") or 0) for r in regimes)
         evidence.append(make_atom(
             "ts.regimes.summary", "regime_summary", "regimes",
             {"n_regimes": len(regimes), "n_windows": int(n_windows),
              "n_leaders": len(counts), "regimes_led": counts,
-             "windows_led": spans, "blip_count": blips},
-            f"The {int(n_windows)} windows split into {len(regimes)} regimes led "
-            f"by {len(counts)} different detectors: {led}.{blip_txt}", order=3))
+             "windows_led": spans, "windows_in_a_regime": covered},
+            f"{covered} of the {int(n_windows)} windows split into "
+            f"{len(regimes)} regimes led by {len(counts)} different detectors: "
+            f"{led}.", order=3))
         required.append("ts.regimes.summary")
+
+    # Every window the regimes do not cover, and why they do not. Kept out of the
+    # summary above so the count is not stated twice in one card.
+    spans_contested = [(int(a), int(b)) for a, b in (contested or [])]
+    if spans_contested:
+        n_contested = sum(b - a + 1 for a, b in spans_contested)
+        longest = max(spans_contested, key=lambda ab: ab[1] - ab[0])
+        where = (f"in one stretch running from window {longest[0]} to "
+                 f"{longest[1]}" if len(spans_contested) == 1 else
+                 f"in {len(spans_contested)} stretches, the longest running from "
+                 f"window {longest[0]} to {longest[1]}")
+        that = "that stretch" if len(spans_contested) == 1 else "those windows"
+        evidence.append(make_atom(
+            "ts.contested", "contested", "regimes",
+            {"n_contested": n_contested, "n_windows": int(n_windows),
+             "n_stretches": len(spans_contested), "spans": spans_contested,
+             "fraction": _val(n_contested / n_windows, 3) if n_windows else None},
+            f"Leadership was contested in {n_contested} of the {int(n_windows)} "
+            f"windows, {where}. In {that} no detector held the highest estimated "
+            f"expected reward for three consecutive windows.", order=4))
+        required.append("ts.contested")
 
     # ── One sentence per regime, chronological; every one required ──
     for i, r in enumerate(sorted(regimes, key=lambda x: x.get("index", 0))):
@@ -516,38 +534,40 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         favor = [c for c, _ in (r.get("edge_favor_leader") or [])][:1]
         runner = r.get("runner_up")
 
-        # The claims stay distinct clauses, in parallel participles. They are
-        # different quantities: a SHARE of the estimated expected reward, an EDGE over the
-        # runner-up in those same units, and a DEPARTURE from what the context
-        # feature usually contributes, which is not a share of anything.
+        # The claims stay distinct clauses. They are different quantities: a
+        # SHARE of the estimated expected reward, an EDGE over the runner-up in
+        # those same units, and a DEPARTURE from what the context feature usually
+        # contributes, which is not a share of anything.
         #
-        # The departure leaves this sentence for an atom of its own, below: three
-        # participles were one too many, and the narrator elided the second
-        # supplying feature in 7 of 8 regimes on SKAB/7.
+        # All three leave the span sentence for one atom of their own, below. The
+        # span sentence carries the claim and the share that qualifies it; three
+        # participles alongside them were one too many, and the narrator elided
+        # the second supplying feature in 7 of 8 regimes on SKAB/7.
         deviating = ((r.get("shap_raising") or []) + (r.get("shap_lowering") or []))
         worst = (max(deviating, key=lambda cv: abs(cv[1]) if not _is_nan(cv[1]) else -1)
                  if deviating else None)
         clauses: List[str] = []
         if supplying:
-            clauses.append(f"{_oxford([_ch(c) for c in supplying])} raising its "
-                           f"estimated expected reward the most")
+            clauses.append(f"{_oxford([_ch(c) for c in supplying])} raised "
+                           f"{leader}'s estimated expected reward the most")
         if favor and runner:
             # One context feature often does both jobs; "also" says so rather than
             # presenting the same context feature twice as two separate findings.
             also = "also " if favor[0] in supplying else ""
-            clauses.append(f"{_ch(favor[0])} {also}giving it its biggest edge "
+            clauses.append(f"{_ch(favor[0])} {also}gave {leader} its biggest edge "
                            f"over {runner}")
+        if worst is not None:
+            c, v = worst
+            direction = "above" if (not _is_nan(v) and float(v) >= 0) else "below"
+            clauses.append(f"{_ch(c)} departed furthest from its usual "
+                           f"contribution, running {direction} it")
 
-        text = (f"Regime {idx} (windows {r.get('start')} to {r.get('end')}, "
-                f"{r.get('duration')} windows) was led by {leader}")
-        if len(clauses) == 2 and any(" and " in c for c in clauses):
-            # _oxford drops the serial comma for two items, which collides with
-            # the "context feature 8 and context feature 3" inside the first clause and yields
-            # two bare "and"s. The comma is what marks where one clause ends.
-            text += f", with {clauses[0]}, and {clauses[1]}"
-        elif clauses:
-            text += f", with {_oxford(clauses)}"
-        parts = [text + "."]
+        share = r.get("share")
+        held = ("" if _is_nan(share) or share is None else
+                f", which held the highest estimated expected reward in "
+                f"{_fmt(100.0 * float(share), 0)}% of them")
+        parts = [f"Regime {idx} (windows {r.get('start')} to {r.get('end')}, "
+                 f"{r.get('duration')} windows) was led by {leader}{held}."]
 
         rid = f"ts.regime.{idx}"
         evidence.append(make_atom(
@@ -571,24 +591,33 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
              "deviation_edge_channels": [(c, _val(v, 4)) for c, v in (r.get("pref_favor_leader") or [])],
              "mean_rewards": [(m, _val(v, 4)) for m, v in (r.get("rewards_top") or [])],
              "mean_reward_gap": _val(r.get("reward_gap"), 4),
-             "preference_score_gap": _val(r.get("pref_gap"), 4)},
+             "preference_score_gap": _val(r.get("pref_gap"), 4),
+             "share": _val(share, 3)},
             " ".join(parts), order=10 + i))
         required.append(rid)
 
         # Carries "regime N" so the disclosure can file it; the id keeps the
         # suffix so artifacts._REGIME_RE, which anchors on the index, does not
         # read it as an extra regime.
-        if worst is not None:
-            c, v = worst
-            direction = "above" if (not _is_nan(v) and float(v) >= 0) else "below"
-            did = f"{rid}.deviation"
+        if clauses:
+            did = f"{rid}.detail"
+            if len(clauses) == 2 and any(" and " in c for c in clauses):
+                # _oxford drops the serial comma for two items, which collides with
+                # the "context feature 8 and context feature 3" inside the first
+                # clause and yields two bare "and"s. The comma marks where one
+                # clause ends.
+                body = f"{clauses[0]}, and {clauses[1]}"
+            else:
+                body = _oxford(clauses)
             evidence.append(make_atom(
                 did, "regime", leader,
-                {"index": idx, "leader": leader,
+                {"index": idx, "leader": leader, "runner_up": runner,
+                 "supplying_channels": [(c, _val(v, 4)) for c, v in (r.get("reward_raising") or [])],
+                 "edge_channels": [(c, _val(v, 4)) for c, v in (r.get("edge_favor_leader") or [])],
+                 "edge_gap": _val(r.get("edge_gap"), 4),
                  "deviation_raising": [(c, _val(v, 4)) for c, v in (r.get("shap_raising") or [])],
                  "deviation_lowering": [(c, _val(v, 4)) for c, v in (r.get("shap_lowering") or [])]},
-                f"In regime {idx}, {_ch(c)} departed furthest from its usual "
-                f"contribution, running {direction} it.", order=10 + i))
+                f"In regime {idx}, {body}.", order=10 + i))
             required.append(did)
 
     # ── Which context feature carried the winner, across the regimes it led ──
@@ -645,6 +674,27 @@ def build_thompson_ir(dataset: str, entity: str, *, n_windows: int,
         required.append("ts.states.summary")
 
     caveats: List[Dict[str, Any]] = []
+    # A regime tolerates gaps shorter than the minimum length, so its leader can
+    # in principle hold the lead in as little as a third of it.
+    thin = [r for r in regimes
+            if not _is_nan(r.get("share")) and r.get("share") is not None
+            and float(r["share"]) < 0.5]
+    if len(thin) == 1:
+        r = thin[0]
+        caveats.append(make_atom(
+            "ts.caveat.low_share", "caveat", "regimes",
+            {"regimes": [int(r.get("index"))], "share": _val(r.get("share"), 3)},
+            f"Regime {r.get('index')} names {r.get('leader')} for windows "
+            f"{r.get('start')} to {r.get('end')}, but {r.get('leader')} held the "
+            f"highest estimated expected reward in only "
+            f"{_fmt(100.0 * float(r['share']), 0)}% of them."))
+    elif thin:
+        caveats.append(make_atom(
+            "ts.caveat.low_share", "caveat", "regimes",
+            {"regimes": [int(r.get("index")) for r in thin]},
+            f"Regimes {_oxford([str(r.get('index')) for r in thin])} each name a "
+            f"leader that held the highest estimated expected reward in fewer "
+            f"than half of the regime's own windows."))
     if n_context_features is not None and int(n_context_features) == 1:
         caveats.append(make_atom(
             "ts.caveat.single_channel", "caveat", "context features", int(n_context_features),
@@ -838,10 +888,18 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
             solo = ordered[0][0]
             head = (f"One detector held the highest score for the whole run: "
                     f"{solo}, across {spans.get(solo, 0)} windows.")
-        else:
+        elif len(regimes) > len(counts):
             head = (f"Leadership on this score changed hands over the run: it "
                     f"splits into {len(regimes)} streaks led by {len(counts)} "
                     f"different detectors: {led}.")
+        else:
+            # Every detector leads exactly one streak, so the per-detector list
+            # restates the streak sentences word for word. Narrated together the
+            # two collapse into one sentence, which then carries the whole walk
+            # into the summary and files it all under the first streak.
+            head = (f"Leadership on this score changed hands over the run, "
+                    f"splitting into {len(regimes)} streaks led by "
+                    f"{len(counts)} different detectors.")
         longest = max(spans, key=lambda m: (spans[m], str(m))) if spans else None
         evidence.append(make_atom(
             "tsr.regimes.summary", "regime_summary", "regimes",

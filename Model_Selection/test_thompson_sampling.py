@@ -48,11 +48,11 @@ from Thompson_Sampling import (
     rank_models,
     calculate_score,
     compute_estimated_expected_rewards,
-    detect_regime_shifts,
+    detect_regimes,
     classify_selection,
     compute_shap_values,
     aggregate_shap_per_context_feature,
-    reconstruct_regime_segments,
+    window_leaders,
     reward_contribution_per_context_feature,
     aggregate_squared_per_context_feature,
     rank_gap_decomposition,
@@ -400,7 +400,7 @@ class TestComputeExpectedRewards(unittest.TestCase):
 
 
 # ════════════════════════════════════════════════════════════════════════════
-# 8.  detect_regime_shifts
+# 8.  detect_regimes
 # ════════════════════════════════════════════════════════════════════════════
 
 def _make_reward_history(dominant_sequence, n_models=3):
@@ -414,61 +414,101 @@ def _make_reward_history(dominant_sequence, n_models=3):
     return history, model_names
 
 
-class TestDetectRegimeShifts(unittest.TestCase):
+class TestWindowLeaders(unittest.TestCase):
 
-    def test_no_shift_returns_empty(self):
+    def test_a_tie_at_the_maximum_has_no_leader(self):
+        """argmax would hand every tie to whichever detector sits first in the
+        model list; a tie means nothing in the beliefs picks one out."""
+        history = {"M0": [1.0, 1.0], "M1": [1.0, 0.0]}
+        leaders, _ = window_leaders(history)
+        self.assertEqual(leaders, [None, "M0"])
+
+    def test_all_zero_windows_are_ties(self):
+        """Every window before the first posterior update: all means are zero."""
+        history, _ = _make_reward_history([0] * 3)
+        for m in history:
+            history[m][0] = 0.0
+        leaders, _ = window_leaders(history)
+        self.assertIsNone(leaders[0])
+
+    def test_all_nan_window_has_no_leader(self):
+        history = {"M0": [float("nan")], "M1": [float("nan")]}
+        leaders, _ = window_leaders(history)
+        self.assertEqual(leaders, [None])
+
+    def test_empty_history(self):
+        self.assertEqual(window_leaders({}), ([], []))
+
+
+class TestDetectRegimes(unittest.TestCase):
+
+    def test_one_leader_throughout_is_one_regime(self):
         history, _ = _make_reward_history([0] * 20)
-        shifts, blips = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
-        self.assertEqual(shifts, [])
-        self.assertEqual(blips, [])
+        regimes, contested = detect_regimes(history, min_regime_length=3)
+        self.assertEqual(len(regimes), 1)
+        self.assertEqual((regimes[0]["start"], regimes[0]["end"]), (0, 19))
+        self.assertEqual(regimes[0]["share"], 1.0)
+        self.assertEqual(contested, [])
 
-    def test_single_sustained_shift_detected(self):
+    def test_a_sustained_handover_makes_two_regimes(self):
         history, _ = _make_reward_history([0] * 10 + [1] * 10)
-        shifts, blips = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
-        self.assertEqual(len(shifts), 1)
-        self.assertEqual(shifts[0]["from_model"], "M0")
-        self.assertEqual(shifts[0]["to_model"], "M1")
-        self.assertEqual(shifts[0]["window"], 10)
-        self.assertEqual(blips, [])
+        regimes, contested = detect_regimes(history, min_regime_length=3)
+        self.assertEqual([r["leader"] for r in regimes], ["M0", "M1"])
+        self.assertEqual((regimes[0]["start"], regimes[0]["end"]), (0, 9))
+        self.assertEqual((regimes[1]["start"], regimes[1]["end"]), (10, 19))
+        self.assertEqual(contested, [])
 
-    def test_blip_not_counted_as_shift(self):
-        """M0 for 10, then M1 for 2 windows (< min_regime_length=3), then M0 again."""
+    def test_a_short_interruption_is_tolerated_inside_a_regime(self):
+        """Two windows is under the minimum, so it neither ends M0's regime nor
+        starts one of its own."""
         history, _ = _make_reward_history([0] * 10 + [1] * 2 + [0] * 10)
-        shifts, blips = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
-        self.assertEqual(shifts, [], "Transient should not be a regime shift")
-        self.assertGreater(len(blips), 0, "Transient should be recorded as blip")
+        regimes, contested = detect_regimes(history, min_regime_length=3)
+        self.assertEqual(len(regimes), 1)
+        self.assertEqual((regimes[0]["start"], regimes[0]["end"]), (0, 21))
+        self.assertAlmostEqual(regimes[0]["share"], 20 / 22, places=6)
+        self.assertEqual(contested, [])
 
-    def test_reward_delta_is_positive(self):
-        """The winning model should have higher smoothed reward at the shift window."""
-        history, _ = _make_reward_history([0] * 8 + [1] * 8)
-        shifts, _ = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
-        self.assertGreater(shifts[0]["reward_delta"], 0.0)
+    def test_the_incumbent_is_held_to_the_same_threshold(self):
+        """The asymmetric rule kept M0's name over the whole churn; the
+        symmetric one ends M0's regime at its last led window and reports the
+        rest as contested."""
+        history, _ = _make_reward_history([0] * 5 + [1, 2] * 6 + [0] * 5)
+        regimes, contested = detect_regimes(history, min_regime_length=3)
+        self.assertEqual([r["leader"] for r in regimes], ["M0", "M0"])
+        self.assertEqual((regimes[0]["start"], regimes[0]["end"]), (0, 4))
+        self.assertEqual(contested, [(5, 16)])
 
-    def test_regime_length_in_shift_event(self):
-        """regime_length should equal the old regime's window count."""
-        history, _ = _make_reward_history([0] * 12 + [1] * 10)
-        shifts, _ = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
-        self.assertEqual(shifts[0]["regime_length"], 12)
+    def test_the_leader_share_never_falls_below_a_third(self):
+        """A regime tolerates gaps of at most min_regime_length - 1, so the
+        leader holds at least one window in every min_regime_length."""
+        history, _ = _make_reward_history([0, 0, 0] + [0, 1, 2] * 8)
+        regimes, _ = detect_regimes(history, min_regime_length=3)
+        for r in regimes:
+            self.assertGreaterEqual(r["share"], 1 / 3)
 
-    def test_smoothing_suppresses_single_window_noise(self):
-        """With smoothing_window=5, a single-window blip should be absorbed."""
-        seq = [0] * 10 + [1] + [0] * 10
-        history, _ = _make_reward_history(seq)
-        shifts, _ = detect_regime_shifts(history, smoothing_window=5, min_regime_length=3)
-        self.assertEqual(shifts, [], "Single-window blip must be smoothed away")
+    def test_a_run_shorter_than_the_minimum_opens_nothing(self):
+        history, _ = _make_reward_history([0] * 2 + [1] * 10)
+        regimes, contested = detect_regimes(history, min_regime_length=3)
+        self.assertEqual([r["leader"] for r in regimes], ["M1"])
+        self.assertEqual(contested, [(0, 1)])
+
+    def test_tied_windows_are_not_contested(self):
+        """Nothing was competing there, so the stretch is undefined rather than
+        contested."""
+        history = {"M0": [1.0] * 5 + [0.0], "M1": [0.0] * 5 + [0.0]}
+        regimes, contested = detect_regimes(history, min_regime_length=3)
+        self.assertEqual(len(regimes), 1)
+        self.assertEqual(contested, [])
+
+    def test_regimes_never_overlap_and_are_ordered(self):
+        history, _ = _make_reward_history([0] * 8 + [1] * 8 + [2] * 8)
+        regimes, _ = detect_regimes(history, min_regime_length=3)
+        self.assertEqual([r["index"] for r in regimes], list(range(len(regimes))))
+        for earlier, later in zip(regimes, regimes[1:]):
+            self.assertLess(earlier["end"], later["start"])
 
     def test_empty_history_returns_empty(self):
-        shifts, blips = detect_regime_shifts({}, smoothing_window=1, min_regime_length=3)
-        self.assertEqual(shifts, [])
-        self.assertEqual(blips, [])
-
-    def test_multiple_shifts(self):
-        """Three distinct regimes should produce two shift events."""
-        history, _ = _make_reward_history([0] * 8 + [1] * 8 + [2] * 8)
-        shifts, _ = detect_regime_shifts(history, smoothing_window=1, min_regime_length=3)
-        self.assertEqual(len(shifts), 2)
-        self.assertEqual(shifts[0]["to_model"], "M1")
-        self.assertEqual(shifts[1]["to_model"], "M2")
+        self.assertEqual(detect_regimes({}, min_regime_length=3), ([], []))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -549,48 +589,6 @@ class TestSHAP(unittest.TestCase):
         per_context_feature = aggregate_shap_per_context_feature(shap, n_context_features=2)
         # window_size = 5 // 2 = 2; uses shap[:4] = [1, 2, 3, 4] → [3, 7]
         np.testing.assert_array_almost_equal(per_context_feature, [3.0, 7.0])
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 11.  reconstruct_regime_segments
-# ════════════════════════════════════════════════════════════════════════════
-
-class TestReconstructRegimeSegments(unittest.TestCase):
-
-    def test_no_shifts_single_segment(self):
-        segs = reconstruct_regime_segments([], T=20, fallback_model="LOF_1")
-        self.assertEqual(segs, [(0, 19, "LOF_1", 20)])
-
-    def test_empty_when_T_zero(self):
-        self.assertEqual(reconstruct_regime_segments([], T=0), [])
-
-    def test_segments_match_shift_events(self):
-        """Shifts at windows 2, 17, 35 over T=50 → four contiguous regimes."""
-        shifts = [
-            {"window": 2,  "from_model": "LOF_4", "to_model": "NN_3"},
-            {"window": 17, "from_model": "NN_3",  "to_model": "NN_1"},
-            {"window": 35, "from_model": "NN_1",  "to_model": "NN_3"},
-        ]
-        segs = reconstruct_regime_segments(shifts, T=50)
-        self.assertEqual(segs, [
-            (0,  1,  "LOF_4", 2),
-            (2,  16, "NN_3",  15),
-            (17, 34, "NN_1",  18),
-            (35, 49, "NN_3",  15),
-        ])
-
-    def test_segments_are_contiguous_and_cover_all_windows(self):
-        shifts = [
-            {"window": 5,  "from_model": "A", "to_model": "B"},
-            {"window": 12, "from_model": "B", "to_model": "C"},
-        ]
-        T = 30
-        segs = reconstruct_regime_segments(shifts, T=T)
-        self.assertEqual(segs[0][0], 0)
-        self.assertEqual(segs[-1][1], T - 1)
-        for earlier, later in zip(segs, segs[1:]):
-            self.assertEqual(earlier[1] + 1, later[0])
-        self.assertEqual(sum(d for _, _, _, d in segs), T)
 
 
 # ════════════════════════════════════════════════════════════════════════════

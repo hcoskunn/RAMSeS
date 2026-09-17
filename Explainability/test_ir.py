@@ -157,6 +157,7 @@ def _thompson_kwargs():
         n_windows=6,
         final_ranking=[("A", 1.5), ("B", 0.7)],
         regimes=[{"index": 0, "start": 0, "end": 2, "duration": 3, "leader": "A",
+                  "share": 1.0,
                   "rewards_top": [("A", 0.5), ("B", 0.2)], "reward_gap": 0.3,
                   "runner_up": "B",
                   # Three distinct quantities: what the reward is MADE of,
@@ -171,6 +172,7 @@ def _thompson_kwargs():
                   "pref_favor_leader": [(0, 0.3)],
                   "pref_favor_runner": [(3, -0.05)], "pref_gap": 0.3},
                  {"index": 1, "start": 3, "end": 5, "duration": 3, "leader": "B",
+                  "share": 0.667,
                   "rewards_top": [("B", 0.6), ("A", 0.4)], "reward_gap": 0.2,
                   "runner_up": "A",
                   "reward_raising": None, "reward_lowering": None,
@@ -179,9 +181,7 @@ def _thompson_kwargs():
                   "shap_raising": None, "shap_lowering": None,
                   "pref_favor_leader": None, "pref_favor_runner": None,
                   "pref_gap": float("nan")}],
-        shifts=[{"window": 3, "from_model": "A", "to_model": "B",
-                 "reward_delta": 0.2, "regime_length": 3}],
-        blip_count=1,
+        contested=[(6, 8)],
         state_fractions={"random": 0.2, "exploitation": 0.6, "informed_exploration": 0.2},
         state_counts={"random": 1, "exploitation": 3, "informed_exploration": 1},
         final_state="exploitation",
@@ -299,32 +299,44 @@ class TestBuilders(unittest.TestCase):
             by_id["ts.output.top"]["text"],
             "A and B each held the highest estimated expected reward in 3 of the 6 windows.")
 
-        # THREE distinct claims over two atoms: what the reward was made of and
-        # where the edge came from share the span sentence, in that order, while
-        # the departure — a different quantity — gets one of its own.
+        # THREE distinct claims over three atoms: the span sentence carries the
+        # leader and the share of its own windows it led, while what the reward
+        # was made of and how far a context feature departed from its usual
+        # contribution each get one of their own.
         self.assertEqual(
             by_id["ts.regime.0"]["text"],
-            "Regime 0 (windows 0 to 2, 3 windows) was led by A, with context feature 0 "
-            "and context feature 1 raising its estimated expected reward the most, and context "
-            "feature 0 also giving it its biggest edge over B.")
+            "Regime 0 (windows 0 to 2, 3 windows) was led by A, which held the "
+            "highest estimated expected reward in 100% of them.")
         self.assertEqual(
-            by_id["ts.regime.0.deviation"]["text"],
-            "In regime 0, context feature 0 departed furthest from its usual "
-            "contribution, running above it.")
+            by_id["ts.regime.0.detail"]["text"],
+            "In regime 0, context feature 0 and context feature 1 raised A's "
+            "estimated expected reward the most, context feature 0 also gave "
+            "A its biggest edge over B, and context feature 0 departed furthest "
+            "from its usual contribution, running above it.")
         # It carries the index so the disclosure can file it, and is required.
-        self.assertIn("ts.regime.0.deviation", doc["required_atom_ids"])
-        # Regime 1 has no SHAP/preference data -> just the span sentence.
+        self.assertIn("ts.regime.0.detail", doc["required_atom_ids"])
+        # Regime 1 has no SHAP/preference data -> the span sentence and nothing
+        # else; no detail atom is emitted when there is nothing to attribute.
         self.assertEqual(
             by_id["ts.regime.1"]["text"],
-            "Regime 1 (windows 3 to 5, 3 windows) was led by B.")
+            "Regime 1 (windows 3 to 5, 3 windows) was led by B, which held the "
+            "highest estimated expected reward in 67% of them.")
+        self.assertNotIn("ts.regime.1.detail", by_id)
         for rid in ("ts.regime.0", "ts.regime.1", "ts.regimes.summary",
                     "ts.output.top", "ts.states.summary"):
             self.assertIn(rid, doc["required_atom_ids"])
 
-        # Regime summary counts regimes and distinct leaders.
+        # Regime summary counts regimes and distinct leaders, and states how many
+        # windows they cover. The contested windows are the complement and get
+        # their own atom, so the number is not written twice in one card.
         self.assertIn("split into 2 regimes led by 2 different detectors",
                       by_id["ts.regimes.summary"]["text"])
-        self.assertIn("blip window", by_id["ts.regimes.summary"]["text"])
+        self.assertNotIn("contested", by_id["ts.regimes.summary"]["text"])
+        self.assertEqual(
+            by_id["ts.contested"]["text"],
+            "Leadership was contested in 3 of the 6 windows, in one stretch "
+            "running from window 6 to 8. In that stretch no detector held the "
+            "highest estimated expected reward for three consecutive windows.")
 
         # States are narrated best-first as a window count and a share; no
         # final-state atom. The unit is written once and then carried.
@@ -392,10 +404,10 @@ class TestBuilders(unittest.TestCase):
         kwargs["regimes"][0]["edge_favor_leader"] = [(7, 0.3)]
         doc = ir.build_thompson_ir("DS", "e1", **kwargs)
         by_id = {a["id"]: a["text"] for a in doc["evidence"]}
-        self.assertIn("context feature 2 and context feature 5 raising its estimated expected reward the most",
-                      by_id["ts.regime.0"])
-        self.assertIn("context feature 7 giving it its biggest edge over B",
-                      by_id["ts.regime.0"])
+        self.assertIn("context feature 2 and context feature 5 raised A's estimated expected reward the most",
+                      by_id["ts.regime.0.detail"])
+        self.assertIn("context feature 7 gave A its biggest edge over B",
+                      by_id["ts.regime.0.detail"])
 
     def test_thompson_edge_never_comes_from_the_deviation_split(self):
         """The edge clause is in expected-reward units. A run whose SHAP
@@ -405,12 +417,13 @@ class TestBuilders(unittest.TestCase):
         kwargs["regimes"][0]["edge_favor_leader"] = [(1, 0.25)]
         kwargs["regimes"][0]["pref_favor_leader"] = [(6, 0.9)]
         doc = ir.build_thompson_ir("DS", "e1", **kwargs)
-        atom = next(a for a in doc["evidence"] if a["id"] == "ts.regime.0")
-        self.assertIn("context feature 1 also giving it its biggest edge over B",
+        atom = next(a for a in doc["evidence"] if a["id"] == "ts.regime.0.detail")
+        self.assertIn("context feature 1 also gave A its biggest edge over B",
                       atom["text"])
         self.assertNotIn("context feature 6", atom["text"])
         # SHAP's version of the comparison survives for the alternate plot.
-        self.assertEqual(atom["value"]["deviation_edge_channels"], [[6, 0.9]])
+        span = next(a for a in doc["evidence"] if a["id"] == "ts.regime.0")
+        self.assertEqual(span["value"]["deviation_edge_channels"], [[6, 0.9]])
 
     def test_thompson_deviation_sentence_names_the_furthest_departure(self):
         """The deviation clause reports the largest departure in EITHER
@@ -420,7 +433,7 @@ class TestBuilders(unittest.TestCase):
         kwargs["regimes"][0]["shap_raising"] = [(1, 0.2)]
         kwargs["regimes"][0]["shap_lowering"] = [(3, -0.9)]
         doc = ir.build_thompson_ir("DS", "e1", **kwargs)
-        atom = next(a for a in doc["evidence"] if a["id"] == "ts.regime.0.deviation")
+        atom = next(a for a in doc["evidence"] if a["id"] == "ts.regime.0.detail")
         self.assertIn("context feature 3 departed furthest from its usual "
                       "contribution, running below it.", atom["text"])
         self.assertEqual(atom["value"]["deviation_lowering"], [[3, -0.9]])
@@ -434,14 +447,15 @@ class TestBuilders(unittest.TestCase):
         kwargs["regimes"][0]["edge_favor_leader"] = [(1, 0.02)]
         kwargs["regimes"][0]["edge_favor_runner"] = [(0, -0.14)]
         doc = ir.build_thompson_ir("DS", "e1", **kwargs)
-        atom = next(a for a in doc["evidence"] if a["id"] == "ts.regime.0")
-        self.assertIn("context feature 1 also giving it its biggest edge over B",
+        by_id = {a["id"]: a for a in doc["evidence"]}
+        atom = by_id["ts.regime.0.detail"]
+        self.assertIn("context feature 1 also gave A its biggest edge over B",
                       atom["text"])
         for word in ("although", "however", "despite", "-0.12"):
             self.assertNotIn(word, atom["text"])
         # The signed gaps are still grounded in `value` for the verifier.
         self.assertEqual(atom["value"]["edge_gap"], -0.12)
-        self.assertEqual(atom["value"]["preference_score_gap"], 0.3)
+        self.assertEqual(by_id["ts.regime.0"]["value"]["preference_score_gap"], 0.3)
 
     def test_thompson_context_feature_names_used_when_available(self):
         kwargs = _thompson_kwargs()
@@ -449,14 +463,14 @@ class TestBuilders(unittest.TestCase):
         kwargs["regimes"][0]["pref_favor_leader"] = [(1, 0.3)]
         named = ir.build_thompson_ir(
             "DS", "e1", context_feature_names=["Pressure", "Accelerometer1RMS"], **kwargs)
-        txt = next(a for a in named["evidence"] if a["id"] == "ts.regime.0")["text"]
+        txt = next(a for a in named["evidence"] if a["id"] == "ts.regime.0.detail")["text"]
         # Name is used verbatim — never lower-cased by a blanket .capitalize().
-        self.assertIn("Accelerometer1RMS raising its estimated expected reward the most", txt)
+        self.assertIn("Accelerometer1RMS raised A's estimated expected reward the most", txt)
         self.assertNotIn("context feature 1", txt)
         # Out-of-range indices fall back to the numeric form.
         short = ir.build_thompson_ir("DS", "e1", context_feature_names=["Pressure"], **kwargs)
         self.assertIn("context feature 1", next(
-            a for a in short["evidence"] if a["id"] == "ts.regime.0")["text"])
+            a for a in short["evidence"] if a["id"] == "ts.regime.0.detail")["text"])
 
     def test_thompson_family_sweep_and_single_channel_caveat(self):
         kwargs = _thompson_kwargs()
@@ -472,6 +486,25 @@ class TestBuilders(unittest.TestCase):
         kwargs["final_ranking"] = [("NN_1", 1.5), ("LOF_2", 1.2), ("NN_3", 0.9)]
         mixed = ir.build_thompson_ir("DS", "e1", **kwargs)
         self.assertNotIn("ts.output.family", {a["id"] for a in mixed["evidence"]})
+
+    def test_tsr_summary_lists_leaders_only_when_one_leads_several_streaks(self):
+        """The list is an aggregate only when a detector holds more than one
+        streak. Where every detector holds exactly one, it repeats that
+        detector's own streak sentence, and narrated together the two collapse
+        into a single sentence carrying the whole walk."""
+        kwargs = _thompson_ranking_kwargs()
+        # B leads two of the three streaks, so its 25-window total is a fact no
+        # streak sentence states.
+        kwargs["regimes"] = kwargs["regimes"] + [
+            {"index": 2, "start": 40, "end": 49, "duration": 10,
+             "leader": "B", "runner_up": "A",
+             "top_channels": [(1, 0.4)], "gap_channels": [(1, 0.2)],
+             "score": 0.5, "runner_score": 0.4}]
+        doc = ir.build_thompson_ranking_ir("DS", "e1", **kwargs)
+        text = next(a["text"] for a in doc["evidence"]
+                    if a["id"] == "tsr.regimes.summary")
+        self.assertIn("B led 2 streaks, spanning 25 windows", text)
+        self.assertIn("A led 1 streak, spanning 15 windows", text)
 
     def test_thompson_ranking(self):
         doc = ir.build_thompson_ranking_ir("DS", "e1", n_context_features=4,
@@ -527,19 +560,21 @@ class TestBuilders(unittest.TestCase):
             "A was selected in 22 of the 40 windows, against 12 for B.")
         self.assertEqual(by_id["tsr.support"]["value"]["runner_up"], "B")
 
-        # Each leader's streak count AND the windows it held: four short streaks
-        # are not more of the run than one long one, so the count alone misleads.
-        # The prose says "streak" where the sibling stage says "regime" — the
-        # atom ids stay `tsr.regime.N` either way.
+        # Two streaks, two leaders: each leader's count and span is exactly what
+        # its own streak sentence says, so the list is left out. The prose says
+        # "streak" where the sibling stage says "regime" — the atom ids stay
+        # `tsr.regime.N` either way.
         self.assertEqual(
             by_id["tsr.regimes.summary"]["text"],
-            "Leadership on this score changed hands over the run: it splits "
-            "into 2 streaks led by 2 different detectors: A led 1 streak, "
-            "spanning 15 windows and B led 1 streak, spanning 15 windows. "
+            "Leadership on this score changed hands over the run, splitting "
+            "into 2 streaks led by 2 different detectors. "
             "The first 10 windows are left out, because all detectors start "
             "with score zero.")
+        # Suppressed from the prose, still grounded for the verifier.
         self.assertEqual(by_id["tsr.regimes.summary"]["value"]["windows_led"],
                          {"A": 15, "B": 15})
+        self.assertEqual(by_id["tsr.regimes.summary"]["value"]["regimes_led"],
+                         {"A": 1, "B": 1})
         # No runner-up in the regime sentence. Coverage is conjunctive, the
         # narrator drops that clause, and the atom then passed only when the
         # runner-up was named elsewhere by luck — so a run's faithfulness hung

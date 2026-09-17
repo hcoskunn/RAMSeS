@@ -449,140 +449,121 @@ def rank_gap_decomposition(mean_a: np.ndarray, mean_b: np.ndarray,
             - aggregate_squared_per_context_feature(mean_b, n_context_features))
 
 
-def detect_regime_shifts(
+def window_leaders(
     estimated_expected_rewards_history: Dict[str, List[float]],
-    smoothing_window: int = 5,
-    min_regime_length: int = 3,
-) -> Tuple[List[Dict], List[str]]:
+) -> Tuple[List[Optional[str]], List[str]]:
     """
-    Detect sustained changes in the dominant model from expected-reward history.
+    Per window, the detector holding the highest estimated expected reward.
 
-    A regime is a sustained period where one model holds the highest estimated
-    expected reward.
-    A regime shift is recorded when the new dominant model persists for at least
-    min_regime_length consecutive windows. Shorter changes are classified as blips.
-
-    Parameters
-    ----------
-    estimated_expected_rewards_history : Dict[str, List[float]]
-        Per-model estimated expected reward sequences. NaN values (from skipped windows)
-        are handled.
-    smoothing_window : int, default 5
-        Width of rolling mean used to suppress per-window noise (1 = no smoothing).
-    min_regime_length : int, default 3
-        Minimum consecutive windows a model must dominate to constitute a true regime.
-
-    Returns
-    -------
-    regime_shifts : List[Dict]
-        Each dict has keys: window, from_model, to_model, reward_delta, regime_length.
-        reward_delta is smoothed[to_model] - smoothed[from_model] at the shift window.
-        regime_length is the duration (windows) of the OLD regime.
-    blip_windows : List[str]
-        Human-readable labels for transient dominance changes below min_regime_length.
+    The leader is undefined, and reported as None, whenever the maximum is tied
+    between two or more detectors or every value is NaN. Both mean the same
+    thing: nothing in the beliefs picks a detector out, and np.argmax would
+    otherwise resolve the tie to whichever detector happens to sit first in the
+    model list. Every window before the first posterior update is such a tie,
+    since every mean starts at zero.
     """
     model_list = list(estimated_expected_rewards_history.keys())
     if not model_list:
         return [], []
-
     T = len(estimated_expected_rewards_history[model_list[0]])
     if T == 0:
-        return [], []
+        return [], model_list
 
-    reward_matrix = np.array([estimated_expected_rewards_history[m] for m in model_list], dtype=float)
-
-    # Rolling mean smoothing per model; replace NaN with 0 for convolution stability
-    nan_mask = np.isnan(reward_matrix)
-    safe_matrix = np.where(nan_mask, 0.0, reward_matrix)
-    if smoothing_window > 1:
-        kernel = np.ones(smoothing_window) / smoothing_window
-        smoothed = np.array([np.convolve(safe_matrix[k], kernel, 'same') for k in range(len(model_list))])
-    else:
-        smoothed = safe_matrix.copy()
-
-    # Dominant model per window (None where all models have NaN)
+    matrix = np.array([estimated_expected_rewards_history[m] for m in model_list],
+                      dtype=float)
+    nan_mask = np.isnan(matrix)
+    safe = np.where(nan_mask, -np.inf, matrix)
     all_nan = np.all(nan_mask, axis=0)
-    dominant = [
-        None if all_nan[t] else model_list[int(np.argmax(smoothed[:, t]))]
-        for t in range(T)
-    ]
-
-    # Run-length encode the non-None dominant sequence into segments
-    segments = []
-    i = 0
-    while i < T:
-        if dominant[i] is None:
-            i += 1
-            continue
-        j = i + 1
-        while j < T and dominant[j] == dominant[i]:
-            j += 1
-        segments.append((dominant[i], i, j - i))
-        i = j
-
-    if len(segments) <= 1:
-        return [], []
-
-    # Walk segments: sustained change → regime shift; short change → blip
-    regime_shifts = []
-    blip_windows = []
-    prev_model = segments[0][0]
-    prev_start = segments[0][1]
-
-    for model, start, length in segments[1:]:
-        if model == prev_model:
-            # Continuation of current regime after a blip sequence
-            continue
-        if length >= min_regime_length:
-            k_new = model_list.index(model)
-            k_old = model_list.index(prev_model)
-            regime_shifts.append({
-                'window': start,
-                'from_model': prev_model,
-                'to_model': model,
-                'reward_delta': float(smoothed[k_new, start] - smoothed[k_old, start]),
-                'regime_length': start - prev_start,
-            })
-            prev_model = model
-            prev_start = start
-        else:
-            for t in range(start, start + length):
-                blip_windows.append(f"window {t}: {prev_model} -> {model} (blip)")
-
-    return regime_shifts, blip_windows
+    top = safe.max(axis=0)
+    tied = (safe == top).sum(axis=0) >= 2
+    return [None if (all_nan[t] or tied[t]) else model_list[int(np.argmax(safe[:, t]))]
+            for t in range(T)], model_list
 
 
-def reconstruct_regime_segments(
-    regime_shifts: List[Dict],
-    T: int,
-    fallback_model: str = 'N/A',
-) -> List[Tuple[int, int, str, int]]:
+def detect_regimes(
+    estimated_expected_rewards_history: Dict[str, List[float]],
+    min_regime_length: int = 3,
+) -> Tuple[List[Dict], List[Tuple[int, int]]]:
     """
-    Rebuild contiguous regime segments from the list of regime-shift events.
+    Segment the run into regimes of sustained leadership on estimated expected reward.
 
-    Parameters
-    ----------
-    regime_shifts : List[Dict]
-        Output of detect_regime_shifts(); each dict has 'window', 'from_model',
-        'to_model'.
-    T : int
-        Total number of windows.
-    fallback_model : str
-        Model name to use for the single segment when there are no shifts.
+    One threshold governs both ends. A regime opens where a detector holds the
+    highest estimated expected reward for `min_regime_length` consecutive
+    windows; it tolerates gaps shorter than that; and it closes at the last
+    window that detector led, once it has failed to lead for
+    `min_regime_length` consecutive windows. Windows belonging to no regime are
+    returned separately as contested: there, the lead changed hands without
+    anyone holding it long enough to qualify.
+
+    The rule is symmetric on purpose. Requiring a challenger to sustain the lead
+    while asking nothing of the incumbent let a regime keep its name through
+    stretches its leader did not lead — on SKAB/0, through 34 consecutive
+    windows. Bounding the gap at `min_regime_length` caps that by construction.
 
     Returns
     -------
-    List[Tuple[int, int, str, int]]
-        One tuple per regime: (start, end_inclusive, dominant_model, duration).
+    regimes : List[Dict]
+        One dict per regime with keys: index, start, end (inclusive), duration,
+        leader, share. `share` is the fraction of the regime's own windows in
+        which the leader actually held the highest estimated expected reward.
+    contested : List[Tuple[int, int]]
+        Inclusive spans of windows in no regime, excluding windows whose leader
+        is undefined.
     """
-    if T <= 0:
-        return []
-    if regime_shifts:
-        starts = [0] + [s['window'] for s in regime_shifts]
-        ends = [s['window'] for s in regime_shifts] + [T]
-        models_seq = [regime_shifts[0]['from_model']] + [s['to_model'] for s in regime_shifts]
-        return [(rs, re - 1, rm, re - rs) for rm, rs, re in zip(models_seq, starts, ends)]
-    return [(0, T - 1, fallback_model, T)]
+    leaders, _ = window_leaders(estimated_expected_rewards_history)
+    T = len(leaders)
+    if T == 0:
+        return [], []
+
+    regimes: List[Dict] = []
+    i = 0
+    while i < T:
+        model = leaders[i]
+        if model is None:
+            i += 1
+            continue
+        j = i
+        while j < T and leaders[j] == model:
+            j += 1
+        if j - i < min_regime_length:
+            i = j
+            continue
+        start, last, gap, t = i, j - 1, 0, j
+        while t < T:
+            if leaders[t] == model:
+                last, gap = t, 0
+            else:
+                gap += 1
+                if gap >= min_regime_length:
+                    break
+            t += 1
+        held = sum(1 for w in range(start, last + 1) if leaders[w] == model)
+        regimes.append({
+            'index': len(regimes),
+            'start': start,
+            'end': last,
+            'duration': last - start + 1,
+            'leader': model,
+            'share': held / (last - start + 1),
+        })
+        i = last + 1
+
+    covered = np.zeros(T, dtype=bool)
+    for r in regimes:
+        covered[r['start']:r['end'] + 1] = True
+    contested: List[Tuple[int, int]] = []
+    span_start = None
+    for t in range(T):
+        # A window with no defined leader is not contested; nothing was competing.
+        loose = not covered[t] and leaders[t] is not None
+        if loose and span_start is None:
+            span_start = t
+        elif not loose and span_start is not None:
+            contested.append((span_start, t - 1))
+            span_start = None
+    if span_start is not None:
+        contested.append((span_start, T - 1))
+    return regimes, contested
 
 
 def leadership_regimes(
@@ -592,10 +573,10 @@ def leadership_regimes(
     """
     Segment the run by whichever detector leads on the ranking score ||mu||^2.
 
-    Deliberately simpler than detect_regime_shifts(), which smooths expected
-    rewards and imposes a minimum length: here a segment is just a maximal run of
-    consecutive windows with the same argmax_k ||mu_k||^2 — no smoothing, no
-    minimum length. ||mu||^2 leadership is far stickier than expected-reward
+    Deliberately simpler than detect_regimes(), which imposes a minimum length at
+    both ends: here a segment is just a maximal run of consecutive windows with
+    the same argmax_k ||mu_k||^2, with no minimum length and no contested
+    stretches. ||mu||^2 leadership is far stickier than expected-reward
     leadership (it only moves in the windows where that arm was selected), so
     plain run-length encoding already yields a handful of segments rather than
     one per handful of windows. Because they claim nothing about the environment
@@ -953,7 +934,7 @@ def plot_history(history: List[Dict[str, np.ndarray]], models: Dict[str, Any],
 
 def plot_estimated_expected_rewards(
     estimated_expected_rewards_history: Dict[str, List[float]],
-    regime_shifts: List[Dict],
+    regimes: List[Dict],
     model_names: List[str],
     dataset: str,
     entity: str,
@@ -965,14 +946,16 @@ def plot_estimated_expected_rewards(
 
     Regime regions are shaded by dominant model, regime boundaries are marked
     with dashed vertical lines, and every regime is labelled at its centre
-    (vertically) with the model that dominates it.
+    (vertically) with the model that dominates it. Contested windows belong to no
+    regime and are left unshaded.
 
     smooth : bool
         When False (default) each trajectory is the raw per-window value, saved
         as expected_rewards_{iterations}.png. When True each trajectory is
         Gaussian-smoothed (sigma=2) and saved as
-        expected_rewards_smoothed_{iterations}.png. Both variants are produced
-        per run so the raw and smoothed views can be compared side by side.
+        expected_rewards_smoothed_{iterations}.png. The pipeline draws only the
+        raw variant: regimes are read off it, and smoothed curves put a different
+        detector on top on roughly a quarter of the windows.
     """
     plt.rcParams.update({
         "font.family": "serif",
@@ -1004,9 +987,9 @@ def plot_estimated_expected_rewards(
     # Shade each regime, mark every boundary, and label every regime with the
     # model that dominates it — written vertically, centred in the regime span.
     if T > 0 and model_names:
-        segments = reconstruct_regime_segments(regime_shifts, T, fallback_model=model_names[0])
         y_top = ax.get_ylim()[1]
-        for (start, end, rm, _duration) in segments:
+        for r in regimes:
+            start, end, rm = r['start'], r['end'], r['leader']
             if rm in colour_map:
                 ax.axvspan(start, end + 1, alpha=0.08, color=colour_map[rm], lw=0)
             center = (start + end + 1) / 2.0
@@ -1015,8 +998,8 @@ def plot_estimated_expected_rewards(
             ax.text(center, y_top * 0.97, abbreviate_detector(rm), fontsize=8,
                     ha='center', va='top', rotation=90, fontweight='bold',
                     alpha=0.85)
-        for shift in regime_shifts:
-            ax.axvline(x=shift['window'], color='black', linestyle='--', linewidth=0.9, alpha=0.7)
+            ax.axvline(x=start, color='black', linestyle='--', linewidth=0.9, alpha=0.7)
+            ax.axvline(x=end + 1, color='black', linestyle='--', linewidth=0.9, alpha=0.7)
 
     ax.set_xlabel('Window')
     ax.set_ylabel('Estimated Expected Reward (mu_k^T * c_t)')
@@ -1446,7 +1429,7 @@ _REWARD_YLABEL = r'Contribution to estimated expected reward  $\mu^\top c_t$'
 def _plot_per_regime(
     means: Dict[str, np.ndarray],
     shap_payload: Dict,
-    regime_shifts: List[Dict],
+    regimes: List[Dict],
     dataset: str,
     entity: str,
     iterations: int,
@@ -1479,14 +1462,12 @@ def _plot_per_regime(
         return
     n_context_features = shap_payload["n_channels"]
 
-    fallback = _top_k_models_by_norm(means, 1)[0]
-    segments = reconstruct_regime_segments(regime_shifts, len(contexts),
-                                           fallback_model=fallback)
     every_model = _top_k_models_by_norm(means, len(means)) if all_models else None
     folder = f'{stem}_all_{iterations}' if all_models else f'{stem}_{iterations}'
     directory = _fresh_plot_dir(f'myresults/Thomposon/{dataset}/{entity}/{folder}/')
     mu_hist = shap_payload.get("means_history") or []
-    for i, (start, end, model, _duration) in enumerate(segments):
+    for r in regimes:
+        i, start, end, model = r['index'], r['start'], r['end'], r['leader']
         regime_ctx = contexts[start:end + 1]
         if not regime_ctx:
             continue
@@ -1509,7 +1490,7 @@ def _plot_per_regime(
 def plot_shap_per_regime(
     means: Dict[str, np.ndarray],
     shap_payload: Dict,
-    regime_shifts: List[Dict],
+    regimes: List[Dict],
     dataset: str,
     entity: str,
     iterations: int,
@@ -1529,7 +1510,7 @@ def plot_shap_per_regime(
         under shap_per_regime_all_{iterations}/.
     """
     _plot_per_regime(
-        means, shap_payload, regime_shifts, dataset, entity, iterations,
+        means, shap_payload, regimes, dataset, entity, iterations,
         stem='shap_per_regime',
         per_context_feature_fn=lambda sel, ctx, mu: _avg_per_context_feature_shap_map(
             means, sel, ctx, shap_payload["baseline_context"],
@@ -1542,7 +1523,7 @@ def plot_shap_per_regime(
 def plot_reward_per_regime(
     means: Dict[str, np.ndarray],
     shap_payload: Dict,
-    regime_shifts: List[Dict],
+    regimes: List[Dict],
     dataset: str,
     entity: str,
     iterations: int,
@@ -1559,7 +1540,7 @@ def plot_reward_per_regime(
     so one joiner pairs either set with the same regime sentence.
     """
     _plot_per_regime(
-        means, shap_payload, regime_shifts, dataset, entity, iterations,
+        means, shap_payload, regimes, dataset, entity, iterations,
         stem='reward_per_regime',
         per_context_feature_fn=lambda sel, ctx, mu: _avg_per_context_feature_reward_map(
             means, sel, ctx, shap_payload["n_channels"], means_per_context=mu),
@@ -1679,8 +1660,8 @@ def explain_thompson_sampling(
     l2_norm_history: Dict[str, List[float]],
     pre_estimated_expected_rewards_history: Dict[str, List[float]],
     list_of_chosen_models: List[str],
-    regime_shifts: List[Dict],
-    blip_windows: List[str],
+    regimes: List[Dict],
+    contested: List[Tuple[int, int]],
     selection_states: List[str],
     shap_payload: Optional[Dict],
     dataset: str,
@@ -1691,7 +1672,7 @@ def explain_thompson_sampling(
     Write a structured plain-text explainability report to disk.
 
     Sections: header, per-window table (chosen model, dominant model, top expected
-    reward, selection state), regime summary, shift events, blips, selection state
+    reward, selection state), regime summary, contested stretches, selection state
     summary, SHAP feature attribution (when shap_payload is provided), SHAP preference
     decomposition, and final ranking by ||mu_k||^2.
 
@@ -1724,11 +1705,8 @@ def explain_thompson_sampling(
             dominant_per_window.append('N/A')
             top_reward_per_window.append(None)
 
-    # Reconstruct regime segments from shift events. The no-shift fallback uses the
-    # most frequent dominant model (window 0 is 'N/A' and not a meaningful fallback).
-    _valid_doms = [d for d in dominant_per_window if d != 'N/A']
-    first_dom = max(set(_valid_doms), key=_valid_doms.count) if _valid_doms else 'N/A'
-    regime_segments = reconstruct_regime_segments(regime_shifts, T, fallback_model=first_dom)
+    regime_segments = [(r['start'], r['end'], r['leader'], r['duration'])
+                       for r in regimes]
 
     # Per-regime story blocks: regime-mean estimated expected rewards (from the recorded
     # pre-update beliefs), the leader's SHAP context features on the regime-aggregated
@@ -1829,6 +1807,7 @@ def explain_thompson_sampling(
             regimes_data.append({
                 "index": seg_idx, "start": seg_start, "end": seg_end,
                 "duration": int(seg_dur), "leader": leader,
+                "share": float(regimes[seg_idx].get("share", float('nan'))),
                 "rewards_top": top3, "reward_gap": gap, "runner_up": runner,
                 # The narrated context features: what the leader's estimated expected reward is
                 # made of here. SHAP's split rides along for the deviation
@@ -1872,27 +1851,26 @@ def explain_thompson_sampling(
             f.write(f"{t:>8}  {chosen:>12}  {dominant:>12}  {top_str:>14}  {state:>22}\n")
 
         f.write("\n--- Regime Summary ---\n")
-        f.write(f"{'Start':>8}  {'End':>8}  {'Model':>12}  {'Duration':>10}\n")
-        f.write("-" * 44 + "\n")
-        for rs, re, rm, dur in regime_segments:
-            f.write(f"{rs:>8}  {re:>8}  {rm:>12}  {dur:>10} windows\n")
+        f.write(f"{'Start':>8}  {'End':>8}  {'Model':>12}  {'Duration':>10}  {'Led':>6}\n")
+        f.write("-" * 52 + "\n")
+        for r in regimes:
+            f.write(f"{r['start']:>8}  {r['end']:>8}  {r['leader']:>12}  "
+                    f"{r['duration']:>10} windows  {r['share'] * 100:>5.0f}%\n")
+        f.write("('Led' is the share of the regime's own windows in which the leader held\n"
+                " the highest estimated expected reward.)\n")
 
-        f.write("\n--- Regime Shift Events ---\n")
-        if regime_shifts:
-            f.write(f"{'Window':>8}  {'From':>12}  {'To':>12}  {'Delta':>10}  {'Old Regime Len':>16}\n")
-            f.write("-" * 64 + "\n")
-            for s in regime_shifts:
-                f.write(f"{s['window']:>8}  {s['from_model']:>12}  {s['to_model']:>12}  "
-                        f"{s['reward_delta']:>10.4f}  {s['regime_length']:>16} windows\n")
+        f.write("\n--- Contested Stretches ---\n")
+        if contested:
+            total = sum(b - a + 1 for a, b in contested)
+            for a, b in contested:
+                n = b - a + 1
+                where = f"window {a}" if n == 1 else f"windows {a} to {b}"
+                f.write(f"  {where} ({n} window{'' if n == 1 else 's'})\n")
+            f.write(f"  {total} of {T} windows ({total / T:.0%}) belong to no regime: the "
+                    f"lead changed hands without\n  any detector holding it for three "
+                    f"consecutive windows.\n")
         else:
-            f.write("No regime shifts detected.\n")
-
-        f.write("\n--- Brief Blips ---\n")
-        if blip_windows:
-            for b in blip_windows:
-                f.write(f"  {b}\n")
-        else:
-            f.write("No blips detected.\n")
+            f.write("None: every window belongs to a regime.\n")
 
         f.write("\n--- Per-Regime Estimated Expected Rewards & Context-Feature Attribution ---\n")
         f.write("(Mean E[reward] over each regime's windows from the recorded pre-update\n")
@@ -2028,8 +2006,7 @@ def explain_thompson_sampling(
             dataset, entity, n_windows=T,
             final_ranking=ranking,
             regimes=regimes_data,
-            shifts=regime_shifts,
-            blip_count=len(blip_windows),
+            contested=[(int(a), int(b)) for a, b in contested],
             state_fractions={s: state_counts[s] / state_total for s in state_counts},
             # The tallies as well as the shares: the IR states both, and a share
             # rounded back to a window count can be one out on a long run.
@@ -2775,23 +2752,21 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
         # into its value before being compared against the ones that were not
         # evaluated — a self-selection bump of up to r/2 on a detector's first
         # pick, largest exactly where the early regimes form.
-        regime_shifts, blip_windows = detect_regime_shifts(pre_exp_rewards_hist)
+        regimes, contested = detect_regimes(pre_exp_rewards_hist)
         # Written once for all three stages: the reward, SHAP and ranking frames
         # are all per-model per-context-feature vectors over the same windows, and the
         # WebUI draws whichever one is asked for rather than the pipeline
         # writing every one of them.
         save_per_window_context_features(means, shap_payload, dataset, entity, iterations)
-        plot_estimated_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
-                              dataset, entity, iterations, smooth=False)
-        plot_estimated_expected_rewards(exp_rewards_hist, regime_shifts, list(trained_models.keys()),
-                              dataset, entity, iterations, smooth=True)
+        plot_estimated_expected_rewards(exp_rewards_hist, regimes, list(trained_models.keys()),
+                              dataset, entity, iterations)
         plot_selection_states(selection_states, dataset, entity, iterations)
         plot_shap_per_model(means, shap_payload, dataset, entity, iterations)
         # Each SHAP comparison plot is produced in both a top-k and an all-models variant.
         plot_shap_comparison(means, shap_payload, dataset, entity, iterations)
         plot_shap_comparison(means, shap_payload, dataset, entity, iterations, all_models=True)
-        plot_shap_per_regime(means, shap_payload, regime_shifts, dataset, entity, iterations)
-        plot_shap_per_regime(means, shap_payload, regime_shifts, dataset, entity, iterations,
+        plot_shap_per_regime(means, shap_payload, regimes, dataset, entity, iterations)
+        plot_shap_per_regime(means, shap_payload, regimes, dataset, entity, iterations,
                              all_models=True)
         # Kept, but demoted: mean|SHAP| measures how much a context feature's influence
         # VARIES across windows, not how much it contributes on average. The
@@ -2803,16 +2778,16 @@ def run_linear_thompson_sampling(test_data, trained_models, model_names, dataset
         # Full parity with the SHAP sets above so the two can be read frame for
         # frame. These are the ones whose bars sum to the prediction; the SHAP
         # ones answer the narrower question of deviation from a typical window.
-        plot_reward_per_regime(means, shap_payload, regime_shifts, dataset, entity,
+        plot_reward_per_regime(means, shap_payload, regimes, dataset, entity,
                                iterations)
-        plot_reward_per_regime(means, shap_payload, regime_shifts, dataset, entity,
+        plot_reward_per_regime(means, shap_payload, regimes, dataset, entity,
                                iterations, all_models=True)
         plot_reward_average_all(means, shap_payload, dataset, entity, iterations)
         plot_reward_average_all(means, shap_payload, dataset, entity, iterations,
                                 all_models=False)
         explain_thompson_sampling(means, exp_rewards_hist, l2_norm_hist, pre_exp_rewards_hist,
                                   list_of_chosen_models,
-                                  regime_shifts, blip_windows, selection_states,
+                                  regimes, contested, selection_states,
                                   shap_payload,
                                   dataset, entity, iterations)
 

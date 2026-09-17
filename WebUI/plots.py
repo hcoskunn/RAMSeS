@@ -190,19 +190,14 @@ def _thompson(ds, ent):
     it = _iteration_tag(d)
     headline, gallery = [], []
     if it:
-        # Smoothed first: it is what regime detection actually reads, so it is
-        # the one the regime prose describes. The raw signal is the same
-        # quantity un-smoothed, which makes it a toggle rather than a figure of
-        # its own.
-        rewards = _variants(d, [f"expected_rewards_smoothed_{it}.png",
-                                f"expected_rewards_{it}.png"],
-                            ["Smoothed", "Raw"])
-        if rewards:
-            headline.append({
-                "title": "Estimated expected rewards over the run",
-                "caption": "Smoothed is what regime detection reads; the raw "
-                           "signal is the same quantity unsmoothed.",
-                "variants": rewards, "default": 0})
+        # The smoothed variant is not offered: regimes are read off this exact
+        # signal, and on a quarter of the windows a smoothed curve puts a
+        # different detector on top than the shading drawn over it.
+        for path in _ls(d, f"expected_rewards_{it}.png"):
+            headline.append(_fig(
+                path, "Estimated expected rewards over the run",
+                "Shaded spans are regimes, unshaded stretches are windows where "
+                "leadership was contested."))
         for pattern, title, caption in (
             (f"selection_states_{it}.png", "Selection states",
              "Exploitation, informed exploration and forced random picks over the run."),
