@@ -591,7 +591,7 @@ function appendix(payload) {
     el("div", { class: "stack" },
       table,
       el("p", { class: "small muted", text:
-        `Explanations read from myresults/explanations_nl/${payload.dataset}/${payload.entity}/` +
+        `Explanations read from explanations_nl/${payload.dataset}/${payload.entity}/` +
         (payload.iteration !== null && payload.iteration !== undefined
           ? ` (iteration ${payload.iteration})` : "") }),
       el("p", {}, el("a", { href: `/api/explanations/${dataset}/${entity}/download?stage=global`,
