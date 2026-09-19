@@ -16,6 +16,7 @@ from Utils.pipeline_spec import (DEFAULT_DECISION_METRICS, combine_metrics,
                                  metrics_required)
 from Explainability import ir
 from Model_Selection.Sensitivity_robustness import exclusive_win_surrogates as ews
+from Utils.paths import results_dir
 
 
 def intersperse_borderline_normal_points(data, labels, factor, min_scale=0.95, max_scale=1.05,
@@ -232,7 +233,7 @@ def run_off_by_threshold(test_data, trained_models, model_names, dataset, entity
 
     # Format the date and time as a string
     date_time_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    directory = f'myresults/robustness/off_by/{dataset}/{entity}/'
+    directory = results_dir("robustness", "off_by", dataset, entity)
     filename = f'{dataset}_{entity}_Misclassified Anomalies_{date_time_string}.png'
     full_path = os.path.join(directory, filename)
 
@@ -294,7 +295,7 @@ def plot_data_with_injected_points(original_data, augmented_data, injected_norma
 
     # Format the date and time as a string
     date_time_string = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    directory = f'myresults/robustness/off_by/{dataset}/{entity}/'
+    directory = results_dir("robustness", "off_by", dataset, entity)
     filename = f'Data_vs_DataWithAnomalies_{date_time_string}_.png'
     full_path = os.path.join(directory, filename)
 
@@ -370,7 +371,7 @@ def train_offby_point_surrogates(table, winner, max_depth: int = 3,
 # ── Plots ────────────────────────────────────────────────────────────────────
 
 def _offby_explain_dir(dataset, entity) -> str:
-    directory = f"myresults/robustness/off_by/{dataset}/{entity}/"
+    directory = results_dir("robustness", "off_by", dataset, entity)
     os.makedirs(directory, exist_ok=True)
     return directory
 
@@ -397,7 +398,8 @@ def explain_off_by_threshold(point_records, adjusted_y_pred_dict, true_labels, r
     """
     Off-by-threshold explainability orchestrator (explain-only). Builds the per-point
     table from the production run, picks the fitness winner, fits per-competitor exclusive-win
-    surrogates, writes a report + two plots under myresults/robustness/off_by/{ds}/{ent}/,
+    surrogates, writes a report + two plots under the configured results root, in
+    robustness/off_by/{ds}/{ent}/,
     and returns the structures. explain=False → None; infeasible table → None.
 
     The body is `exclusive_win_surrogates.explain_exclusive_win_stage`, shared

@@ -15,6 +15,8 @@ import unittest
 
 import numpy as np
 import matplotlib
+import pathlib
+from Utils import paths as ramses_paths
 matplotlib.use("Agg")
 
 
@@ -298,6 +300,7 @@ class TestOrchestrator(unittest.TestCase):
 
     def _run(self, tmp, metrics=("f1", "pr_auc"), vus=None):
         os.chdir(tmp)
+        ramses_paths._RESULTS_ROOT = pathlib.Path(tmp) / "results"
         pt = mc.build_trial_matrices(_trials(_CONTESTED, _NAMES, vus), 5, metrics)
         return mc.explain_monte_carlo(pt, _NAMES, "DS", "e1", explain=True,
                                       metrics=metrics, noise_level=0.1)
@@ -313,7 +316,7 @@ class TestOrchestrator(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             try:
                 self._run(tmp)
-                directory = os.path.join(tmp, "myresults", "robustness",
+                directory = os.path.join(tmp, "results", "robustness",
                                          "MonteCarlo", "DS", "e1")
                 names = set(os.listdir(directory))
                 self.assertIn("DS_e1_MonteCarlo_trial_ranks.png", names)
@@ -321,6 +324,7 @@ class TestOrchestrator(unittest.TestCase):
                 self.assertIn("DS_e1_MonteCarlo_explainability.txt", names)
             finally:
                 os.chdir(cwd)
+                ramses_paths.reset_cache()
 
     def test_every_fitness_component_gets_its_own_figure(self):
         cwd = os.getcwd()
@@ -329,11 +333,12 @@ class TestOrchestrator(unittest.TestCase):
                 self._run(tmp, metrics=("f1", "pr_auc", "vus"),
                           vus=np.full((5, 5), 0.5))
                 names = set(os.listdir(os.path.join(
-                    tmp, "myresults", "robustness", "MonteCarlo", "DS", "e1")))
+                    tmp, "results", "robustness", "MonteCarlo", "DS", "e1")))
                 for tag in ("F1", "PRAUC", "VUS"):
                     self.assertIn(f"DS_e1_MonteCarlo_trial_{tag}.png", names)
             finally:
                 os.chdir(cwd)
+                ramses_paths.reset_cache()
 
     def test_a_one_term_fitness_draws_no_component_figure(self):
         """The component figures exist to show which term moved; with one term
@@ -343,11 +348,12 @@ class TestOrchestrator(unittest.TestCase):
             try:
                 self._run(tmp, metrics=("f1",))
                 names = set(os.listdir(os.path.join(
-                    tmp, "myresults", "robustness", "MonteCarlo", "DS", "e1")))
+                    tmp, "results", "robustness", "MonteCarlo", "DS", "e1")))
                 self.assertIn("DS_e1_MonteCarlo_trial_fitness.png", names)
                 self.assertNotIn("DS_e1_MonteCarlo_trial_F1.png", names)
             finally:
                 os.chdir(cwd)
+                ramses_paths.reset_cache()
 
     def test_the_report_carries_every_trials_ranking(self):
         cwd = os.getcwd()
@@ -361,6 +367,7 @@ class TestOrchestrator(unittest.TestCase):
                 self.assertIn("Leave-one-trial-out", text)
             finally:
                 os.chdir(cwd)
+                ramses_paths.reset_cache()
 
     def test_no_sweep_is_run(self):
         """The layer reads the trials the ranking averages; a second experiment
@@ -371,7 +378,7 @@ class TestOrchestrator(unittest.TestCase):
 
 
 def _read_report(tmp):
-    directory = os.path.join(tmp, "myresults", "robustness", "MonteCarlo", "DS", "e1")
+    directory = os.path.join(tmp, "results", "robustness", "MonteCarlo", "DS", "e1")
     name = [f for f in os.listdir(directory) if f.endswith("_explainability.txt")][0]
     with open(os.path.join(directory, name)) as f:
         return f.read()

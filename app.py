@@ -64,6 +64,7 @@ from Utils.pipeline_spec import (
 from Utils.pipeline_spec import ALL_STAGES as _SPEC_ALL_STAGES
 from Utils.pipeline_spec import OFFLINE_ITERATION as _SPEC_OFFLINE_ITERATION
 from Utils.utils import get_args_from_cmdline
+from Utils.paths import results_dir
 # from comprehensive_results_writer import write_comprehensive_results
 
 # ------------------------------------------------------------------------------
@@ -893,7 +894,7 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
     # -----------------------
     # Persist a concise report
     # -----------------------
-    directory = f"myresults/robust_aggregated/{dataset}/{entity}/"
+    directory = results_dir("robust_aggregated", dataset, entity)
     os.makedirs(directory, exist_ok=True)
     output_file = os.path.join(
         directory, f"robust_aggregated_results_{dataset}_{entity}_{iteration}.txt"
@@ -1136,7 +1137,7 @@ def run_model_selection_algorithms_2(train_data, train_val_data, test_data, data
                      f"(Peak: unavailable on this platform)")
 
     # Persist results
-    directory = f"myresults/robust_aggregated/{dataset}/{entity}/"
+    directory = results_dir("robust_aggregated", dataset, entity)
     os.makedirs(directory, exist_ok=True)
     output_file = os.path.join(
         directory, f"robust_aggregated_results_{dataset}_{entity}_{iteration}.txt"
@@ -1225,7 +1226,7 @@ def save_current_selection(dataset, entity, window_idx, best_ensemble, best_sing
     from pathlib import Path
     
     # Create output directory
-    output_dir = Path(f"results/{dataset}/{entity}")
+    output_dir = Path(results_dir("online", dataset, entity))
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # CSV file for tracking selections over time
@@ -1281,7 +1282,7 @@ def find_num_falses(adjusted_y_pred_ind_current, test_data_copy, dataset, entity
         incorrect = predicted_int != true_values
         misclassified_ensemble.append(int(np.sum(incorrect)))
 
-    directory = f"myresults/robust_aggregated/{dataset}/{entity}/"
+    directory = results_dir("robust_aggregated", dataset, entity)
     os.makedirs(directory, exist_ok=True)
     output_file = os.path.join(
         directory, f"new_robust_aggregated_results_{dataset}_{entity}_{iteration}.txt"
@@ -1387,8 +1388,9 @@ def perform_reoptimization_task(
 def run_app(algorithm_list, algorithm_list_instances):
     args = get_args_from_cmdline()
 
-    # Get dataset and entity from args (command line overrides, or use defaults)
-    dataset = args.get('dataset', 'skab')
+    # Get dataset and entity from args (command line overrides, or use defaults).
+
+    dataset = str(args.get('dataset', 'skab')).lower()
     entity = str(args.get('entity', '3'))
     use_parallel = args.get('parallel', False)
     enable_online_phase = args.get('enable_online', False)  # Online phase OFF by default
@@ -1399,6 +1401,7 @@ def run_app(algorithm_list, algorithm_list_instances):
     explain = args.get('explain', False)  # Explainability OFF by default; --explain enables it
     stages = set(args.get('stages', ALL_STAGES))  # Which stage-6 sub-stages to run
     is_partial = stages != ALL_STAGES  # Strict subset → partial run (stop after selected stages)
+    skip_gan = args.get('skip_gan', False)  # --skip_gan drops the GAN sub-stage, keeping the rest
     anomaly_type = args.get('anomaly_type', DEFAULT_ANOMALY_TYPE)  # Synthetic anomaly injected at stage 4
     anomaly_rate = args.get('anomaly_rate')  # None = the per-type defaults in anomaly_parameters.py
     decision_metric = args.get('decision_metrics', DEFAULT_DECISION_METRICS)  # Fitness the run maximises
@@ -1413,22 +1416,22 @@ def run_app(algorithm_list, algorithm_list_instances):
     data_dir = args['dataset_path']
 
     logger.info("="*80)
-    logger.info(f"🚀 STARTING RAMSeS EXECUTION: dataset={dataset}, entity={entity}, parallel={use_parallel}, online_phase={enable_online_phase}, iteration={iteration}, strategy={strategy}, online_regime={inject_online_regime}, max_windows={max_online_windows}, stages={','.join(sorted(stages))}, detectors={len(detectors_to_load)}/{len(algorithm_list_instances)}")
+    logger.info(f"🚀 STARTING RAMSeS EXECUTION: dataset={dataset}, entity={entity}, parallel={use_parallel}, online_phase={enable_online_phase}, iteration={iteration}, strategy={strategy}, online_regime={inject_online_regime}, max_windows={max_online_windows}, stages={','.join(sorted(stages))}, skip_gan={skip_gan}, detectors={len(detectors_to_load)}/{len(algorithm_list_instances)}")
     logger.info("="*80)
     
     logger.info("📂 STAGE 1/7: Loading Training Data...")
     train_data = load_data(
         dataset=dataset, group='train',
-        entities=entity, downsampling=10,
-        min_length=256, root_dir=data_dir, normalize=True, verbose=False
+        entities=entity, downsampling=args['downsampling'],
+        min_length=args['min_length'], root_dir=data_dir, normalize=True, verbose=False
     )
     logger.info(f"✓ Training data loaded: {len(train_data.entities)} entity(ies)")
     
     logger.info("📂 STAGE 2/7: Loading Test Data...")
     test_data = load_data(
         dataset=dataset, group='test',
-        entities=entity, downsampling=10,
-        min_length=256, root_dir=data_dir, normalize=True, verbose=False
+        entities=entity, downsampling=args['downsampling'],
+        min_length=args['min_length'], root_dir=data_dir, normalize=True, verbose=False
     )
     logger.info(f"✓ Test data loaded: {len(test_data.entities)} entity(ies)")
 
@@ -1484,6 +1487,7 @@ def run_app(algorithm_list, algorithm_list_instances):
         dataset=dataset,
         entity=entity,
         algorithm_list=families_to_train,
+        detectors=detectors_to_load,
         downsampling=args['downsampling'],
         min_length=args['min_length'],
         root_dir=args['dataset_path'],
@@ -1555,7 +1559,7 @@ def run_app(algorithm_list, algorithm_list_instances):
         axes[1].plot(test_data.entities[0].labels.flatten(), color='red')
         axes[1].set_title('Anomaly Scores', fontsize=16)
 
-        out_dir = f"myresults/GA_Ens/{dataset}/{entity}/"
+        out_dir = results_dir("GA_Ens", dataset, entity)
         os.makedirs(out_dir, exist_ok=True)
         # The anomaly type used to be in this name, so switching type accumulated
         # variants in the gallery instead of replacing the previous run's figure.
@@ -1651,7 +1655,7 @@ def run_app(algorithm_list, algorithm_list_instances):
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_2(
                 train_data, train_val_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
                 trained_models=trained_models, model_list=loaded_model_names,
-                test_data_gan=test_data_before, explain=explain,
+                test_data_gan=test_data_before, skip_gan=skip_gan, explain=explain,
                 decision_metric=decision_metric, meta_model=meta_model
             )
         else:
@@ -1661,7 +1665,8 @@ def run_app(algorithm_list, algorithm_list_instances):
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
                 train_data, train_val_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
-                model_list=loaded_model_names, test_data_gan=test_data_before, explain=explain,
+                model_list=loaded_model_names, test_data_gan=test_data_before,
+                skip_gan=skip_gan, explain=explain,
                 stages=stages, decision_metric=decision_metric, meta_model=meta_model
             )
 
@@ -1908,7 +1913,7 @@ def run_app(algorithm_list, algorithm_list_instances):
 
         logger.info("📝 STAGE 7/7: Writing Comprehensive Results...")
         # Write comprehensive results
-        comp_results_dir = f"myresults/comprehensive/{dataset}/{entity}/"
+        comp_results_dir = results_dir("comprehensive", dataset, entity)
         os.makedirs(comp_results_dir, exist_ok=True)
         comp_results_file = os.path.join(
             comp_results_dir, f"comprehensive_results_{dataset}_{entity}_iter{iteration}.txt"
@@ -2179,7 +2184,7 @@ def run_app(algorithm_list, algorithm_list_instances):
             logger.info(f"⏱️  Online Phase Total Time: {online_total_time:.2f}s ({online_total_time/60:.2f} min)")
             
             # Write online phase summary
-            online_summary_file = f"myresults/comprehensive/{dataset}/{entity}/online_phase_timing.txt"
+            online_summary_file = results_dir("comprehensive", dataset, entity) + f"online_phase_timing.txt"
             with open(online_summary_file, 'w') as f:
                 f.write("="*80 + "\n")
                 f.write("RAMSeS Online Phase Timing Summary\n")

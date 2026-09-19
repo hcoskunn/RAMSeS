@@ -10,6 +10,7 @@ from Utils.pipeline_spec import (DEFAULT_DECISION_METRICS, combine_metrics,
 from loguru import logger
 import matplotlib.pyplot as plt
 from Explainability import ir
+from Utils.paths import results_dir
 
 # Keys `summarize_results` adds beside the per-model entries. Everything that
 # walks the summary skips these, so a ranking cannot leak into a loop that
@@ -259,7 +260,7 @@ def plot_monte_carlo_results(results, summary, model_names, dataset, entity):
         plt.tight_layout()
 
         # Save the plot
-        directory = f'myresults/robustness/MonteCarlo/{dataset}/{entity}/'
+        directory = results_dir("robustness", "MonteCarlo", dataset, entity)
         os.makedirs(directory, exist_ok=True)
         filename = f'{dataset}_{entity}_{model_name}_MonteCarloResults.png'
         plt.savefig(os.path.join(directory, filename), dpi=300)
@@ -270,7 +271,7 @@ def plot_monte_carlo_results(results, summary, model_names, dataset, entity):
 def save_summary(summary, dataset, entity, metrics=DEFAULT_DECISION_METRICS,
                  per_trial=None, noise_level=None):
     """Save the summary of Monte Carlo simulation to a file."""
-    directory = f'myresults/robustness/MonteCarlo/{dataset}/{entity}/'
+    directory = results_dir("robustness", "MonteCarlo", dataset, entity)
     os.makedirs(directory, exist_ok=True)
     summary_file = os.path.join(directory, f'{dataset}_{entity}_MonteCarloSummary.txt')
 
@@ -481,7 +482,7 @@ def _mc_explain_rcparams() -> None:
 
 
 def _mc_dir(dataset, entity) -> str:
-    directory = f'myresults/robustness/MonteCarlo/{dataset}/{entity}/'
+    directory = results_dir("robustness", "MonteCarlo", dataset, entity)
     os.makedirs(directory, exist_ok=True)
     return directory
 
@@ -550,7 +551,7 @@ def explain_monte_carlo(per_trial: Dict[str, Any],
     """
     Monte Carlo robustness explainability, read off the trials the ranking
     averages. Writes a report + figures under
-    myresults/robustness/MonteCarlo/{dataset}/{entity}/ and emits the IR.
+    the configured results root, in robustness/MonteCarlo/{dataset}/{entity}/, and emits the IR.
 
     Returns the computed structures when explain=True; None otherwise (and None,
     with a logged note, when there are no usable trials).
