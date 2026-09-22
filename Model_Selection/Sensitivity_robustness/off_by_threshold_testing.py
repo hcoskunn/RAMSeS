@@ -398,8 +398,7 @@ def explain_off_by_threshold(point_records, adjusted_y_pred_dict, true_labels, r
     """
     Off-by-threshold explainability orchestrator (explain-only). Builds the per-point
     table from the production run, picks the fitness winner, fits per-competitor exclusive-win
-    surrogates, writes a report + two plots under the configured results root, in
-    robustness/off_by/{ds}/{ent}/,
+    surrogates, writes a report + two plots under results/robustness/off_by/{ds}/{ent}/,
     and returns the structures. explain=False → None; infeasible table → None.
 
     The body is `exclusive_win_surrogates.explain_exclusive_win_stage`, shared

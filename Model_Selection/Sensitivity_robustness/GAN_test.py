@@ -580,8 +580,7 @@ def explain_gan_robustness(point_records, adjusted_y_pred_dict, true_labels, ran
     """
     GAN robustness explainability orchestrator (explain-only). Builds the per-point
     table from the production run, picks the fitness winner, fits per-competitor exclusive-win
-    surrogates, writes a report + two plots under the configured results root, in
-    robustness/GAN/{ds}/{ent}/,
+    surrogates, writes a report + two plots under results/robustness/GAN/{ds}/{ent}/,
     and returns the structures. explain=False → None; infeasible table → None.
 
     The body is `exclusive_win_surrogates.explain_exclusive_win_stage`, shared
