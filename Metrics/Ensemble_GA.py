@@ -1698,11 +1698,6 @@ def explain_ga_selection(
     three plots and a structured text report under
         results/GA_Ens/{dataset}/{entity}/
 
-    The fold matrices and `evaluate_fitness_full` are what the excluded-detector
-    layer needs: add-one-in wants the meta-model each evaluation trained, and the
-    redundancy and noise-floor measures read the folds directly. Without them
-    that layer is skipped and the rest is unchanged.
-
     Returns a dict with the computed structures when explain=True; None otherwise.
     """
     if not explain:
