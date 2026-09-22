@@ -1026,13 +1026,13 @@ _GA_SEL_BUCKET_CODES = {"both": "HH", "utility": "HL", "stability": "LH",
                         "marginal": "LL"}
 
 
-def exclusion_reason(delta: Any, delta_test: Any, redundancy: Any,
-                     eps: Any, eps_test: Any, r_hi: Any) -> str:
+def exclusion_reason(delta: Any, redundancy: Any, eps: Any, r_hi: Any) -> str:
     """Closed enum for why a high-utility, high-stability detector was left out.
 
-    A positive delta means the search never evaluated that combination — the
-    winner is the argmax over everything it did — so the two delta-positive
-    codes carry that fact implicitly.
+    The search and the final decision read the same split, so a delta is one
+    measurement, not two to reconcile. A positive delta therefore says only
+    that the search never evaluated that combination — the winner is the
+    argmax over everything it did.
     """
     if _is_nan(delta):
         return "not_available"
@@ -1043,14 +1043,11 @@ def exclusion_reason(delta: Any, delta_test: Any, redundancy: Any,
         if not _is_nan(redundancy) and not _is_nan(r_hi) and redundancy >= r_hi:
             return "redundant"
         return "neutral"
-    if _is_nan(delta_test):
-        return "fold_only_unverified"
-    return "fold_only" if delta_test <= (0.0 if _is_nan(eps_test) else float(eps_test)) \
-        else "outperformed"
+    return "unevaluated"
 
 
-EXCLUSION_REASONS = ("rejected", "redundant", "neutral", "fold_only",
-                     "fold_only_unverified", "outperformed", "not_available")
+EXCLUSION_REASONS = ("rejected", "redundant", "neutral", "unevaluated",
+                     "not_available")
 
 
 def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> Dict[str, Any]:
@@ -1064,7 +1061,6 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
     redundancy: Dict[str, Dict[str, Any]] = result.get("redundancy", {}) or {}
     noise: Dict[str, float] = result.get("noise", {}) or {}
     eps = noise.get("eps", float("nan"))
-    eps_test = noise.get("eps_test", float("nan"))
     r_values = [v.get("redundancy", float("nan")) for v in redundancy.values()]
     r_finite = [r for r in r_values if not _is_nan(r)]
     # The entity's own p90, floored at 0.95: detector scores correlate highly as
@@ -1215,13 +1211,12 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
             aoi = add_one_in.get(d, {})
             red = redundancy.get(d, {})
             delta = aoi.get("delta", float("nan"))
-            delta_test = aoi.get("delta_test", float("nan"))
             r = red.get("redundancy", float("nan"))
             partner = red.get("partner")
-            reason = exclusion_reason(delta, delta_test, r, eps, eps_test, r_hi)
+            reason = exclusion_reason(delta, r, eps, r_hi)
             if reason == "redundant" and not partner:
                 reason = "neutral"
-            dv, dt = _fmt(delta, 4), _fmt(delta_test, 4)
+            dv = _fmt(delta, 4)
             texts = {
                 "rejected":
                     f"Adding {d} to the chosen ensemble lowered fitness by {dv}, so "
@@ -1233,18 +1228,10 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
                 "neutral":
                     f"Adding {d} to the chosen ensemble moved fitness by only {dv}, so "
                     f"despite high utility and high stability it was left out.",
-                "fold_only":
-                    f"Adding {d} raised fitness by {dv} on the validation fold the "
-                    f"search optimised but moved the test-split fitness by {dt}, so "
-                    f"leaving it out avoided overfitting the ensemble to that fold.",
-                "fold_only_unverified":
-                    f"Adding {d} raised fitness by {dv} on the validation fold the "
-                    f"search optimised; the test split could not be scored, so the "
-                    f"gain is unconfirmed.",
-                "outperformed":
-                    f"Adding {d} raised fitness by {dv} on the validation fold and by "
-                    f"{dt} on the test split; the genetic algorithm never evaluated "
-                    f"the ensemble with {d} added.",
+                "unevaluated":
+                    f"Adding {d} to the chosen ensemble raised fitness by {dv}; the "
+                    f"genetic algorithm never evaluated that combination, so the "
+                    f"winner is the best of what it did try, not of every subset.",
                 "not_available":
                     f"{d} had high utility and high stability, but the fitness of the "
                     f"ensemble with it added could not be computed.",
@@ -1253,7 +1240,6 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
                 eid, "excluded_detector", d,
                 dict(_num(d), u_high=True, s_high=True, archetype="HH",
                      reason=reason, delta_add=_val(delta, 4),
-                     delta_add_test=_val(delta_test, 4),
                      redundancy=_val(r, 3), redundant_with=partner,
                      tried_exact=aoi.get("tried_exact")),
                 texts[reason], order=order))

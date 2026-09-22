@@ -358,13 +358,6 @@ def write_comprehensive_results(output_file, dataset, entity, iteration, results
         f.write(f"    PR-AUC      : {_fmt_metric(ga_results.get('pr_auc'))}\n")
         f.write(f"    VUS         : {_fmt_metric(ga_results.get('vus'))}\n")
         f.write(f"    Fitness     : {_fmt_metric(ga_results.get('fitness'))}\n")
-        ga_validation = ga_results.get('validation') or {}
-        if ga_validation:
-            f.write("  On validation data:\n")
-            f.write(f"    F1 Score    : {_fmt_metric(ga_validation.get('f1'))}\n")
-            f.write(f"    PR-AUC      : {_fmt_metric(ga_validation.get('pr_auc'))}\n")
-            f.write(f"    VUS         : {_fmt_metric(ga_validation.get('vus'))}\n")
-            f.write(f"    Fitness     : {_fmt_metric(ga_validation.get('fitness'))}\n")
         f.write(f"  Meta-Model  : {meta_model_label(ga_results.get('meta_model_type', 'N/A'))}\n")
         f.write(f"  Ensemble Size: {len(ga_results.get('ensemble', []))}\n\n")
         
@@ -558,32 +551,7 @@ def load_trained_models(model_names, models_dir):
 # Model-Selection Pipelines
 # ------------------------------------------------------------------------------
 
-GA_VALIDATION_FRACTION = 0.25
-
-
-def split_train_for_validation(train_data, anomaly_list, rate=None,
-                               fraction=GA_VALIDATION_FRACTION):
-    """Cut the clean training series into a fit fold and a validation fold and
-    inject each separately, so both carry anomalies at the configured rate."""
-    source = train_data.entities[0]
-    n_time = source.Y.shape[1]
-    cut = max(1, int(n_time * (1.0 - fraction)))
-
-    def fold(lo, hi):
-        data = copy.deepcopy(train_data)
-        entity = data.entities[0]
-        entity.Y = source.Y[:, lo:hi]
-        entity.labels = (source.labels[:, lo:hi] if source.labels.ndim > 1
-                         else source.labels[lo:hi])
-        entity.mask = source.mask[:, lo:hi]
-        entity.n_time = hi - lo
-        data.total_time = hi - lo
-        return Inject(data, anomaly_list, rate=rate)[0]
-
-    return fold(0, cut), fold(cut, n_time)
-
-
-def run_model_selection_algorithms_1(train_data, train_val_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False, explain=False, stages=None, decision_metric=DEFAULT_DECISION_METRICS, meta_model=DEFAULT_META_MODEL):
+def run_model_selection_algorithms_1(train_data, test_data, dataset, entity, iteration, model_list=None, test_data_gan=None, skip_gan=False, explain=False, stages=None, decision_metric=DEFAULT_DECISION_METRICS, meta_model=DEFAULT_META_MODEL):
     """
     One-pass model selection pipeline in the order:
       1) GA (stacking ensemble search)
@@ -639,7 +607,6 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
     y_true_train = y_true_test = None
     meta_model_type = None
     ensemble_scores = None
-    ga_validation = {}
     thompson_model_names = []
     Gan_ranked = Gan_ranked_names = []
     ranked_sensitivity = ranked_names_sensitivity = []
@@ -665,8 +632,8 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
         start_time = time.time()
         best_ensemble, best_f1, best_pr_auc, best_fitness, \
         individual_predictions, base_model_predictions_train, base_model_predictions_test, \
-        y_true_train, y_true_test, meta_model_type, ensemble_scores, ga_validation = genetic_algorithm(
-            dataset, entity, train_data, train_val_data, test_data,
+        y_true_train, y_true_test, meta_model_type, ensemble_scores = genetic_algorithm(
+            dataset, entity, train_data, test_data,
             still_usable(), trained_models,
             population_size=20, generations=20,
             meta_model_type=meta_model, mutation_rate=0.1,
@@ -811,8 +778,7 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
             meta_model_type,
             {
                 'ga': {'f1': best_f1, 'pr_auc': best_pr_auc, 'fitness': best_fitness,
-                       'scores': ensemble_scores, 'y_true': y_true_test,
-                       'validation': ga_validation},
+                       'scores': ensemble_scores, 'y_true': y_true_test},
                 'thompson': thompson_model_names,
                 'gan': _robust_slot(Gan_ranked, Gan_ranked_names),
                 'borderline': _robust_slot(ranked_sensitivity, ranked_names_sensitivity),
@@ -917,7 +883,7 @@ def run_model_selection_algorithms_1(train_data, train_val_data, test_data, data
     return _result()
 
 
-def run_model_selection_algorithms_2(train_data, train_val_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False, explain=False, decision_metric=DEFAULT_DECISION_METRICS, meta_model=DEFAULT_META_MODEL):
+def run_model_selection_algorithms_2(train_data, test_data, dataset, entity, iteration, trained_models, model_list=None, test_data_gan=None, skip_gan=False, explain=False, decision_metric=DEFAULT_DECISION_METRICS, meta_model=DEFAULT_META_MODEL):
     """
     PARALLEL VERSION: Runs model selection algorithms concurrently using ThreadPoolExecutor.
     
@@ -980,7 +946,7 @@ def run_model_selection_algorithms_2(train_data, train_val_data, test_data, data
         # Submit all algorithms with their own data copies
         ga_future = executor.submit(
             genetic_algorithm,
-            dataset, entity, train_data, train_val_data, test_data_ga,
+            dataset, entity, train_data, test_data_ga,
             models_to_use, trained_models,
             population_size=20, generations=20, meta_model_type=meta_model, mutation_rate=0.1,
             explain=explain,
@@ -1022,7 +988,7 @@ def run_model_selection_algorithms_2(train_data, train_val_data, test_data, data
         
         best_ensemble, best_f1, best_pr_auc, best_fitness, \
         individual_predictions, base_model_predictions_train, base_model_predictions_test, \
-        y_true_train, y_true_test, meta_model_type, ensemble_scores, ga_validation = ga_future.result()
+        y_true_train, y_true_test, meta_model_type, ensemble_scores = ga_future.result()
         timing_dict['1_GA'] = time.time() - overall_start
         mem_ga = get_memory_usage_mb()
         memory_dict['modules']['1_GA'] = {
@@ -1170,8 +1136,7 @@ def run_model_selection_algorithms_2(train_data, train_val_data, test_data, data
         meta_model_type,
         {
             'ga': {'f1': best_f1, 'pr_auc': best_pr_auc, 'fitness': best_fitness,
-                   'scores': ensemble_scores, 'y_true': y_true_test,
-                   'validation': ga_validation},
+                   'scores': ensemble_scores, 'y_true': y_true_test},
             'thompson': thompson_model_names,
             'gan': _robust_slot(Gan_ranked, Gan_ranked_names),
             'borderline': _robust_slot(ranked_sensitivity, ranked_names_sensitivity),
@@ -1301,7 +1266,7 @@ def find_num_falses(adjusted_y_pred_ind_current, test_data_copy, dataset, entity
 
 def perform_reoptimization_task(
     window_idx, cumulative_online_windows, offline_data, offline_targets, offline_mask,
-    test_data, train_data, train_val_data, dataset, entity, trained_models, loaded_model_names,
+    test_data, train_data, dataset, entity, trained_models, loaded_model_names,
     anomaly_list, individual_predictions, base_model_predictions_train,
     base_model_predictions_test, y_true_train, y_true_test, meta_model_type,
     use_parallel, test_data_before, logger, current_best_ensemble, current_best_single,
@@ -1357,7 +1322,7 @@ def perform_reoptimization_task(
         (best_thompson, robust_agg, full_aggregated, best_ensemble,
          individual_predictions_new, base_model_predictions_train_new, base_model_predictions_test_new,
          y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_2(
-            train_data, train_val_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
+            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
             trained_models=trained_models, model_list=loaded_model_names,
             test_data_gan=test_data_before, skip_gan=True, explain=explain,
             meta_model=meta_model_type
@@ -1366,7 +1331,7 @@ def perform_reoptimization_task(
         (best_thompson, robust_agg, full_aggregated, best_ensemble,
          individual_predictions_new, base_model_predictions_train_new, base_model_predictions_test_new,
          y_true_train_new, y_true_test_new, meta_model_type_new, _) = run_model_selection_algorithms_1(
-            train_data, train_val_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
+            train_data, test_data_new_sliding, dataset, entity, iteration=window_idx,
             model_list=loaded_model_names, test_data_gan=test_data_before, skip_gan=True, explain=explain,
             meta_model=meta_model_type
         )
@@ -1536,8 +1501,7 @@ def run_app(algorithm_list, algorithm_list_instances):
         test_data_before = copy.deepcopy(test_data)
         train_data_before = copy.deepcopy(train_data)
 
-        train_data, train_val_data = split_train_for_validation(
-            train_data, anomaly_list, rate=anomaly_rate)
+        train_data, _ = Inject(train_data, anomaly_list, rate=anomaly_rate)
         test_data, anomaly_sizes = Inject(test_data, anomaly_list, rate=anomaly_rate)
         logger.info(f"✓ Injected anomalies: {anomaly_list}"
                     + (f" at rate {anomaly_rate}" if anomaly_rate is not None else ""))
@@ -1653,7 +1617,7 @@ def run_app(algorithm_list, algorithm_list_instances):
             (best_thompson, robust_agg, full_aggregated, best_ensemble,
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_2(
-                train_data, train_val_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
+                train_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
                 trained_models=trained_models, model_list=loaded_model_names,
                 test_data_gan=test_data_before, skip_gan=skip_gan, explain=explain,
                 decision_metric=decision_metric, meta_model=meta_model
@@ -1664,7 +1628,7 @@ def run_app(algorithm_list, algorithm_list_instances):
             (best_thompson, robust_agg, full_aggregated, best_ensemble,
              individual_predictions, base_model_predictions_train, base_model_predictions_test,
              y_true_train, y_true_test, meta_model_type, extra_results) = run_model_selection_algorithms_1(
-                train_data, train_val_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
+                train_data, test_data_new, dataset, entity, iteration=OFFLINE_ITERATION,
                 model_list=loaded_model_names, test_data_gan=test_data_before,
                 skip_gan=skip_gan, explain=explain,
                 stages=stages, decision_metric=decision_metric, meta_model=meta_model
@@ -2079,7 +2043,7 @@ def run_app(algorithm_list, algorithm_list_instances):
                     pending_reopt_future = reopt_executor.submit(
                         perform_reoptimization_task,
                         i, cumulative_online_windows, offline_data, offline_targets, offline_mask,
-                        test_data, train_data, train_val_data, dataset, entity, trained_models, loaded_model_names,
+                        test_data, train_data, dataset, entity, trained_models, loaded_model_names,
                         anomaly_list, individual_predictions, base_model_predictions_train,
                         base_model_predictions_test, y_true_train, y_true_test, meta_model_type,
                         use_parallel, test_data_before, logger, current_best_ensemble, current_best_single,

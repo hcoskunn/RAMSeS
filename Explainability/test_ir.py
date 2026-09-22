@@ -925,9 +925,8 @@ class TestBuilders(unittest.TestCase):
         res["archetypes"]["C"] = {"utility": 0.15, "stability_mean": 0.9,
                                   "relative": {"archetype": "HH"},
                                   "absolute": {"archetype": "HH"}}
-        res["noise"] = {"eps": 0.02, "eps_test": 0.01}
-        res["add_one_in"] = {"C": {"delta": 0.0, "delta_test": 0.0,
-                                   "tried_exact": True}}
+        res["noise"] = {"eps": 0.02}
+        res["add_one_in"] = {"C": {"delta": 0.0, "tried_exact": True}}
         res["redundancy"] = {"C": {"redundancy": 0.5, "partner": "A"}}
         res["add_one_in"]["C"].update(over.pop("add_one_in", {}))
         res["redundancy"]["C"].update(over.pop("redundancy", {}))
@@ -940,25 +939,23 @@ class TestBuilders(unittest.TestCase):
     def test_exclusion_reason_covers_every_code(self):
         """Every branch of the cascade is reachable and returns a listed code."""
         cases = {
-            "not_available": (float("nan"), 0.0, 0.5),
-            "rejected": (-0.5, 0.0, 0.5),
-            "redundant": (0.0, 0.0, 0.99),
-            "neutral": (0.0, 0.0, 0.5),
-            "fold_only": (0.5, -0.1, 0.5),
-            "outperformed": (0.5, 0.5, 0.5),
-            "fold_only_unverified": (0.5, float("nan"), 0.5),
+            "not_available": (float("nan"), 0.5),
+            "rejected": (-0.5, 0.5),
+            "redundant": (0.0, 0.99),
+            "neutral": (0.0, 0.5),
+            "unevaluated": (0.5, 0.5),
         }
         seen = set()
-        for expected, (dv, dt, r) in cases.items():
-            got = ir.exclusion_reason(dv, dt, r, 0.02, 0.01, 0.95)
-            self.assertEqual(got, expected, f"{dv}/{dt}/{r}")
+        for expected, (dv, r) in cases.items():
+            got = ir.exclusion_reason(dv, r, 0.02, 0.95)
+            self.assertEqual(got, expected, f"{dv}/{r}")
             seen.add(got)
         self.assertEqual(seen, set(ir.EXCLUSION_REASONS))
 
     def test_positive_delta_never_reads_as_neutral(self):
         """eps is the floor: a gain inside it is neutral, outside it is not."""
-        self.assertEqual(ir.exclusion_reason(0.01, -1, 0.0, 0.02, 0.01, 0.95), "neutral")
-        self.assertEqual(ir.exclusion_reason(0.03, -1, 0.0, 0.02, 0.01, 0.95), "fold_only")
+        self.assertEqual(ir.exclusion_reason(0.01, 0.0, 0.02, 0.95), "neutral")
+        self.assertEqual(ir.exclusion_reason(0.03, 0.0, 0.02, 0.95), "unevaluated")
 
     def test_redundant_names_its_partner_in_the_text(self):
         atom = self._reason_atom(redundancy={"redundancy": 0.99, "partner": "A"})
@@ -975,15 +972,17 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(atom["value"]["reason"], "neutral")
         self.assertNotIn("duplicate", atom["text"])
 
-    def test_outperformed_states_the_search_never_tried_it(self):
-        atom = self._reason_atom(add_one_in={"delta": 0.5, "delta_test": 0.5})
-        self.assertEqual(atom["value"]["reason"], "outperformed")
+    def test_unevaluated_states_the_search_never_tried_it(self):
+        atom = self._reason_atom(add_one_in={"delta": 0.5})
+        self.assertEqual(atom["value"]["reason"], "unevaluated")
         self.assertIn("never evaluated", atom["text"])
 
-    def test_fold_only_frames_the_exclusion_as_avoiding_overfitting(self):
-        atom = self._reason_atom(add_one_in={"delta": 0.5, "delta_test": -0.1})
-        self.assertEqual(atom["value"]["reason"], "fold_only")
-        self.assertIn("avoided overfitting", atom["text"])
+    def test_the_atom_carries_no_test_side_delta(self):
+        """The search and the decision read one split, so there is no second
+        delta to reconcile and none may be implied."""
+        atom = self._reason_atom(add_one_in={"delta": 0.5})
+        self.assertNotIn("delta_add_test", atom["value"])
+        self.assertNotIn("validation", atom["text"])
 
     def test_tried_exact_is_recorded_but_never_stated(self):
         """Provenance belongs in the record, not in a sentence the narrator

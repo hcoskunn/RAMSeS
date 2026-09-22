@@ -651,21 +651,20 @@ def plot_models_scores(algorithm_list, test_data, y_scores_list, dataset, entity
     # plt.show()
 
 
-def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorithm_list, trained_models, meta_model_type,
+def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, trained_models, meta_model_type,
                       population_size, generations, mutation_rate, explain: bool = False,
                       metric=DEFAULT_DECISION_METRICS, vus_win=None):
     """
     Run the genetic algorithm to find the best ensemble of models.
 
-    Subsets are searched on the validation fold: the meta-learner is trained on
-    train_data and every candidate is scored on val_data. Only the winner is then
-    scored on test_data, which is what the final ensemble-vs-single decision reads.
+    The meta-learner is trained on train_data and every candidate subset is
+    scored on test_data, which is also what the final ensemble-vs-single
+    decision reads.
 
     Args:
         dataset (str): Dataset name.
         entity (str): Entity name.
-        train_data: Training dataset (the fit fold).
-        val_data: Validation fold the search scores subsets on.
+        train_data: Training dataset.
         test_data: Test dataset.
         algorithm_list (list): List of algorithm names.
         trained_models (dict): Dictionary of trained models.
@@ -740,16 +739,6 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
         is_ensemble=True)
     logger.info(f"  ✓ Training data evaluation complete in {time_module.time() - start_train:.2f}s")
 
-    logger.info(f"  → Evaluating all {len(algorithm_list)} models on the VALIDATION fold (for subset search)...")
-    start_val = time_module.time()
-    y_true_val, base_model_predictions_val, _, _ = evaluate_model_consistently(
-        val_data,
-        trained_models,
-        algorithm_list,
-        is_ensemble=True)
-    val_vus_win = vus_window(val_data.entities[0].Y)
-    logger.info(f"  ✓ Validation fold evaluation complete in {time_module.time() - start_val:.2f}s")
-
     # Reuse test predictions from individual_predictions instead of re-computing
     logger.info(f"  → Reusing test predictions from individual evaluation (no re-computation)...")
     start_reuse = time_module.time()
@@ -779,12 +768,12 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
             if ensemble is not None:  # Ensure ensemble is not None
                 ensemble_key = tuple(sorted(ensemble))  # Create a unique key for the ensemble
                 if ensemble_key not in evaluated_ensembles:
-                    fitness_result = fitness_function(ensemble, train_data, val_data, trained_models,
+                    fitness_result = fitness_function(ensemble, train_data, test_data, trained_models,
                                                       individual_predictions,
                                                       base_model_predictions_train, algorithm_list,
-                                                      base_model_predictions_val, y_true_train, y_true_val,
+                                                      base_model_predictions_test, y_true_train, y_true_test,
                                                       meta_model_type=meta_model_type,
-                                                      metric=metric, vus_win=val_vus_win)
+                                                      metric=metric, vus_win=vus_win)
                     evaluated_ensembles[ensemble_key] = fitness_result
 
 
@@ -834,27 +823,9 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
         logger.info(f"End of Generation {generation + 1}, Population: {population}")
         print(f"End of Generation {generation + 1}, Population: {population}")
 
-    # The search is over, and everything above it was measured on the validation
-    # fold. The winner is scored once on the test split, and those are the numbers
-    # the final ensemble-vs-single decision compares against a single detector
-    # measured on the same rows. best_fitness stays the validation fitness — it is
-    # the objective the search maximised, not an estimate of held-out performance.
-    validation_metrics = {}
-    if best_ensemble:
-        validation_metrics = {
-            'f1': best_f1, 'pr_auc': best_pr_auc, 'fitness': best_fitness,
-            'vus': vus_score(best_scores, y_true_val, val_vus_win),
-        }
-
-    if best_ensemble and best_meta_model is not None and base_model_predictions_test.size:
-        best_f1, best_pr_auc, best_scores = score_ensemble(
-            best_meta_model, best_ensemble, algorithm_list,
-            base_model_predictions_test, y_true_test)
-        logger.info(f"Best ensemble scored on the test split: F1 {best_f1}, PR AUC {best_pr_auc}")
-
     misclassified_ens = []
     for predicts in adjusted_y_pred_list:
-        true_values = np.array(val_data.entities[0].labels)  # 1 for anomaly, 0 for normal
+        true_values = np.array(test_data.entities[0].labels)  # 1 for anomaly, 0 for normal
 
         predicted_values = np.array(predicts)  # True for predicted anomaly, False for no predicted anomaly
 
@@ -878,9 +849,9 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
     pr_auc_scores = [result[1] for result in evaluated_ensembles.values()]
     flat_ensemble_names = ['_'.join(names) for names in ensemble_names]
     plot_name = results_dir("Outputs", "GA_Ens") + f'ensemble_scores_{dataset}_{entity}_{meta_model_type}_{population_size}_{generations}_{mutation_rate}_ensemble_{date_time_string}.png'
-    plot_models_scores(list_ensemble, val_data, adjusted_y_pred_list, dataset, entity, F1_Score_list,
+    plot_models_scores(list_ensemble, test_data, adjusted_y_pred_list, dataset, entity, F1_Score_list,
                        PR_AUC_Score_list)
-    plot_scores_vs_true(val_data, F1_Score_list, PR_AUC_Score_list, adjusted_y_pred_list, list_ensemble, plot_name,
+    plot_scores_vs_true(test_data, F1_Score_list, PR_AUC_Score_list, adjusted_y_pred_list, list_ensemble, plot_name,
                         plot_path)
     # Plot for F1 scores
     plt.figure(figsize=(10, 5))
@@ -928,11 +899,9 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
 
     # plt.show()
     logger.info(
-        f"Best ensemble found: {best_ensemble} with validation fitness {best_fitness}, "
-        f"and test F1 score {best_f1}, test PR AUC {best_pr_auc}")
+        f"Best ensemble found: {best_ensemble} with F1 score {best_f1}, PR AUC {best_pr_auc}, and fitness {best_fitness}")
     print(
-        f"Best ensemble found: {best_ensemble} with validation fitness {best_fitness}, "
-        f"and test F1 score {best_f1}, test PR AUC {best_pr_auc}")
+        f"Best ensemble found: {best_ensemble} with F1 score {best_f1}, PR AUC {best_pr_auc}, and fitness {best_fitness}")
     # Sort evaluated_ensembles by fitness score before writing to the file
     sorted_ensembles = sorted(evaluated_ensembles.items(), key=lambda x: x[1][2], reverse=True)
     # Save the results to a text file
@@ -946,12 +915,12 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
             key = tuple(sorted(subset))
             if key in evaluated_ensembles:
                 return evaluated_ensembles[key]
-            res = fitness_function(list(subset), train_data, val_data, trained_models,
+            res = fitness_function(list(subset), train_data, test_data, trained_models,
                                    individual_predictions, base_model_predictions_train,
-                                   algorithm_list, base_model_predictions_val,
-                                   y_true_train, y_true_val,
+                                   algorithm_list, base_model_predictions_test,
+                                   y_true_train, y_true_test,
                                    meta_model_type=meta_model_type,
-                                   metric=metric, vus_win=val_vus_win)
+                                   metric=metric, vus_win=vus_win)
             evaluated_ensembles[key] = res
             return res
 
@@ -963,10 +932,9 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
                              dataset, entity, explain=True,
                              evaluate_fitness_full=_evaluate_fitness_full,
                              base_fit=base_model_predictions_train, y_fit=y_true_train,
-                             base_eval=base_model_predictions_val, y_eval=y_true_val,
-                             base_test=base_model_predictions_test, y_test=y_true_test,
+                             base_eval=base_model_predictions_test, y_eval=y_true_test,
                              meta_model_type=meta_model_type,
-                             metric=metric, vus_win=val_vus_win)
+                             metric=metric, vus_win=vus_win)
 
         explain_ga_combination(best_ensemble, algorithm_list,
                                base_model_predictions_train, base_model_predictions_test,
@@ -974,7 +942,7 @@ def genetic_algorithm(dataset, entity, train_data, val_data, test_data, algorith
                                dataset, entity, meta_model=best_meta_model, explain=True,
                                metric=metric, vus_win=vus_win)
 
-    return best_ensemble, best_f1, best_pr_auc, best_fitness, individual_predictions, base_model_predictions_train, base_model_predictions_test, y_true_train, y_true_test, meta_model_type, best_scores, validation_metrics
+    return best_ensemble, best_f1, best_pr_auc, best_fitness, individual_predictions, base_model_predictions_train, base_model_predictions_test, y_true_train, y_true_test, meta_model_type, best_scores
 
 # Usage
 # Assuming train_data and test_data are already loaded and preprocessed
@@ -1046,8 +1014,6 @@ def measure_refit_noise(
     y_fit: np.ndarray,
     base_eval: np.ndarray,
     y_eval: np.ndarray,
-    base_test: Optional[np.ndarray] = None,
-    y_test: Optional[np.ndarray] = None,
     repeats: int = 10,
     meta_model_type: str = 'rf',
     metric: str = DEFAULT_DECISION_METRICS,
@@ -1060,15 +1026,14 @@ def measure_refit_noise(
     every refit. Nothing else varies across the repeats, so the spread is the
     floor below which a fitness difference says nothing about the detectors.
 
-    Returns {'eps', 'eps_test', 'sigma', 'sigma_test', 'repeats'}, with eps at
-    two sigma. NaN when the ensemble is empty or every repeat failed.
+    Returns {'eps', 'sigma', 'repeats'}, with eps at two sigma. NaN when the
+    ensemble is empty or every repeat failed.
     """
     nan = float('nan')
-    empty = {'eps': nan, 'eps_test': nan, 'sigma': nan, 'sigma_test': nan,
-             'repeats': 0}
+    empty = {'eps': nan, 'sigma': nan, 'repeats': 0}
     if not ensemble:
         return empty
-    evals, tests = [], []
+    evals = []
     for _ in range(max(1, repeats)):
         try:
             res = fitness_function(ensemble, None, None, None, None,
@@ -1079,21 +1044,10 @@ def measure_refit_noise(
             continue
         if not np.isnan(res[2]):
             evals.append(float(res[2]))
-        if base_test is not None and y_test is not None and res[5] is not None:
-            try:
-                f1_t, pr_t, _ = score_ensemble(res[5], ensemble, algorithm_list,
-                                               base_test, y_test)
-                combined = combine_metrics(metric, {'f1': f1_t, 'pr_auc': pr_t,
-                                                    'vus': float('nan')})
-                tests.append(float(combined if not np.isnan(combined) else f1_t))
-            except Exception:
-                pass
     if not evals:
         return empty
     sigma = float(np.std(evals, ddof=1)) if len(evals) > 1 else 0.0
-    sigma_t = float(np.std(tests, ddof=1)) if len(tests) > 1 else nan
-    return {'eps': 2.0 * sigma, 'eps_test': 2.0 * sigma_t if not np.isnan(sigma_t) else nan,
-            'sigma': sigma, 'sigma_test': sigma_t, 'repeats': len(evals)}
+    return {'eps': 2.0 * sigma, 'sigma': sigma, 'repeats': len(evals)}
 
 
 def compute_add_one_in(
@@ -1101,16 +1055,13 @@ def compute_add_one_in(
     excluded: List[str],
     algorithm_list: List[str],
     evaluate_fitness_full: Callable[[List[str]], tuple],
-    base_test: Optional[np.ndarray] = None,
-    y_test: Optional[np.ndarray] = None,
 ) -> Dict[str, Dict[str, float]]:
     """
     Mirror of LOFO for detectors that were NOT selected.
 
     For each excluded detector d:
         delta[d] = fitness(best_ensemble + [d]) − fitness(best_ensemble)
-    on the fold the search optimised, and the same comparison on the test split
-    using the meta-model that evaluation already trained.
+    on the fold the search optimised.
 
     A positive delta implies the search never evaluated that combination: the
     winner is the argmax over everything it did evaluate.
@@ -1118,32 +1069,18 @@ def compute_add_one_in(
     nan = float('nan')
     out: Dict[str, Dict[str, float]] = {}
     if not best_ensemble:
-        return {d: {'delta': nan, 'delta_test': nan} for d in excluded}
+        return {d: {'delta': nan} for d in excluded}
 
     base_res = evaluate_fitness_full(list(best_ensemble))
     base_fit = float(base_res[2])
-    base_test_score = nan
-    if base_test is not None and y_test is not None and base_res[5] is not None:
-        f1_t, pr_t, _ = score_ensemble(base_res[5], best_ensemble, algorithm_list,
-                                       base_test, y_test)
-        base_test_score = 0.5 * (f1_t + pr_t)
 
     for d in excluded:
         try:
             res = evaluate_fitness_full(sorted(set(best_ensemble) | {d}))
         except Exception:
-            out[d] = {'delta': nan, 'delta_test': nan}
+            out[d] = {'delta': nan}
             continue
-        delta = float(res[2]) - base_fit
-        delta_test = nan
-        if not np.isnan(base_test_score) and res[5] is not None:
-            try:
-                f1_t, pr_t, _ = score_ensemble(res[5], sorted(set(best_ensemble) | {d}),
-                                               algorithm_list, base_test, y_test)
-                delta_test = 0.5 * (f1_t + pr_t) - base_test_score
-            except Exception:
-                pass
-        out[d] = {'delta': delta, 'delta_test': delta_test}
+        out[d] = {'delta': float(res[2]) - base_fit}
     return out
 
 
@@ -1751,8 +1688,6 @@ def explain_ga_selection(
     y_fit: Optional[np.ndarray] = None,
     base_eval: Optional[np.ndarray] = None,
     y_eval: Optional[np.ndarray] = None,
-    base_test: Optional[np.ndarray] = None,
-    y_test: Optional[np.ndarray] = None,
     meta_model_type: str = 'rf',
     metric: str = DEFAULT_DECISION_METRICS,
     vus_win: Optional[int] = None,
@@ -1791,11 +1726,10 @@ def explain_ga_selection(
     if excluded and evaluate_fitness_full is not None and base_eval is not None:
         noise = measure_refit_noise(
             best_ensemble, algorithm_list, base_fit, y_fit, base_eval, y_eval,
-            base_test, y_test, meta_model_type=meta_model_type,
+            meta_model_type=meta_model_type,
             metric=metric, vus_win=vus_win)
         add_one_in = compute_add_one_in(
-            best_ensemble, excluded, algorithm_list, evaluate_fitness_full,
-            base_test, y_test)
+            best_ensemble, excluded, algorithm_list, evaluate_fitness_full)
         redundancy = compute_score_redundancy(
             best_ensemble, excluded, algorithm_list, base_eval)
         for d in excluded:
