@@ -1,7 +1,6 @@
 import csv
 import os
 import shutil
-import warnings
 from typing import List, Optional, Union
 
 import numpy as np
@@ -109,14 +108,17 @@ def find_presplit_entity(root_dir, dataset, entities):
     return stem if os.path.isfile(os.path.join(base, 'train', f'{stem}.txt')) else None
 
 
+def downsample_max(values, factor):
+    n_time = values.shape[0]
+    padding = (-n_time) % factor
+    if padding:
+        values = np.pad(values, [(padding, 0)] + [(0, 0)] * (values.ndim - 1))
+    return values.reshape(values.shape[0] // factor, factor,
+                          *values.shape[1:]).max(axis=1)
+
+
 def load_presplit(group, root_dir, dataset, entity, downsampling=None,
                   min_length=None, normalize=True, verbose=True):
-    if downsampling is not None:
-        warnings.warn(
-            f"downsampling={downsampling} ignored for '{dataset}': it is stored "
-            f"as a train/test/test_label split. Drop the "
-            f"setting, or max-pool the files on disk.",
-            stacklevel=2)
 
     stem = find_presplit_entity(root_dir, dataset, entity)
     base = resolve_dataset_dir(root_dir, dataset)
@@ -134,16 +136,27 @@ def load_presplit(group, root_dir, dataset, entity, downsampling=None,
         scaler = MinMaxScaler().fit(train)
         train, test = scaler.transform(train), scaler.transform(test)
 
+    labels = None
+    if group == 'test':
+        labels = np.loadtxt(f'{base}/test_label/{stem}.txt')
+        if labels.shape[-1] != test.shape[0]:
+            raise ValueError(f'{stem}: {labels.shape[-1]} labels for '
+                             f'{test.shape[0]} test rows')
+
+    if downsampling is not None:
+        factor = int(downsampling)
+        train = downsample_max(train, factor)
+        test = downsample_max(test, factor)
+        if labels is not None:
+            labels = downsample_max(labels, factor)
+
     if group == 'train':
         name = f'{dataset}-train'
         entities_out = [Entity(Y=train.T, name=stem, verbose=verbose)]
     elif group == 'test':
         name = f'{dataset}-test'
-        labels = np.loadtxt(f'{base}/test_label/{stem}.txt').reshape(1, -1)
-        if labels.shape[-1] != test.shape[0]:
-            raise ValueError(f'{stem}: {labels.shape[-1]} labels for '
-                             f'{test.shape[0]} test rows')
-        entities_out = [Entity(Y=test.T, name=stem, labels=labels, verbose=verbose)]
+        entities_out = [Entity(Y=test.T, name=stem, labels=labels.reshape(1, -1),
+                               verbose=verbose)]
     else:
         raise ValueError(f"group must be 'train' or 'test', got {group!r}")
 
