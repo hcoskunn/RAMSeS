@@ -5,6 +5,7 @@ Metrics.metrics, Utils.model_selection_utils) so the pure analysis + plot
 functions can be imported in any env that has numpy + matplotlib.
 """
 
+import math
 import os
 import re
 import sys
@@ -83,7 +84,6 @@ if _PROJECT_ROOT not in sys.path:
 sys.modules["Utils"].__path__ = [os.path.join(_PROJECT_ROOT, "Utils")]
 
 from Metrics.Ensemble_GA import (
-    compute_lofo_utility,
     compute_mean_marginal_contribution,
     compute_survival_rates,
     classify_detector_archetypes,
@@ -98,6 +98,8 @@ from Metrics.Ensemble_GA import (
     explain_ga_combination,
 )
 from Metrics.Ensemble_GA import (_assign_archetype, ARCHETYPE_ORDER,
+                                 _assign_banded_archetype,
+                                 BANDED_ARCHETYPE_ORDER, compute_near_best,
                                  _competition_ranks, score_fn_for,
                                  _best_threshold_f1)
 
@@ -141,32 +143,6 @@ class TestScoreFnFollowsFitness(unittest.TestCase):
     def test_every_metric_yields_a_finite_score(self):
         for token in ("f1", "pr_auc"):
             self.assertTrue(np.isfinite(score_fn_for(token)(self.y, self.s)), token)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# 1.  compute_lofo_utility
-# ════════════════════════════════════════════════════════════════════════════
-
-class TestLofoUtility(unittest.TestCase):
-
-    def test_marginal_equals_base_minus_reduced(self):
-        # Stub evaluate_fitness: fitness = sum of indices of detectors in subset.
-        # Detector 'A' contributes +1, 'B' +2, 'C' +3 → base = 6.
-        # Removing 'B' → reduced = {A,C} = 4 → marginal_B = 6 − 4 = 2.
-        values = {"A": 1.0, "B": 2.0, "C": 3.0}
-        def evaluate_fitness(subset):
-            return float(sum(values[d] for d in subset))
-        lofo = compute_lofo_utility(["A", "B", "C"], evaluate_fitness)
-        self.assertAlmostEqual(lofo["A"], 1.0)
-        self.assertAlmostEqual(lofo["B"], 2.0)
-        self.assertAlmostEqual(lofo["C"], 3.0)
-
-    def test_singleton_ensemble_returns_nan(self):
-        lofo = compute_lofo_utility(["A"], lambda s: 1.0)
-        self.assertTrue(np.isnan(lofo["A"]))
-
-    def test_empty_ensemble_returns_empty_dict(self):
-        self.assertEqual(compute_lofo_utility([], lambda s: 1.0), {})
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -301,6 +277,130 @@ class TestArchetypes(unittest.TestCase):
         differ = any(arch[d]["relative"]["archetype"] != arch[d]["absolute"]["archetype"]
                      for d in algos)
         self.assertTrue(differ)
+
+
+class TestBandedArchetypes(unittest.TestCase):
+    """Utility carries three levels, stability two."""
+
+    @staticmethod
+    def _mm(contribs):
+        return {d: {'contribution': v, 'e_present': float('nan'),
+                    'e_absent': float('nan'), 'n_present': 0, 'n_absent': 0}
+                for d, v in contribs.items()}
+
+    def test_every_cell_has_its_own_code(self):
+        from itertools import product
+        codes = {(u, s): _assign_banded_archetype(u, s, util_nan=False)
+                 for u, s in product(["H", "M", "L"], [True, False])}
+        self.assertEqual(len(set(codes.values())), 6)
+        self.assertEqual(codes[("M", False)], "ML")
+        self.assertEqual(codes[("M", True)], "MH")
+        self.assertEqual(_assign_banded_archetype("H", True, util_nan=True),
+                         "Unclassified")
+        self.assertEqual(len(BANDED_ARCHETYPE_ORDER), 7)
+        self.assertEqual(set(codes.values()),
+                         set(BANDED_ARCHETYPE_ORDER) - {"Unclassified"})
+
+    def test_middle_band_is_one_sd_either_side_of_the_mean(self):
+        # One detector far above the mean, one far below, the rest inside.
+        algos = ["HI", "LO", "M1", "M2", "M3"]
+        mm = self._mm({"HI": 1.0, "LO": -1.0, "M1": 0.0, "M2": 0.05,
+                       "M3": -0.05})
+        surv = {d: [0.5, 0.5] for d in algos}
+        arch = classify_detector_archetypes(mm, surv, algos)
+        self.assertEqual(arch["HI"]["banded"]["u_level"], "H")
+        self.assertEqual(arch["LO"]["banded"]["u_level"], "L")
+        for d in ("M1", "M2", "M3"):
+            self.assertEqual(arch[d]["banded"]["u_level"], "M")
+
+    def test_stability_splits_at_the_mean_not_the_median(self):
+        # Three survival rates whose mean (0.5) sits above their median (0.3).
+        algos = ["A", "B", "C"]
+        mm = self._mm({"A": 0.1, "B": 0.2, "C": 0.3})
+        surv = {"A": [0.2], "B": [0.3], "C": [1.0]}
+        arch = classify_detector_archetypes(mm, surv, algos)
+        self.assertFalse(arch["B"]["banded"]["s_high"])   # 0.3 < mean 0.5
+        self.assertTrue(arch["B"]["relative"]["s_high"] is False
+                        or arch["B"]["relative"]["s_high"] is True)
+        self.assertTrue(arch["C"]["banded"]["s_high"])
+
+    def test_no_utility_data_is_unclassified_not_low(self):
+        algos = ["A", "B", "C"]
+        mm = self._mm({"A": float("nan"), "B": 0.3, "C": -0.3})
+        surv = {d: [0.8] for d in algos}
+        arch = classify_detector_archetypes(mm, surv, algos)
+        self.assertEqual(arch["A"]["banded"]["archetype"], "Unclassified")
+
+    def test_a_single_detector_leaves_the_band_undefined(self):
+        # No sample sd from one value, so nothing can be called high or low.
+        arch = classify_detector_archetypes(self._mm({"A": 0.5}), {"A": [0.5]},
+                                            ["A"])
+        self.assertEqual(arch["A"]["banded"]["u_level"], "M")
+
+
+class TestNearBestEnsembles(unittest.TestCase):
+    """The fallback's input: which ensembles the run could not rank apart from
+    the one it reported, and what they say about each detector."""
+
+    @staticmethod
+    def _ev(pairs):
+        return {tuple(sorted(k)): (0.0, 0.0, v, None, None, None)
+                for k, v in pairs.items()}
+
+    def test_cutoff_is_kappa_sigma_below_the_best(self):
+        ev = self._ev({("A", "B"): 0.90, ("A", "C"): 0.88, ("B", "C"): 0.50})
+        out = compute_near_best(ev, ["A", "B"], ["A", "B", "C"], sigma=0.05,
+                                kappa=1.0)
+        self.assertAlmostEqual(out["best_fitness"], 0.90)
+        self.assertAlmostEqual(out["cutoff"], 0.85)
+        self.assertEqual(out["n_near_best"], 2)
+
+    def test_share_is_read_against_the_baseline_not_a_half(self):
+        # Every near-best ensemble holds 4 of 5 detectors, so the baseline is
+        # 0.8: a detector in 3 of 4 of them (0.75) is BELOW chance, even though
+        # it is in most of them.
+        pool = ["A", "B", "C", "D", "E"]
+        ev = self._ev({("A", "B", "C", "D"): 0.90,
+                       ("A", "B", "C", "E"): 0.89,
+                       ("A", "B", "D", "E"): 0.89,
+                       ("A", "C", "D", "E"): 0.89})
+        out = compute_near_best(ev, pool[:4], pool, sigma=0.05, kappa=1.0)
+        self.assertTrue(out["defined"])
+        self.assertAlmostEqual(out["baseline"], 0.8)
+        self.assertAlmostEqual(out["detectors"]["B"]["share"], 0.75)
+        self.assertFalse(out["detectors"]["B"]["says_in"])
+        self.assertTrue(out["detectors"]["A"]["says_in"])    # 1.00 > 0.80
+
+    def test_disagreement_is_flagged_in_both_directions(self):
+        pool = ["A", "B", "C", "D"]
+        # Reported ensemble is {A, B}; the near-best ensembles all hold C and
+        # none hold B, so both detectors disagree with the report.
+        ev = self._ev({("A", "C"): 0.90, ("A", "C", "D"): 0.89,
+                       ("C", "D"): 0.88, ("A", "B"): 0.40})
+        out = compute_near_best(ev, ["A", "B"], pool, sigma=0.05, kappa=1.0)
+        self.assertTrue(out["detectors"]["C"]["disagrees"])   # in them, not reported
+        self.assertTrue(out["detectors"]["B"]["disagrees"])   # reported, not in them
+        self.assertFalse(out["detectors"]["A"]["disagrees"])
+
+    def test_too_few_near_best_ensembles_is_undefined(self):
+        ev = self._ev({("A", "B"): 0.90, ("A", "C"): 0.20, ("B", "C"): 0.10})
+        out = compute_near_best(ev, ["A", "B"], ["A", "B", "C"], sigma=0.01,
+                                kappa=1.0)
+        self.assertFalse(out["defined"])
+        self.assertEqual(out["detectors"], {})
+        self.assertEqual(out["n_near_best"], 1)
+
+    def test_unknown_fitting_noise_is_undefined(self):
+        ev = self._ev({("A", "B"): 0.90, ("A", "C"): 0.89, ("B", "C"): 0.88})
+        out = compute_near_best(ev, ["A", "B"], ["A", "B", "C"],
+                                sigma=float("nan"))
+        self.assertFalse(out["defined"])
+        self.assertEqual(out["detectors"], {})
+
+    def test_default_kappa_is_root_two(self):
+        out = compute_near_best(self._ev({("A",): 0.5}), ["A"], ["A"],
+                                sigma=0.1)
+        self.assertAlmostEqual(out["kappa"], math.sqrt(2.0))
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -578,47 +678,6 @@ class TestCombination(unittest.TestCase):
         finally:
             GA.train_meta_model_rf = orig
 
-    def test_add_one_in_is_the_mirror_of_lofo(self):
-        # LOFO removes a member; this adds a non-member, against the same base.
-        import Metrics.Ensemble_GA as GA
-        seen = []
-
-        def fake_full(subset):
-            seen.append(tuple(subset))
-            score = {("A", "B"): 0.70, ("A", "B", "C"): 0.64,
-                     ("A", "B", "D"): 0.78}[tuple(sorted(subset))]
-            return (0.0, 0.0, score, None, None, None)
-
-        out = GA.compute_add_one_in(["A", "B"], ["C", "D"], ["A", "B", "C", "D"],
-                                    fake_full)
-        self.assertAlmostEqual(out["C"]["delta"], -0.06)
-        self.assertAlmostEqual(out["D"]["delta"], 0.08)
-        # The base is evaluated once, not once per excluded detector.
-        self.assertEqual(seen.count(("A", "B")), 1)
-
-    def test_add_one_in_without_a_winner_returns_nans(self):
-        import Metrics.Ensemble_GA as GA
-        out = GA.compute_add_one_in([], ["C"], ["C"], lambda s: None)
-        self.assertTrue(np.isnan(out["C"]["delta"]))
-
-    def test_redundancy_finds_the_member_it_duplicates(self):
-        import Metrics.Ensemble_GA as GA
-        rng = np.random.RandomState(0)
-        a = rng.rand(50)
-        X = np.column_stack([a, rng.rand(50), a * 2.0 + 0.01 * rng.rand(50)])
-        out = GA.compute_score_redundancy(["A", "B"], ["C"], ["A", "B", "C"], X)
-        self.assertEqual(out["C"]["partner"], "A")
-        self.assertGreater(out["C"]["redundancy"], 0.99)
-
-    def test_redundancy_is_nan_for_a_constant_column(self):
-        # A detector that emits one value has no correlation with anything, and
-        # must not be reported as duplicating a member.
-        import Metrics.Ensemble_GA as GA
-        X = np.column_stack([np.random.RandomState(0).rand(20), np.ones(20)])
-        out = GA.compute_score_redundancy(["A"], ["B"], ["A", "B"], X)
-        self.assertTrue(np.isnan(out["B"]["redundancy"]))
-        self.assertIsNone(out["B"]["partner"])
-
     def test_refit_noise_is_two_sigma_of_the_repeats(self):
         import Metrics.Ensemble_GA as GA
         scores = iter([0.60, 0.62, 0.64, 0.66, 0.68])
@@ -764,7 +823,7 @@ class TestCombination(unittest.TestCase):
 
 class TestExplainGASelection(unittest.TestCase):
 
-    def test_writes_report_and_three_plots(self):
+    def test_writes_report_and_every_plot(self):
         algorithm_list = ["A", "B", "C"]
         best_ensemble = ["A", "B"]
         ee = {tuple(sorted(k)): (0.0, 0.0, float(v), None, None) for k, v in {
@@ -780,14 +839,6 @@ class TestExplainGASelection(unittest.TestCase):
             [["A", "B"], ["A", "C"], ["B", "C"], ["A", "B", "C"]],
             [["A", "B"], ["A", "B"], ["B", "C"], ["A", "B", "C"]],
         ]
-        # Fitness closure for LOFO — uses the evaluated_ensembles when cached
-        # and a simple stub otherwise (test triggers paths for both).
-        def evaluate_fitness(subset):
-            key = tuple(sorted(subset))
-            if key in ee:
-                return ee[key][2]
-            return 0.6  # fresh subsets get a fixed stub value
-
         with tempfile.TemporaryDirectory() as tmpdir:
             cwd = os.getcwd()
             os.chdir(tmpdir)
@@ -796,13 +847,12 @@ class TestExplainGASelection(unittest.TestCase):
                 result = explain_ga_selection(
                     best_ensemble, ee, gen_pops, algorithm_list,
                     population_size=4,
-                    evaluate_fitness=evaluate_fitness,
                     dataset="TEST", entity="e1", explain=True,
                 )
                 self.assertIsInstance(result, dict)
-                for key in ("best_ensemble", "lofo", "mean_marginal",
-                            "survival",
-                            "archetypes", "n_subsets_evaluated", "n_generations"):
+                for key in ("best_ensemble", "mean_marginal", "survival",
+                            "archetypes", "near_best", "noise",
+                            "n_subsets_evaluated", "n_generations"):
                     self.assertIn(key, result)
 
                 out = os.path.join("results", "GA_Ens", "TEST", "e1")
@@ -824,14 +874,26 @@ class TestExplainGASelection(unittest.TestCase):
                     os.path.join(out, "ga_selection_survival_all_TEST_e1.png")))
                 self.assertTrue(os.path.exists(
                     os.path.join(out, "ga_selection_archetypes_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_profile_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_bands_TEST_e1.png")))
+                self.assertTrue(os.path.exists(
+                    os.path.join(out, "ga_selection_plateau_TEST_e1.png")))
+                report = open(os.path.join(
+                    out, "ga_selection_explainability_TEST_e1.txt")).read()
+                # The report follows the archetype scheme the explanation reads.
+                self.assertIn("Near-best ensembles", report)
+                self.assertIn("ML = middle utility, low stability", report)
+                self.assertNotIn("LOFO", report)
             finally:
                 os.chdir(cwd)
                 ramses_paths.reset_cache()
+
     def test_explain_false_is_noop(self):
         result = explain_ga_selection(
             ["A", "B"], {}, [], ["A", "B"],
             population_size=2,
-            evaluate_fitness=lambda s: 0.5,
             dataset="X", entity="Y",
             explain=False,
         )

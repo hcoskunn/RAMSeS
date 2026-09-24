@@ -253,28 +253,86 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "the chosen ensemble, and how the meta-learner uses them "
                      "once it has selected them."},
         )},
-        {"id": "ga-why-chosen", "title": "Utility, stability and LOFO", "blocks": (
+        {"id": "ga-why-chosen", "title": "Utility and stability", "blocks": (
             {"text": "Two properties are measured after the search, from the "
                      "subsets the search itself evaluated. Utility is a "
-                     "detector's mean marginal contribution: the average change "
+                     "detector's mean marginal contribution, the average change "
                      "in fitness between the subsets that contained the detector "
-                     "and those that did not. Stability is its survival rate, "
-                     "the share of evaluated subsets that detector appeared in. "
-                     "Each detector is placed on both axes at once and labelled "
-                     "high or low on each, split at the median of the detector "
-                     "pool, so \"high utility\" means above the other detectors "
-                     "here rather than good in absolute terms. A third quantity, "
-                     "LOFO, is reported for members of the final ensemble only: "
-                     "the ensemble's fitness loss when that one detector is "
-                     "removed from it. Utility is a global average over the "
-                     "whole search, LOFO is local to the one ensemble that was "
-                     "chosen, and the two can disagree in sign."},
+                     "and those that did not. Stability is its survival rate. In "
+                     "each generation the algorithm holds a population of "
+                     "candidate subsets, and the survival rate is the share of "
+                     "that population containing the detector, averaged across "
+                     "generations. Each detector is placed on both axes at once "
+                     "and labelled on each, so \"high utility\" means above the "
+                     "other detectors in this run rather than good in absolute "
+                     "terms."},
             {"formula": "utility(d)   = mean{ fit(S) : d ∈ S } − mean{ fit(S) : d ∉ S }\n"
-                        "stability(d) = (1/G) · Σ_g |{ individuals in generation g containing d }| / P\n"
-                        "LOFO(d)      = fit(Ŝ) − fit(Ŝ \\ {d}),    d ∈ Ŝ"},
+                        "stability(d) = (1/G) · Σ_g |{ individuals in generation g containing d }| / P"},
             {"text": "where S ranges over the distinct subsets the GA evaluated, "
-                     "Ŝ is the chosen ensemble, G is the number of generations "
-                     "and P the size of the population in each generation."},
+                     "G is the number of generations and P the size of the "
+                     "population in each generation."},
+        )},
+        {"id": "ga-middle-class", "title": "Why utility has a middle class",
+         "blocks": (
+            {"text": "The two axes are cut against the same statistic, the mean "
+                     "across the detector pool, but they are not cut the same "
+                     "way. Stability is split in two, above the mean or below "
+                     "it. Utility is split in three, with a middle band one "
+                     "standard deviation either side of the mean, and a detector "
+                     "inside that band is called neither high nor low."},
+            {"text": "The reason is that the two axes are measured to different "
+                     "precisions. Utility is estimated from a few hundred subset "
+                     "evaluations, and its standard error is typically around a "
+                     "third of the spread it has to resolve. Stability is a "
+                     "frequency over every individual in every generation, and "
+                     "its standard error is closer to a tenth of that spread. So "
+                     "there is a range of utilities the run genuinely cannot "
+                     "separate, and the middle class says exactly that rather "
+                     "than forcing a verdict. There is no matching range on the "
+                     "stability axis, and giving it a band as well left most of "
+                     "the pool undetermined on both axes at once."},
+            {"text": "A detector's archetype is the pair of levels written as "
+                     "two letters, so ML is middle utility and low stability. "
+                     "The reading depends on what the algorithm did with the "
+                     "detector as well as on the pair itself. A middle-utility, "
+                     "low-stability detector that was kept was kept because of "
+                     "its middle utility despite its low stability, and the "
+                     "same detector left out was left out because of its middle "
+                     "utility and its low stability."},
+        )},
+        {"id": "ga-near-best",
+         "title": "When the archetype and the ensemble disagree", "blocks": (
+            {"text": "Two of the six archetypes make a prediction. A detector "
+                     "high on both axes is expected in the ensemble and one low "
+                     "on both is expected out of it, and the algorithm sometimes "
+                     "does the opposite. The explanation answers those cases "
+                     "rather than passing over them."},
+            {"text": "The meta-learner is not seeded, so fitting it a second "
+                     "time on the same data gives a slightly different model and "
+                     "a slightly different fitness. That spread is the fitting "
+                     "noise, and it is measured directly by refitting the chosen "
+                     "ensemble thirty times. It sets the resolution of every "
+                     "fitness comparison in the run, because a difference "
+                     "smaller than it carries nothing about the detectors."},
+            {"text": "The near-best ensembles are the ones that scored so close "
+                     "to the best that the gap between them is smaller than the "
+                     "fitting noise. The reported ensemble is one of them, not "
+                     "the only one. So when the archetype and the reported "
+                     "ensemble disagree about a detector, the stage asks what "
+                     "the rest of the near-best ensembles did with it, and "
+                     "compares that share against the baseline, the share the "
+                     "detector would reach by chance given how large those "
+                     "ensembles are. If the near-best ensembles point the other "
+                     "way, the archetype was describing them and the reported "
+                     "ensemble was one arbitrary draw."},
+            {"formula": "cutoff   = best fitness − √2 · fitting noise\n"
+                        "baseline = mean size of the near-best ensembles / |pool|"},
+            {"text": "The √2 is there because each fitness was measured once, so "
+                     "the difference between two of them carries √2 times the "
+                     "fitting noise of one. Where too few ensembles clear the "
+                     "cutoff to compare against, the stage says it could not "
+                     "determine why rather than offering a reason it does not "
+                     "have."},
         )},
         {"id": "ga-meta-explained",
          "title": "SHAP, PFI and ALE", "blocks": (
@@ -1005,8 +1063,16 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
     "ga_selection": (
         ("Utility", "The average change in an ensemble's fitness when the "
                     "detector is added to it."),
-        ("Stability", "The share of the subsets the algorithm evaluated that "
-                      "included the detector."),
+        ("Stability", "How often the algorithm's population kept the detector, "
+                      "averaged over all generations."),
+        ("Fitting noise", "Fitting the meta-learner again on the same data "
+                          "gives a slightly different fitness. The fitting "
+                          "noise is how far it moves."),
+        ("Near-best ensembles", "The ensembles that scored so close to the best "
+                                "one that the gap between them is smaller than "
+                                "the fitting noise."),
+        ("Baseline", "The share of the near-best ensembles a detector would "
+                     "appear in by chance alone."),
     ),
     "ga_combination": (
         ("SHAP", "How much the meta-learner's anomaly probability moves when a "

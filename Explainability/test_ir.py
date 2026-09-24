@@ -21,20 +21,25 @@ _spec.loader.exec_module(ir)
 
 # ── Fixtures shaped like the verified explain_* returns ─────────────────────
 
+def _banded(code):
+    return {"u_level": code[0], "s_high": code[1] == "H", "archetype": code}
+
+
 def _ga_selection_result():
+    # A = MH included, B = ML included, C = ML excluded. No contradiction, so
+    # the near-best fallback stays out of the way.
     return {
         "best_ensemble": ["A", "B"],
-        "lofo": {"A": 0.05, "B": -0.02},
         "mean_marginal": {"A": {"contribution": 0.12}, "B": {"contribution": 0.08},
                           "C": {"contribution": 0.15}},
         "survival": {"A": [0.5, 0.75], "B": [0.25, 0.5], "C": [0.5, 0.25]},
         "archetypes": {
             "A": {"utility": 0.12, "stability_mean": 0.625,
-                  "relative": {"archetype": "HH"}, "absolute": {"archetype": "HH"}},
+                  "banded": _banded("MH")},
             "B": {"utility": 0.08, "stability_mean": 0.375,
-                  "relative": {"archetype": "LL"}, "absolute": {"archetype": "LL"}},
+                  "banded": _banded("ML")},
             "C": {"utility": 0.15, "stability_mean": 0.375,
-                  "relative": {"archetype": "HL"}, "absolute": {"archetype": "HL"}},
+                  "banded": _banded("ML")},
         },
         "n_subsets_evaluated": 9, "n_generations": 3,
     }
@@ -848,158 +853,164 @@ class TestBuilders(unittest.TestCase):
         self.assertNotIn("ga_sel.caveat.relative", {c["id"] for c in doc["caveats"]})
 
     def test_ga_selection_reason_grouping(self):
-        # Fixture: A = HH (both), B = LL with lofo<=0 (marginal), C = HL excluded
-        # with high utility (individual "why not this one?" callout).
+        # Fixture: A = MH included, B = ML included, C = ML excluded.
         doc = ir.build_ga_selection_ir("DS", "e1", _ga_selection_result())
         by_id = {a["id"]: a for a in doc["evidence"]}
         self.assertEqual(
-            by_id["ga_sel.included.both"]["text"],
-            "A was chosen for both high utility and high stability.")
-        self.assertIn("B was low on both utility and stability",
-                      by_id["ga_sel.included.marginal"]["text"])
-        # Low stability IS the reason an HL detector was left out, so the clause
-        # is causal rather than concessive.
+            by_id["ga_sel.included.MH"]["text"],
+            "A was chosen because of medium utility and high stability.")
         self.assertEqual(
-            by_id["ga_sel.excluded.C"]["text"],
-            "C had high utility but low stability, so it was left out.")
+            by_id["ga_sel.included.ML"]["text"],
+            "B was chosen because of medium utility despite low stability.")
+        # The same archetype reads the other way once the ensemble left it out.
+        self.assertEqual(
+            by_id["ga_sel.excluded.ML"]["text"],
+            "C was left out because of medium utility and low stability.")
         # Utility/stability numbers stay in `value`, never in the prose.
         self.assertEqual(
-            by_id["ga_sel.included.both"]["value"]["per_detector"]["A"],
+            by_id["ga_sel.included.MH"]["value"]["per_detector"]["A"],
             {"utility": 0.12, "stability": 0.625})
         for a in doc["evidence"]:
             self.assertNotIn("0.12", a["text"])
-        for rid in ("ga_sel.output.ensemble", "ga_sel.included.both",
-                    "ga_sel.included.marginal", "ga_sel.excluded.C"):
+        for rid in ("ga_sel.output.ensemble", "ga_sel.included.MH",
+                    "ga_sel.included.ML", "ga_sel.excluded.ML"):
             self.assertIn(rid, doc["required_atom_ids"])
 
+    def test_the_concession_follows_the_decision_not_the_archetype(self):
+        """The whole point of reading the decision into the atom: the same
+        archetype concedes a different axis depending on what happened to the
+        detector. Medium argues neither way, so it never takes the concession."""
+        self.assertEqual(ir._profile_clause("ML", "included"),
+                         "medium utility despite low stability")
+        self.assertEqual(ir._profile_clause("ML", "excluded"),
+                         "medium utility and low stability")
+        self.assertEqual(ir._profile_clause("MH", "included"),
+                         "medium utility and high stability")
+        self.assertEqual(ir._profile_clause("MH", "excluded"),
+                         "medium utility despite high stability")
+        self.assertEqual(ir._profile_clause("LH", "included"),
+                         "high stability despite low utility")
+        self.assertEqual(ir._profile_clause("HL", "excluded"),
+                         "low stability despite high utility")
+        self.assertEqual(ir._profile_clause("HH", "included"),
+                         "high utility and high stability")
+        self.assertEqual(ir._profile_clause("LL", "excluded"),
+                         "low utility and low stability")
+
     def test_ga_selection_full_reason_cascade(self):
-        def arch(u, s):
-            return {"stability_mean": 0.5, "relative": {"u_high": u, "s_high": s}}
+        def arch(code):
+            return {"stability_mean": 0.5, "banded": _banded(code)}
         result = {
-            "best_ensemble": ["Mb", "Mu", "Ms", "Mn", "Mm"],
-            "lofo": {"Mb": 0.1, "Mu": 0.1, "Ms": 0.1, "Mn": 0.03, "Mm": -0.01},
+            "best_ensemble": ["Mhh", "Mmh", "Mlh", "Mhl", "Mml"],
             "mean_marginal": {d: {"contribution": 0.1}
-                              for d in ("Mb", "Mu", "Ms", "Mn", "Mm", "Xh", "Xs", "Xp")},
+                              for d in ("Mhh", "Mmh", "Mlh", "Mhl", "Mml",
+                                        "Xhl", "Xlh", "Xml", "Xll")},
             "archetypes": {
-                "Mb": arch(True, True), "Mu": arch(True, False),
-                "Ms": arch(False, True), "Mn": arch(False, False),
-                "Mm": arch(False, False), "Xh": arch(True, False),
-                "Xs": arch(False, True), "Xp": arch(False, False),
-                "Xn": arch(False, False),          # not in mean_marginal → no data
+                "Mhh": arch("HH"), "Mmh": arch("MH"), "Mlh": arch("LH"),
+                "Mhl": arch("HL"), "Mml": arch("ML"),
+                "Xhl": arch("HL"), "Xlh": arch("LH"), "Xml": arch("ML"),
+                "Xll": arch("LL"),
+                "Xn": {"stability_mean": 0.5},     # no banded code → no data
             },
         }
         doc = ir.build_ga_selection_ir("DS", "e1", result)
         _check_envelope(self, doc, "ga_selection")
         by_id = {a["id"]: a for a in doc["evidence"]}
-        self.assertEqual(by_id["ga_sel.included.both"]["value"]["detectors"], ["Mb"])
-        self.assertEqual(by_id["ga_sel.included.utility"]["value"]["detectors"], ["Mu"])
-        self.assertEqual(by_id["ga_sel.included.stability"]["value"]["detectors"], ["Ms"])
-        self.assertEqual(by_id["ga_sel.included.marginal"]["value"]["detectors"], ["Mm"])
-        # Mn: low profile but lofo>0 → "needed" callout, with number. The low/low
-        # finding LEADS the sentence rather than sitting in a `despite` clause:
-        # backgrounded that way, narrators restated it as high/high.
-        needed = by_id["ga_sel.needed.Mn"]
-        self.assertEqual(
-            needed["text"],
-            "Mn has low utility and low stability, yet removing it lowers the "
-            "ensemble's fitness by 0.0300, which is why it was kept.")
-        # The profile is machine-checkable, so the verifier's attribution channel
-        # catches an inversion even though the code never reaches the prose.
-        self.assertEqual(needed["value"]["archetype"], "LL")
-        self.assertEqual(by_id["ga_sel.included.both"]["value"]["archetype"], "HH")
-        self.assertEqual(by_id["ga_sel.included.utility"]["value"]["archetype"], "HL")
-        self.assertEqual(by_id["ga_sel.included.stability"]["value"]["archetype"], "LH")
-        # Excluded: high-utility anomaly individual; the rest grouped by profile.
-        self.assertEqual(by_id["ga_sel.excluded.Xh"]["text"],
-                         "Xh had high utility but low stability, so it was left out.")
-        self.assertEqual(by_id["ga_sel.excluded.stable"]["value"]["detectors"], ["Xs"])
-        self.assertEqual(by_id["ga_sel.excluded.plain"]["value"]["detectors"], ["Xp"])
-        # Excluded groups lead with the profile too, for the same reason.
-        self.assertEqual(by_id["ga_sel.excluded.plain"]["text"],
-                         "Xp had low utility and low stability, so it was left out.")
-        self.assertEqual(by_id["ga_sel.excluded.nodata"]["value"]["detectors"], ["Xn"])
+        for code, member in (("HH", "Mhh"), ("MH", "Mmh"), ("LH", "Mlh"),
+                             ("HL", "Mhl"), ("ML", "Mml")):
+            atom = by_id[f"ga_sel.included.{code}"]
+            self.assertEqual(atom["value"]["detectors"], [member])
+            # The profile is machine-checkable, so the verifier's attribution
+            # channel catches an inversion even though the code never reaches
+            # the prose.
+            self.assertEqual(atom["value"]["archetype"], code)
+        for code, name in (("HL", "Xhl"), ("LH", "Xlh"), ("ML", "Xml"),
+                           ("LL", "Xll")):
+            self.assertEqual(
+                by_id[f"ga_sel.excluded.{code}"]["value"]["detectors"], [name])
+        self.assertEqual(by_id["ga_sel.excluded.LL"]["text"],
+                         "Xll was left out because of low utility and low "
+                         "stability.")
+        self.assertEqual(by_id["ga_sel.excluded.nodata"]["value"]["detectors"],
+                         ["Xn"])
 
-    def _hh_excluded(self, **over):
-        """Fixture with one HH detector left out, so the reason cascade runs."""
+    def _contradiction(self, decision="excluded", **over):
+        """One detector whose archetype and the reported ensemble disagree."""
         res = _ga_selection_result()
-        res["archetypes"]["C"] = {"utility": 0.15, "stability_mean": 0.9,
-                                  "relative": {"archetype": "HH"},
-                                  "absolute": {"archetype": "HH"}}
-        res["noise"] = {"eps": 0.02}
-        res["add_one_in"] = {"C": {"delta": 0.0, "tried_exact": True}}
-        res["redundancy"] = {"C": {"redundancy": 0.5, "partner": "A"}}
-        res["add_one_in"]["C"].update(over.pop("add_one_in", {}))
-        res["redundancy"]["C"].update(over.pop("redundancy", {}))
-        return res
-
-    def _reason_atom(self, **over):
-        doc = ir.build_ga_selection_ir("DS", "e1", self._hh_excluded(**over))
-        return {a["id"]: a for a in doc["evidence"]}["ga_sel.excluded.C"]
-
-    def test_exclusion_reason_covers_every_code(self):
-        """Every branch of the cascade is reachable and returns a listed code."""
-        cases = {
-            "not_available": (float("nan"), 0.5),
-            "rejected": (-0.5, 0.5),
-            "redundant": (0.0, 0.99),
-            "neutral": (0.0, 0.5),
-            "unevaluated": (0.5, 0.5),
+        det = "C" if decision == "excluded" else "B"
+        res["archetypes"][det]["banded"] = _banded(
+            "HH" if decision == "excluded" else "LL")
+        res["noise"] = {"sigma": 0.02, "eps": 0.04, "repeats": 30}
+        res["near_best"] = {
+            "defined": True, "n_near_best": 8, "n_evaluated": 40,
+            "baseline": 0.25,
+            "detectors": {det: {"count": 5, "share": 0.625, "says_in": True,
+                                "disagrees": decision == "excluded"}},
         }
-        seen = set()
-        for expected, (dv, r) in cases.items():
-            got = ir.exclusion_reason(dv, r, 0.02, 0.95)
-            self.assertEqual(got, expected, f"{dv}/{r}")
-            seen.add(got)
-        self.assertEqual(seen, set(ir.EXCLUSION_REASONS))
+        res["near_best"].update(over.pop("near_best", {}))
+        return res, det
 
-    def test_positive_delta_never_reads_as_neutral(self):
-        """eps is the floor: a gain inside it is neutral, outside it is not."""
-        self.assertEqual(ir.exclusion_reason(0.01, 0.0, 0.02, 0.95), "neutral")
-        self.assertEqual(ir.exclusion_reason(0.03, 0.0, 0.02, 0.95), "unevaluated")
+    def test_a_contradiction_is_answered_by_the_near_best_ensembles(self):
+        res, det = self._contradiction("excluded")
+        doc = ir.build_ga_selection_ir("DS", "e1", res)
+        atom = {a["id"]: a for a in doc["evidence"]}[f"ga_sel.contradiction.{det}"]
+        self.assertIn("high utility and high stability", atom["text"])
+        self.assertIn("yet it was left out of the ensemble", atom["text"])
+        self.assertIn("It is in 5 of the 8 near-best ensembles", atom["text"])
+        self.assertIn("62% against a baseline of 25%", atom["text"])
+        # Every number the sentence carries is in `value`, or the verifier reads
+        # it as invented.
+        self.assertEqual(atom["value"]["archetype"], "HH")
+        self.assertEqual(atom["value"]["n_near_best"], 8)
+        self.assertEqual(atom["value"]["count"], 5)
+        self.assertIn(f"ga_sel.contradiction.{det}", doc["required_atom_ids"])
 
-    def test_redundant_names_its_partner_in_the_text(self):
-        atom = self._reason_atom(redundancy={"redundancy": 0.99, "partner": "A"})
-        self.assertEqual(atom["value"]["reason"], "redundant")
-        # Both names sit in the text, so the verifier's conjunctive rule obliges
-        # the narrative to carry the partner as well as the subject.
-        self.assertIn("duplicate A", atom["text"])
-        self.assertIn("C", atom["text"])
+    def test_both_contradictions_share_one_structure(self):
+        """An included low/low detector and an excluded high/high one are the
+        same claim mirrored, so the sentence that answers them is one shape."""
+        res, det = self._contradiction("included")
+        res["near_best"]["detectors"][det] = {"count": 1, "share": 0.125,
+                                              "says_in": False,
+                                              "disagrees": True}
+        doc = ir.build_ga_selection_ir("DS", "e1", res)
+        atom = {a["id"]: a for a in doc["evidence"]}[f"ga_sel.contradiction.{det}"]
+        self.assertIn("low utility and low stability", atom["text"])
+        self.assertIn("yet it was kept in the ensemble", atom["text"])
+        self.assertIn("It is in 1 of the 8 near-best ensembles", atom["text"])
+        self.assertIn("12% against a baseline of 25%", atom["text"])
 
-    def test_redundant_without_a_partner_falls_back_to_neutral(self):
-        """A constant score column has no partner, so nothing may be duplicated."""
-        atom = self._reason_atom(redundancy={"redundancy": float("nan"),
-                                             "partner": None})
-        self.assertEqual(atom["value"]["reason"], "neutral")
-        self.assertNotIn("duplicate", atom["text"])
+    def test_a_contradiction_with_no_near_best_answer_says_so(self):
+        res, det = self._contradiction("excluded",
+                                       near_best={"defined": False,
+                                                  "detectors": {}})
+        doc = ir.build_ga_selection_ir("DS", "e1", res)
+        atom = {a["id"]: a for a in doc["evidence"]}[f"ga_sel.contradiction.{det}"]
+        self.assertIn("could not determine why", atom["text"])
+        self.assertNotIn("baseline", atom["text"])
+        self.assertIn("ga_sel.caveat.near_best_na",
+                      {c["id"] for c in doc["caveats"]})
 
-    def test_unevaluated_states_the_search_never_tried_it(self):
-        atom = self._reason_atom(add_one_in={"delta": 0.5})
-        self.assertEqual(atom["value"]["reason"], "unevaluated")
-        self.assertIn("never evaluated", atom["text"])
+    def test_near_best_ensembles_that_agree_are_not_an_answer(self):
+        """If the ensembles it could not be ranked apart from make the same
+        call, the plateau does not explain the contradiction and the stage may
+        not pretend otherwise."""
+        res, det = self._contradiction("excluded")
+        res["near_best"]["detectors"][det]["disagrees"] = False
+        doc = ir.build_ga_selection_ir("DS", "e1", res)
+        atom = {a["id"]: a for a in doc["evidence"]}[f"ga_sel.contradiction.{det}"]
+        self.assertIn("could not determine why", atom["text"])
 
-    def test_the_atom_carries_no_test_side_delta(self):
-        """The search and the decision read one split, so there is no second
-        delta to reconcile and none may be implied."""
-        atom = self._reason_atom(add_one_in={"delta": 0.5})
-        self.assertNotIn("delta_add_test", atom["value"])
-        self.assertNotIn("validation", atom["text"])
+    def test_fitting_noise_caveat_states_the_floor_and_its_own_error(self):
+        res, _ = self._contradiction("excluded")
+        caveats = {a["id"]: a for a in ir.build_ga_selection_ir(
+            "DS", "e1", res)["caveats"]}
+        self.assertIn("0.0200", caveats["ga_sel.caveat.fitting_noise"]["text"])
+        # 30 fits → 100/sqrt(2*29) ≈ 13%.
+        self.assertIn("13%", caveats["ga_sel.caveat.noise_precision"]["text"])
 
-    def test_tried_exact_is_recorded_but_never_stated(self):
-        """Provenance belongs in the record, not in a sentence the narrator
-        has to carry — the reason clause is what distinguishes these atoms."""
-        atom = self._reason_atom()
-        self.assertIs(atom["value"]["tried_exact"], True)
-        for phrase in ("never tried", "already evaluated", "the search evaluated"):
-            self.assertNotIn(phrase, atom["text"])
-
-    def test_refit_noise_caveat_states_the_floor(self):
-        doc = ir.build_ga_selection_ir("DS", "e1", self._hh_excluded())
-        caveat = {a["id"]: a for a in doc["caveats"]}["ga_sel.caveat.refit_noise"]
-        self.assertIn("0.0200", caveat["text"])
-
-    def test_no_refit_noise_caveat_without_a_measurement(self):
+    def test_no_fitting_noise_caveat_without_a_measurement(self):
         doc = ir.build_ga_selection_ir("DS", "e1", _ga_selection_result())
-        self.assertNotIn("ga_sel.caveat.refit_noise",
+        self.assertNotIn("ga_sel.caveat.fitting_noise",
                          {a["id"] for a in doc["caveats"]})
 
     def test_competition_rank_tolerates_float_noise(self):

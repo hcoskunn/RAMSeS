@@ -113,16 +113,15 @@ def _variants(directory, patterns, titles) -> List[Dict[str, Any]]:
 # ── Per-stage manifests ──────────────────────────────────────────────────────
 
 def _ga_selection(ds, ent):
-    """One headline figure; the other two are a click away.
+    """One headline figure, the rest a click away.
 
-    Utility × stability is the figure that answers the stage's question — where
-    a detector sits on the two axes that decided whether it was kept. LOFO and
-    the survival trace are the inputs to that placement, so they browse rather
-    than lead.
+    Utility x stability is the figure that answers the stage's question, where a
+    detector sits on the two axes that decided whether it was kept. Everything
+    else either regroups that placement or shows an input to it.
 
-    The gallery holds only those two. The injected-anomalies figure is about the
-    DATA, not the selection, and the two Friedman-interaction plots are from a
-    disabled axis, so a run that still has them on disk is showing leftovers.
+    The injected-anomalies figure is about the DATA, not the selection, and the
+    two Friedman-interaction plots are from a disabled axis, so a run that still
+    has them on disk is showing leftovers.
     """
     d = _dir_for(TREE_GA, ds, ent)
     headline, gallery = [], []
@@ -130,20 +129,47 @@ def _ga_selection(ds, ent):
         headline.append(_fig(
             path, "Utility × stability",
             "Where each detector sits on the two axes that explain its "
-            "selection, split at the median of each. Both axes start at zero."))
+            "selection, coloured by the archetype the two levels make. Filled "
+            "points are in the chosen ensemble. Both axes start at zero."))
         break
+    for path in _ls(d, "ga_selection_profile_*.png"):
+        gallery.append(_fig(
+            path, "Archetype profile",
+            "How many detectors landed in each archetype and the share of each "
+            "the algorithm kept. A short minority segment on the HH or LL bar "
+            "is a detector the two axes did not account for."))
+    for path in _ls(d, "ga_selection_bands_*.png"):
+        gallery.append(_fig(
+            path, "Where the cuts fall",
+            "The same two axes with the thresholds drawn instead of the "
+            "archetype colours. The shaded band is the middle utility class, "
+            "one standard deviation either side of the pool mean, and the "
+            "dashed line is the stability cut at the pool mean."))
     for path in _ls(d, "ga_selection_utility_*.png"):
         gallery.append(_fig(
-            path, "LOFO",
-            "Leave-one-out fitness change on the chosen ensemble, and mean "
-            "marginal contribution per detector."))
+            path, "Utility",
+            "Mean marginal contribution per detector, sorted, each bar showing "
+            "how precisely it was measured. The shaded band is the middle "
+            "class, and bars whose error reaches into it are detectors the run "
+            "cannot separate from the pool. Ensemble members are marked with a "
+            "star."))
+    for path in _ls(d, "ga_selection_plateau_*.png"):
+        gallery.append(_fig(
+            path, "Near-best ensembles",
+            "Every evaluated ensemble by fitness, best first. The line marks "
+            "how close to the best an ensemble had to score for this run to be "
+            "unable to rank it apart from the winner."))
     survival = _variants(d, ["ga_selection_survival_*[!l].png", "ga_selection_survival_all_*.png"],
                          ["Ensemble highlighted", "All detectors"])
     survival = [f for f in survival if "_all_" not in f["name"]] + \
                [f for f in survival if "_all_" in f["name"]]
     for figure in survival:
-        gallery.append(dict(figure, caption="How consistently the algorithm "
-                                            "kept each detector."))
+        gallery.append(dict(figure, caption=(
+            "The share of each generation's population that contained the "
+            "detector. Members of the chosen ensemble are drawn bold."
+            if "_all_" not in figure["name"] else
+            "The same trajectories with every detector drawn equally, so they "
+            "can be compared without the chosen ensemble standing out.")))
     return headline, gallery
 
 

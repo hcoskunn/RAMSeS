@@ -1014,70 +1014,57 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
     return env
 
 
-# Included-member reason buckets, in narration order. `needed` (a low-profile
-# member kept because removing it costs fitness) is grouped by LOFO cost below.
-_GA_SEL_BUCKETS = ("both", "utility", "stability", "marginal")
+# The archetype codes, as the verifier's attribution channel reads them: letter
+# 0 is the utility level, letter 1 the stability level. The code never reaches
+# the prompt (only atom `text` does) — the terminology stays out of the prose
+# while the claim stays machine-checkable.
+_GA_SEL_CODES = ("HH", "MH", "LH", "HL", "ML", "LL")
 
-# The utility/stability profile each bucket asserts, as the two-letter code the
-# verifier's attribution channel checks claimed "high/low utility" wording
-# against. The code never reaches the prompt (only atom `text` does) — the
-# terminology stays out of the prose while the claim stays machine-checkable.
-_GA_SEL_BUCKET_CODES = {"both": "HH", "utility": "HL", "stability": "LH",
-                        "marginal": "LL"}
+_LEVEL_WORD = {"H": "high", "M": "medium", "L": "low"}
+
+# Which level argues FOR each decision. A level that argues against it is the
+# one the sentence concedes with "despite"; medium argues neither way, so it
+# always joins with "and".
+_SUPPORTS = {"included": "H", "excluded": "L"}
 
 
-def exclusion_reason(delta: Any, redundancy: Any, eps: Any, r_hi: Any) -> str:
-    """Closed enum for why a high-utility, high-stability detector was left out.
+def _profile_clause(code: str, decision: str) -> str:
+    """The "for X utility and/despite Y stability" half of a member sentence.
 
-    The search and the final decision read the same split, so a delta is one
-    measurement, not two to reconcile. A positive delta therefore says only
-    that the search never evaluated that combination — the winner is the
-    argmax over everything it did.
+    The concession goes to whichever axis argues against the decision, so the
+    same archetype reads differently depending on what the ensemble did with
+    the detector: a medium-utility, low-stability detector was kept *despite*
+    its low stability, and left out *for* it.
     """
-    if _is_nan(delta):
-        return "not_available"
-    floor = 0.0 if _is_nan(eps) else float(eps)
-    if delta < -floor:
-        return "rejected"
-    if abs(delta) <= floor:
-        if not _is_nan(redundancy) and not _is_nan(r_hi) and redundancy >= r_hi:
-            return "redundant"
-        return "neutral"
-    return "unevaluated"
-
-
-EXCLUSION_REASONS = ("rejected", "redundant", "neutral", "unevaluated",
-                     "not_available")
+    against = "L" if decision == "included" else "H"
+    u, s = code[0], code[1]
+    u_txt = f"{_LEVEL_WORD[u]} utility"
+    s_txt = f"{_LEVEL_WORD[s]} stability"
+    if u == against and s != against:
+        return f"{s_txt} despite {u_txt}"
+    if s == against and u != against:
+        return f"{u_txt} despite {s_txt}"
+    return f"{u_txt} and {s_txt}"
 
 
 def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> Dict[str, Any]:
     best = list(result.get("best_ensemble", []))
-    lofo: Dict[str, float] = result.get("lofo", {})
     mm: Dict[str, Dict[str, float]] = result.get("mean_marginal", {})
     archetypes: Dict[str, Dict[str, Any]] = result.get("archetypes", {})
     detectors = list(archetypes.keys())
     util = {d: mm.get(d, {}).get("contribution", float("nan")) for d in detectors}
-    add_one_in: Dict[str, Dict[str, Any]] = result.get("add_one_in", {}) or {}
-    redundancy: Dict[str, Dict[str, Any]] = result.get("redundancy", {}) or {}
     noise: Dict[str, float] = result.get("noise", {}) or {}
-    eps = noise.get("eps", float("nan"))
-    r_values = [v.get("redundancy", float("nan")) for v in redundancy.values()]
-    r_finite = [r for r in r_values if not _is_nan(r)]
-    # The entity's own p90, floored at 0.95: detector scores correlate highly as
-    # a rule, so a fixed cutoff would call almost any pair duplicates.
-    r_hi = max(0.95, float(np.percentile(r_finite, 90))) if r_finite else float("nan")
+    sigma = noise.get("sigma", float("nan"))
+    repeats = noise.get("repeats", 0)
+    near_best: Dict[str, Any] = result.get("near_best", {}) or {}
+    nb_det: Dict[str, Dict[str, Any]] = near_best.get("detectors", {}) or {}
 
-    def _flags(d: str) -> Tuple[Any, Any]:
-        """Relative (median-split) high/low utility & stability flags. Prefers
-        the explicit booleans; falls back to the 2-letter archetype code
-        (e.g. 'HL' -> high utility, low stability) when only the code is given."""
-        rel = archetypes.get(d, {}).get("relative", {})
-        u, s = rel.get("u_high"), rel.get("s_high")
-        if u is None and s is None:
-            code = rel.get("archetype", "")
-            if isinstance(code, str) and len(code) == 2 and set(code) <= {"H", "L"}:
-                return code[0] == "H", code[1] == "H"
-        return u, s
+    def _code(d: str) -> Any:
+        """The detector's banded archetype code, or None when it has no utility
+        data. An unrecognised code is None too: a wrong two-letter guess would
+        be asserted to the verifier as a profile the detector does not have."""
+        code = archetypes.get(d, {}).get("banded", {}).get("archetype")
+        return code if code in _GA_SEL_CODES else None
 
     def _num(d: str) -> Dict[str, Any]:
         """Per-detector utility/stability, kept in `value` for grounding but out
@@ -1087,15 +1074,6 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
 
     def _were(names: Sequence[str]) -> str:
         return "was" if len(names) == 1 else "were"
-
-    def _have(names: Sequence[str]) -> str:
-        return "had" if len(names) == 1 else "each had"
-
-    def _them(names: Sequence[str]) -> str:
-        return "it" if len(names) == 1 else "them"
-
-    def _they(names: Sequence[str]) -> str:
-        return "it" if len(names) == 1 else "they"
 
     evidence: List[Dict[str, Any]] = []
     required: List[str] = []
@@ -1108,191 +1086,145 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
          else "The genetic algorithm selected no ensemble."), order=1))
     required.append("ga_sel.output.ensemble")
 
-    # ── Included members: one reason per member, then grouped by reason ──
-    buckets: Dict[str, List[str]] = {b: [] for b in _GA_SEL_BUCKETS}
-    needed: List[str] = []
-    for d in best:
-        u_high, s_high = _flags(d)
-        lv = lofo.get(d, float("nan"))
-        if u_high and s_high:
-            buckets["both"].append(d)
-        elif u_high:
-            buckets["utility"].append(d)
-        elif s_high:
-            buckets["stability"].append(d)
-        elif not _is_nan(lv) and lv > 0:
-            needed.append(d)          # low profile, but removing it costs fitness
-        else:
-            buckets["marginal"].append(d)
-
-    def _bucket_text(b: str, names: Sequence[str]) -> str:
-        w, th = _were(names), _them(names)
-        if b == "both":
-            return (f"{_oxford(names)} {w} chosen for both high utility and high "
-                    f"stability.")
-        if b == "utility":
-            return (f"{_oxford(names)} {w} chosen for high utility, despite lower "
-                    f"stability.")
-        if b == "stability":
-            return (f"{_oxford(names)} {w} chosen for high stability (the genetic "
-                    f"algorithm kept {th} in most generations) despite low utility.")
-        return (f"{_oxford(names)} {w} low on both utility and stability, and "
-                f"removing {th} barely changes fitness; the genetic algorithm "
-                f"retained {th} in its best-scoring subset.")
-
     order = 10
-    for b in _GA_SEL_BUCKETS:
-        names = buckets[b]
+
+    def _fallback_atom(d: str, code: str, decision: str) -> Tuple[str, Dict[str, Any], str]:
+        """The near-best-ensembles sentence, one shape for both contradictions.
+
+        The archetype expects a high/high detector in and a low/low one out. When
+        the reported ensemble does the opposite, the question is whether the
+        ensembles it could not be ranked apart from do the same. One structure
+        serves both directions: state the expectation, state what the reported
+        ensemble did, then let the near-best ensembles answer.
+        """
+        eid = f"ga_sel.contradiction.{d}"
+        stat = nb_det.get(d, {})
+        clause = _profile_clause(code, decision)
+        did = ("it was left out of the ensemble" if decision == "excluded"
+               else "it was kept in the ensemble")
+        base = dict(_num(d), archetype=code, decision=decision)
+        if not near_best.get("defined") or not stat.get("disagrees"):
+            return eid, base, (
+                f"{d} has {clause}, yet {did}. The selection stage could not "
+                f"determine why.")
+        n_near = near_best["n_near_best"]
+        count, share = stat["count"], stat["share"]
+        baseline = near_best["baseline"]
+        base.update(n_near_best=n_near, count=count, share=_val(share, 2),
+                    baseline=_val(baseline, 2),
+                    n_evaluated=near_best.get("n_evaluated"))
+        return eid, base, (
+            f"{d} has {clause}, yet {did}. It is in {count} of the {n_near} "
+            f"near-best ensembles — {_fmt(100 * share, 0)}% against a baseline "
+            f"of {_fmt(100 * baseline, 0)}% — so the reported ensemble is one "
+            f"of several equally supported answers.")
+
+    # ── Included members: grouped by archetype, contradictions called out ──
+    inc_groups: Dict[str, List[str]] = {c: [] for c in _GA_SEL_CODES}
+    inc_nodata: List[str] = []
+    for d in best:
+        code = _code(d)
+        if code is None:
+            inc_nodata.append(d)
+        elif code == "LL":
+            eid, value, text = _fallback_atom(d, code, "included")
+            evidence.append(make_atom(eid, "member_reason", d, value, text,
+                                      order=order))
+            required.append(eid)
+            order += 10
+        else:
+            inc_groups[code].append(d)
+
+    for code in _GA_SEL_CODES:
+        names = inc_groups[code]
         if not names:
             continue
-        bid = f"ga_sel.included.{b}"
+        bid = f"ga_sel.included.{code}"
         evidence.append(make_atom(
-            bid, "member_reason", b,
-            {"detectors": names, "reason": b,
-             "archetype": _GA_SEL_BUCKET_CODES[b],
+            bid, "member_reason", code,
+            {"detectors": names, "archetype": code,
              "per_detector": {d: _num(d) for d in names}},
-            _bucket_text(b, names), order=order))
+            f"{_oxford(names)} {_were(names)} chosen because of "
+            f"{_profile_clause(code, 'included')}.", order=order))
         required.append(bid)
         order += 10
-    # Detectors kept only because removing them costs fitness are grouped by
-    # that cost. Emitting one near-identical sentence each — same verb, same
-    # structure, often the same LOFO number — is what made a narrator open the
-    # second with "Similarly," and then reach for the dominant "high utility and
-    # high stability" phrasing from the group above, inverting the very fact the
-    # sentence was carrying. One sentence per distinct cost has nothing to drift
-    # into. `despite` is avoided for the same reason: a concessive clause
-    # backgrounds the low/low finding and invites restatement as a positive.
-    needed_by_cost: Dict[str, List[str]] = {}
-    for d in needed:
-        needed_by_cost.setdefault(_fmt(lofo.get(d, float("nan")), 4), []).append(d)
-    for cost, names in sorted(needed_by_cost.items(),
-                              key=lambda kv: (-len(kv[1]), kv[0])):
-        rid = ("ga_sel.needed." + names[0] if len(names) == 1
-               else "ga_sel.needed.group" + str(len(needed_by_cost)))
-        if len(names) == 1:
-            text = (f"{names[0]} has low utility and low stability, yet removing "
-                    f"it lowers the ensemble's fitness by {cost}, which is why it "
-                    f"was kept.")
-        else:
-            text = (f"{_oxford(names)} each have low utility and low stability, "
-                    f"yet removing any one of them lowers the ensemble's fitness "
-                    f"by {cost} apiece, which is why all of them were kept.")
+    if inc_nodata:
+        bid = "ga_sel.included.nodata"
         evidence.append(make_atom(
-            rid, "member_reason", names[0] if len(names) == 1 else "needed",
-            {"detectors": names, "reason": "needed",
-             "lofo": _val(lofo.get(names[0], float("nan")), 4),
-             "per_detector": {d: _num(d) for d in names},
-             # The verifier's archetype channel checks claimed high/low wording
-             # against this code; without it the inversion above was invisible.
-             "archetype": "LL"},
-            text, order=order))
-        required.append(rid)
+            bid, "member_reason", "nodata",
+            {"detectors": inc_nodata,
+             "per_detector": {d: _num(d) for d in inc_nodata}},
+            f"{_oxford(inc_nodata)} {_were(inc_nodata)} chosen with no "
+            f"marginal-contribution data to judge utility.", order=order))
+        required.append(bid)
         order += 10
 
-    # ── Excluded detectors: grouped by profile, notable ones called out ──
+    # ── Excluded detectors: grouped by archetype, contradictions called out ──
     excluded = sorted((d for d in detectors if d not in best),
                       key=lambda d: (float("-inf") if _is_nan(util[d]) else util[d]),
                       reverse=True)
-    exc_stable: List[str] = []
-    exc_plain: List[str] = []
+    exc_groups: Dict[str, List[str]] = {c: [] for c in _GA_SEL_CODES}
     exc_nodata: List[str] = []
     for d in excluded:
-        if _is_nan(util[d]):
+        code = _code(d)
+        if code is None:
             exc_nodata.append(d)
-            continue
-        u_high, s_high = _flags(d)
-        if u_high and s_high:
-            # Every atom here shares one profile, so the REASON leads and the
-            # profile trails. Fronting the profile — the shape that fixed these
-            # atoms when they still carried both HH and HL — would now open
-            # every one of them identically, which is what made a narrator merge
-            # them and hand one detector another's facts.
-            eid = f"ga_sel.excluded.{d}"
-            aoi = add_one_in.get(d, {})
-            red = redundancy.get(d, {})
-            delta = aoi.get("delta", float("nan"))
-            r = red.get("redundancy", float("nan"))
-            partner = red.get("partner")
-            reason = exclusion_reason(delta, r, eps, r_hi)
-            if reason == "redundant" and not partner:
-                reason = "neutral"
-            dv = _fmt(delta, 4)
-            texts = {
-                "rejected":
-                    f"Adding {d} to the chosen ensemble lowered fitness by {dv}, so "
-                    f"despite high utility and high stability it was left out.",
-                "redundant":
-                    f"{d}'s scores duplicate {partner}, which is in the ensemble, at a "
-                    f"correlation of {_fmt(r, 3)}; adding it moved fitness by only {dv}, "
-                    f"so despite high utility and high stability it was left out.",
-                "neutral":
-                    f"Adding {d} to the chosen ensemble moved fitness by only {dv}, so "
-                    f"despite high utility and high stability it was left out.",
-                "unevaluated":
-                    f"Adding {d} to the chosen ensemble raised fitness by {dv}; the "
-                    f"genetic algorithm never evaluated that combination, so the "
-                    f"winner is the best of what it did try, not of every subset.",
-                "not_available":
-                    f"{d} had high utility and high stability, but the fitness of the "
-                    f"ensemble with it added could not be computed.",
-            }
-            evidence.append(make_atom(
-                eid, "excluded_detector", d,
-                dict(_num(d), u_high=True, s_high=True, archetype="HH",
-                     reason=reason, delta_add=_val(delta, 4),
-                     redundancy=_val(r, 3), redundant_with=partner,
-                     tried_exact=aoi.get("tried_exact")),
-                texts[reason], order=order))
+        elif code == "HH":
+            eid, value, text = _fallback_atom(d, code, "excluded")
+            evidence.append(make_atom(eid, "excluded_detector", d, value, text,
+                                      order=order))
             required.append(eid)
             order += 10
-        elif u_high:                  # high utility, low stability
-            eid = f"ga_sel.excluded.{d}"
-            evidence.append(make_atom(
-                eid, "excluded_detector", d,
-                dict(_num(d), u_high=True, s_high=False, archetype="HL"),
-                f"{d} had high utility but low stability, so it was left out.",
-                order=order))
-            required.append(eid)
-            order += 10
-        elif s_high:
-            exc_stable.append(d)
         else:
-            exc_plain.append(d)
-    for gid, names, code, txt in (
-        ("ga_sel.excluded.stable", exc_stable, "LH",
-         lambda ns: f"{_oxford(ns)} {_have(ns)} low utility and high stability, "
-                    f"so {_they(ns)} {_were(ns)} left out."),
-        ("ga_sel.excluded.plain", exc_plain, "LL",
-         lambda ns: f"{_oxford(ns)} {_have(ns)} low utility and low stability, "
-                    f"so {_they(ns)} {_were(ns)} left out."),
+            exc_groups[code].append(d)
+
+    for code in _GA_SEL_CODES:
+        names = exc_groups[code]
+        if not names:
+            continue
+        gid = f"ga_sel.excluded.{code}"
+        evidence.append(make_atom(
+            gid, "excluded_group", code,
+            {"detectors": names, "archetype": code,
+             "per_detector": {d: _num(d) for d in names}},
+            f"{_oxford(names)} {_were(names)} left out because of "
+            f"{_profile_clause(code, 'excluded')}.", order=order))
+        required.append(gid)
+        order += 10
+    if exc_nodata:
         # No utility data means no profile to assert, so no code to check.
-        ("ga_sel.excluded.nodata", exc_nodata, None,
-         lambda ns: f"{_oxford(ns)} {_were(ns)} left out with no marginal-"
-                    f"contribution data to judge utility."),
-    ):
-        if names:
-            value: Dict[str, Any] = {"detectors": names,
-                                     "per_detector": {d: _num(d) for d in names}}
-            if code:
-                value["archetype"] = code
-            evidence.append(make_atom(
-                gid, "excluded_group", gid.rsplit(".", 1)[1], value,
-                txt(names), order=order))
-            required.append(gid)
-            order += 10
+        gid = "ga_sel.excluded.nodata"
+        evidence.append(make_atom(
+            gid, "excluded_group", "nodata",
+            {"detectors": exc_nodata,
+             "per_detector": {d: _num(d) for d in exc_nodata}},
+            f"{_oxford(exc_nodata)} {_were(exc_nodata)} left out with no "
+            f"marginal-contribution data to judge utility.", order=order))
+        required.append(gid)
+        order += 10
 
     caveats: List[Dict[str, Any]] = []
-    if not _is_nan(eps):
+    if not _is_nan(sigma):
         caveats.append(make_atom(
-            "ga_sel.caveat.refit_noise", "caveat", "fitness", _val(eps, 4),
-            f"Refitting the meta-learner on unchanged data moves the fitness by "
-            f"about {_fmt(eps, 4)}, so differences smaller than that are not "
-            f"meaningful."))
-    if n < 2:
+            "ga_sel.caveat.fitting_noise", "caveat", "fitness", _val(sigma, 4),
+            f"Fitting the meta-learner again on unchanged data moves the fitness "
+            f"by about {_fmt(sigma, 4)}, so differences smaller than that are "
+            f"not meaningful."))
+        if repeats > 1:
+            # The spread is itself estimated from a finite number of fits, and
+            # the standard error of a standard deviation is 1/sqrt(2(n-1)).
+            pct = 100.0 / (2.0 * (repeats - 1)) ** 0.5
+            caveats.append(make_atom(
+                "ga_sel.caveat.noise_precision", "caveat", "fitness",
+                _val(pct, 1),
+                f"That figure is itself measured from {repeats} fits, so it "
+                f"carries about {_fmt(pct, 0)}% sampling error."))
+    if not near_best.get("defined"):
         caveats.append(make_atom(
-            "ga_sel.caveat.lofo_na", "caveat", "lofo", None,
-            "With fewer than two detectors, LOFO (the leave-one-out fitness "
-            "change) is undefined."))
+            "ga_sel.caveat.near_best_na", "caveat", "near_best", None,
+            "Too few ensembles scored close enough to the best one to say "
+            "whether the reported ensemble was one of several equally supported "
+            "answers."))
 
     question = ("Why were the detectors in the ensemble chosen, and why were the "
                 "rest left out?")

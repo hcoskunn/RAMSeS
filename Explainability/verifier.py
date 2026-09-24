@@ -95,7 +95,9 @@ _SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 # Archetype phrase halves, e.g. "high utility" / "low stability". Comparatives
 # count: a narrator writing "lower stability" is making the same claim as "low
 # stability", and reading only the plain form let a wrong profile through.
-_PROFILE_ADJ = r"(?:high|low)(?:er)?"
+# Every alternative's first letter is its archetype level, which is what the
+# comparison downstream reads.
+_PROFILE_ADJ = r"(?:high|low|medium|moderate|middling)(?:er)?"
 _UTIL_RE = re.compile(rf"\b({_PROFILE_ADJ})[-\s]utility\b")
 _STAB_RE = re.compile(rf"\b({_PROFILE_ADJ})[-\s]stability\b")
 # The shared-adjective form: in "low utility and stability" the second noun
@@ -235,7 +237,9 @@ def _per_subject_allowed(ir_doc: Dict[str, Any]) -> Tuple[
             code = value
         elif isinstance(value, dict) and isinstance(value.get("archetype"), str):
             code = value["archetype"]
-        if not (code and len(code) == 2 and set(code) <= {"H", "L"}):
+        # Utility carries a middle level, stability does not.
+        if not (code and len(code) == 2 and code[0] in "HML"
+                and code[1] in "HL"):
             code = None
 
         if _ENTITY_RE.fullmatch(subj):

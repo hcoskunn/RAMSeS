@@ -623,7 +623,7 @@ def compose_global_narrative(stage_texts: Dict[str, str],
 #             + len(metrics.get("missing_required_ids", [])))
 
 
-_PROFILE_WORD = {"H": "high", "L": "low"}
+_PROFILE_WORD = {"H": "high", "M": "medium", "L": "low"}
 
 
 # def _violation_lines(metrics: Dict[str, Any], ir_doc: Dict[str, Any]) -> List[str]:

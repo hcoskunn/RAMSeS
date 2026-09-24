@@ -234,6 +234,20 @@ class TestVerifier(unittest.TestCase):
         self.assertGreater(v["hallucination_rate"], 0.0)
 
 
+def _middle_ir():
+    """One detector sitting in the middle band of the utility axis."""
+    return {
+        "ir_version": "1.0", "stage": "toy", "dataset": "DS", "entity": "e1",
+        "output": {},
+        "evidence": [
+            {"id": "c.M", "type": "member_reason", "subject": "MD_2",
+             "value": {"archetype": "MH"},
+             "text": "MD_2 was chosen for medium utility and high stability."},
+        ],
+        "caveats": [], "required_atom_ids": ["c.M"],
+    }
+
+
 def _archetype_ir():
     """Two member cards with opposite archetypes for attribution tests."""
     return {
@@ -532,6 +546,44 @@ class TestVerifierProfileClaims(unittest.TestCase):
             "LOF_1 shows low utility and high stability while NN_3 shows high "
             "utility and high stability.", _archetype_ir())
         self.assertEqual(v["attribution_warnings"], [])
+
+    def test_a_middle_claim_is_read(self):
+        # Without this the whole middle class went unchecked: no adjective
+        # matched, so no claim was ever compared against the archetype.
+        v = verifier.verify_narrative("MD_2 was kept for medium utility.",
+                                      _middle_ir())
+        self.assertEqual(v["attribution_warnings"], [])
+
+    def test_a_wrong_level_on_a_middle_detector_is_warned(self):
+        v = verifier.verify_narrative("MD_2 was kept for high utility.",
+                                      _middle_ir())
+        util = [w for w in v["attribution_warnings"] if w["aspect"] == "utility"]
+        self.assertEqual(len(util), 1)
+        self.assertEqual(util[0]["claimed"], ["H"])
+        self.assertEqual(util[0]["actual"], "M")
+
+    def test_a_middle_claim_on_a_high_detector_is_warned(self):
+        v = verifier.verify_narrative("NN_3 was kept for medium utility.",
+                                      _archetype_ir())
+        util = [w for w in v["attribution_warnings"] if w["aspect"] == "utility"]
+        self.assertEqual(len(util), 1)
+        self.assertEqual(util[0]["claimed"], ["M"])
+        self.assertEqual(util[0]["actual"], "H")
+
+    def test_moderate_and_middling_read_as_medium(self):
+        for word in ("moderate", "middling"):
+            v = verifier.verify_narrative(f"MD_2 was kept for {word} utility.",
+                                          _middle_ir())
+            self.assertEqual(v["attribution_warnings"], [], word)
+
+    def test_a_middle_detector_claimed_both_ways_is_contradictory(self):
+        v = verifier.verify_narrative(
+            "MD_2 was kept for medium utility despite its low utility.",
+            _middle_ir())
+        util = [w for w in v["attribution_warnings"] if w["aspect"] == "utility"]
+        self.assertEqual(len(util), 1)
+        self.assertTrue(util[0]["contradictory"])
+        self.assertEqual(util[0]["claimed"], ["L", "M"])
 
 
 class TestVerifierRoleMixing(unittest.TestCase):

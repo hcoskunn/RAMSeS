@@ -1578,19 +1578,26 @@ class TestPlots(unittest.TestCase):
         self.assertEqual([p.name for p in found], [bracketed.name])
 
     def test_ga_selection_leads_with_one_figure(self):
-        """Utility x stability answers the stage's question; LOFO and survival
-        are the inputs to it and browse. The injected-anomalies figure is about
-        the data rather than the selection and is not listed at all."""
-        for name in ("ga_selection_archetypes_SKAB_7", "ga_selection_utility_SKAB_7",
+        """The archetype profile answers the stage's question; the scatter, the
+        axis inputs and the plateau browse. The injected-anomalies figure is
+        about the data rather than the selection and is not listed at all."""
+        for name in ("ga_selection_profile_SKAB_7", "ga_selection_bands_SKAB_7",
+                     "ga_selection_archetypes_SKAB_7", "ga_selection_utility_SKAB_7",
+                     "ga_selection_plateau_SKAB_7",
                      "ga_selection_survival_SKAB_7", "ga_selection_survival_all_SKAB_7",
                      "ensemble_scores_SKAB_7_Data"):
             self._touch(f"GA_Ens/SKAB/7/{name}.png")
         headline, gallery = self.plots._ga_selection("SKAB", "7")
         self.assertEqual([f["title"] for f in headline], ["Utility \u00d7 stability"])
-        self.assertEqual(gallery[0]["title"], "LOFO")
+        self.assertEqual(gallery[0]["title"], "Archetype profile")
         names = " ".join(f["name"] for f in gallery)
-        self.assertIn("survival", names)
+        for expected in ("bands", "utility", "plateau", "survival"):
+            self.assertIn(expected, names)
         self.assertNotIn("ensemble_scores", names)
+        # Every gallery figure carries its own caption now that the figures
+        # themselves have no titles.
+        for figure in gallery:
+            self.assertTrue(figure["caption"], figure["name"])
 
     def test_the_smoothed_reward_curve_is_not_offered(self):
         """Regimes are read off the raw signal, and a smoothed curve puts a

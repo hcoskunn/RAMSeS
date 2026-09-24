@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 from loguru import logger
@@ -702,13 +703,8 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     #                     plot_name, plot_path)
     # logger.info(f"  ✓ Plot saved to {plot_path}/{plot_name}")
     
-    logger.info(f"  → Initializing GA population (size={population_size})...")
     import time as time_module
-    start_init = time_module.time()
     # individual_predictions = []
-    population = initialize_population(algorithm_list, population_size)
-    logger.info(f"  ✓ Population initialized in {time_module.time() - start_init:.2f}s")
-    print(population)
     evaluated_ensembles = {}  # HashMap to track evaluated ensembles and their scores
     file_name = results_dir("Outputs", "GA_Ens") + f'ensemble_scores_{dataset}_{entity}_{meta_model_type}_{population_size}_{generations}_{mutation_rate}_{date_time_string}.txt'
 
@@ -738,6 +734,26 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
         algorithm_list,
         is_ensemble=True)
     logger.info(f"  ✓ Training data evaluation complete in {time_module.time() - start_train:.2f}s")
+
+    usable_detectors = [m for m in algorithm_list
+                        if m in base_model_predictions_train_dict
+                        and m in individual_predictions]
+    if not usable_detectors:
+        raise ValueError("No detector produced usable predictions on both splits.")
+    if len(usable_detectors) < len(algorithm_list):
+        dropped = [m for m in algorithm_list if m not in usable_detectors]
+        logger.warning(
+            f"  ⚠ {len(dropped)} detector(s) produced no usable predictions and are "
+            f"excluded from the GA: {', '.join(dropped)}")
+        base_model_predictions_train = np.array(
+            [base_model_predictions_train_dict[m] for m in usable_detectors]).T
+        algorithm_list = usable_detectors
+
+    logger.info(f"  → Initializing GA population (size={population_size})...")
+    start_init = time_module.time()
+    population = initialize_population(algorithm_list, population_size)
+    logger.info(f"  ✓ Population initialized in {time_module.time() - start_init:.2f}s")
+    print(population)
 
     # Reuse test predictions from individual_predictions instead of re-computing
     logger.info(f"  → Reusing test predictions from individual evaluation (no re-computation)...")
@@ -911,26 +927,9 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
      #       f.write(f"Ensemble: {list(ensemble)}, f1 : {result[0]}, PR_AUC: {result[1]}, Fitness Score: {result[2]}\n")
 
     if explain and best_ensemble:
-        def _evaluate_fitness_full(subset):
-            key = tuple(sorted(subset))
-            if key in evaluated_ensembles:
-                return evaluated_ensembles[key]
-            res = fitness_function(list(subset), train_data, test_data, trained_models,
-                                   individual_predictions, base_model_predictions_train,
-                                   algorithm_list, base_model_predictions_test,
-                                   y_true_train, y_true_test,
-                                   meta_model_type=meta_model_type,
-                                   metric=metric, vus_win=vus_win)
-            evaluated_ensembles[key] = res
-            return res
-
-        def _evaluate_fitness(subset):
-            return _evaluate_fitness_full(subset)[2]
-
         explain_ga_selection(best_ensemble, evaluated_ensembles, generation_populations,
-                             algorithm_list, population_size, _evaluate_fitness,
+                             algorithm_list, population_size,
                              dataset, entity, explain=True,
-                             evaluate_fitness_full=_evaluate_fitness_full,
                              base_fit=base_model_predictions_train, y_fit=y_true_train,
                              base_eval=base_model_predictions_test, y_eval=y_true_test,
                              meta_model_type=meta_model_type,
@@ -957,8 +956,6 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
 #
 #  Two analytical axes per candidate detector:
 #    1. Utility    — mean marginal contribution across evaluated subsets.
-#                    LOFO is computed alongside it but is NOT part of the axis;
-#                    it explains ensemble members that are low on both.
 #    2. Stability  — evolutionary survival rate per generation:
 #                    P(d_j, g) = (#individuals in gen g containing d_j) /
 #                                 population_size.
@@ -969,10 +966,10 @@ def _conditional_mean_fitness(
     evaluated_ensembles: Dict[Tuple[str, ...], tuple],
     present: Tuple[str, ...] = (),
     absent: Tuple[str, ...] = (),
-) -> Tuple[float, int]:
+) -> Tuple[float, int, float]:
     """Mean of subset fitness over evaluated subsets that contain every detector
-    in `present` and none in `absent`. Returns (mean, count). When count == 0
-    the mean is NaN."""
+    in `present` and none in `absent`. Returns (mean, count, variance). When
+    count == 0 the mean is NaN; the variance needs two subsets."""
     present_set = set(present)
     absent_set = set(absent)
     vals = []
@@ -981,30 +978,9 @@ def _conditional_mean_fitness(
         if present_set.issubset(members) and absent_set.isdisjoint(members):
             vals.append(float(result[2]))   # result = (f1, pr_auc, fitness, ...)
     if not vals:
-        return float('nan'), 0
-    return float(np.mean(vals)), len(vals)
-
-
-def compute_lofo_utility(
-    best_ensemble: List[str],
-    evaluate_fitness: Callable[[List[str]], float],
-) -> Dict[str, float]:
-    """
-    Axis 1a — LOFO marginal fitness change on the final ensemble.
-
-    For each detector d in best_ensemble:
-        marginal[d] = fitness(best_ensemble) − fitness(best_ensemble \\ {d})
-    Positive = removing d hurt fitness (d was pulling weight).
-    NaN if best_ensemble has fewer than 2 detectors (LOFO undefined).
-    """
-    if not best_ensemble or len(best_ensemble) < 2:
-        return {d: float('nan') for d in (best_ensemble or [])}
-    base = float(evaluate_fitness(list(best_ensemble)))
-    out: Dict[str, float] = {}
-    for d in best_ensemble:
-        reduced = [x for x in best_ensemble if x != d]
-        out[d] = base - float(evaluate_fitness(reduced))
-    return out
+        return float('nan'), 0, float('nan')
+    var = float(np.var(vals, ddof=1)) if len(vals) > 1 else float('nan')
+    return float(np.mean(vals)), len(vals), var
 
 
 def measure_refit_noise(
@@ -1014,7 +990,7 @@ def measure_refit_noise(
     y_fit: np.ndarray,
     base_eval: np.ndarray,
     y_eval: np.ndarray,
-    repeats: int = 10,
+    repeats: int = 30,
     meta_model_type: str = 'rf',
     metric: str = DEFAULT_DECISION_METRICS,
     vus_win: Optional[int] = None,
@@ -1050,70 +1026,73 @@ def measure_refit_noise(
     return {'eps': 2.0 * sigma, 'sigma': sigma, 'repeats': len(evals)}
 
 
-def compute_add_one_in(
+def compute_near_best(
+    evaluated_ensembles: Dict[Tuple[str, ...], tuple],
     best_ensemble: List[str],
-    excluded: List[str],
     algorithm_list: List[str],
-    evaluate_fitness_full: Callable[[List[str]], tuple],
-) -> Dict[str, Dict[str, float]]:
+    sigma: float,
+    kappa: float = math.sqrt(2.0),
+    min_ensembles: int = 3,
+) -> Dict[str, Any]:
     """
-    Mirror of LOFO for detectors that were NOT selected.
+    The ensembles the run could not rank apart from the one it reported, and
+    what they say about each detector.
 
-    For each excluded detector d:
-        delta[d] = fitness(best_ensemble + [d]) − fitness(best_ensemble)
-    on the fold the search optimised.
+    An ensemble is near-best when its fitness is within `kappa * sigma` of the
+    highest found. Each fitness was measured once, so the difference between
+    two of them carries sqrt(2) times the fitting noise of one — hence the
+    default kappa.
 
-    A positive delta implies the search never evaluated that combination: the
-    winner is the argmax over everything it did evaluate.
+    A detector's share of the near-best ensembles is read against the baseline,
+    the share it would reach by chance: those ensembles have some mean size, so
+    a detector with no preference either way appears in mean_size / |pool| of
+    them. Comparing against a flat half instead would read every large ensemble
+    as evidence for every detector in it.
+
+    `disagrees` is the only field the explanation acts on: the near-best
+    ensembles point one way and the reported one goes the other.
+
+    Undefined when the fitting noise is unknown or fewer than `min_ensembles`
+    ensembles clear the cutoff; `detectors` is then empty and `defined` False.
     """
     nan = float('nan')
-    out: Dict[str, Dict[str, float]] = {}
-    if not best_ensemble:
-        return {d: {'delta': nan} for d in excluded}
+    n_pool = len(algorithm_list)
+    out: Dict[str, Any] = {
+        'defined': False, 'n_near_best': 0,
+        'n_evaluated': len(evaluated_ensembles),
+        'best_fitness': nan, 'cutoff': nan, 'sigma': float(sigma),
+        'kappa': float(kappa), 'mean_size': nan, 'baseline': nan,
+        'detectors': {},
+    }
+    if not evaluated_ensembles or not n_pool or np.isnan(sigma):
+        return out
 
-    base_res = evaluate_fitness_full(list(best_ensemble))
-    base_fit = float(base_res[2])
+    scored = [(set(key), float(res[2])) for key, res in evaluated_ensembles.items()
+              if not np.isnan(float(res[2]))]
+    if not scored:
+        return out
 
-    for d in excluded:
-        try:
-            res = evaluate_fitness_full(sorted(set(best_ensemble) | {d}))
-        except Exception:
-            out[d] = {'delta': nan}
-            continue
-        out[d] = {'delta': float(res[2]) - base_fit}
-    return out
+    best_fitness = max(f for _, f in scored)
+    cutoff = best_fitness - float(kappa) * float(sigma)
+    near = [members for members, f in scored if f >= cutoff]
+    out['best_fitness'] = best_fitness
+    out['cutoff'] = cutoff
+    out['n_near_best'] = len(near)
+    if len(near) < min_ensembles:
+        return out
 
-
-def compute_score_redundancy(
-    best_ensemble: List[str],
-    excluded: List[str],
-    algorithm_list: List[str],
-    base_eval: np.ndarray,
-) -> Dict[str, Dict[str, Any]]:
-    """
-    For each excluded detector, the ensemble member its scores most resemble.
-
-    Returns {d: {'redundancy': max |corr|, 'partner': that member}}. A constant
-    score column has no correlation, so both fields come back NaN/None and the
-    caller must not read redundancy into that.
-    """
-    out: Dict[str, Dict[str, Any]] = {}
-    index = {name: i for i, name in enumerate(algorithm_list)}
-    X = np.asarray(base_eval, dtype=float)
-    for d in excluded:
-        best_r, partner = float('nan'), None
-        if d in index and X.ndim == 2 and X.shape[0] > 1:
-            col_d = X[:, index[d]]
-            for m in best_ensemble:
-                if m not in index:
-                    continue
-                col_m = X[:, index[m]]
-                if np.std(col_d) == 0 or np.std(col_m) == 0:
-                    continue
-                r = abs(float(np.corrcoef(col_d, col_m)[0, 1]))
-                if not np.isnan(r) and (np.isnan(best_r) or r > best_r):
-                    best_r, partner = r, m
-        out[d] = {'redundancy': best_r, 'partner': partner}
+    mean_size = float(np.mean([len(m) for m in near]))
+    baseline = mean_size / n_pool
+    chosen = set(best_ensemble)
+    detectors: Dict[str, Dict[str, Any]] = {}
+    for d in algorithm_list:
+        count = sum(1 for m in near if d in m)
+        share = count / len(near)
+        says_in = share > baseline
+        detectors[d] = {'count': count, 'share': share, 'says_in': says_in,
+                        'disagrees': says_in != (d in chosen)}
+    out.update(defined=True, mean_size=mean_size, baseline=baseline,
+               detectors=detectors)
     return out
 
 
@@ -1127,16 +1106,24 @@ def compute_mean_marginal_contribution(
     For each detector d:
         contribution[d] = E[fitness | d present] − E[fitness | d absent]
     over the distinct subsets the GA evaluated. Returns a dict per detector:
-        {'contribution', 'e_present', 'e_absent', 'n_present', 'n_absent'}.
+        {'contribution', 'se', 'e_present', 'e_absent', 'n_present', 'n_absent'}.
     Missing means are NaN with the corresponding count = 0.
+
+    `se` is the standard error of that difference. It is what says whether two
+    detectors' utilities are separable at all, which is why the utility axis
+    carries a middle class and the stability axis does not.
     """
     out: Dict[str, Dict[str, float]] = {}
     for d in algorithm_list:
-        e_p, n_p = _conditional_mean_fitness(evaluated_ensembles, present=(d,))
-        e_a, n_a = _conditional_mean_fitness(evaluated_ensembles, absent=(d,))
+        e_p, n_p, v_p = _conditional_mean_fitness(evaluated_ensembles, present=(d,))
+        e_a, n_a, v_a = _conditional_mean_fitness(evaluated_ensembles, absent=(d,))
         contrib = (e_p - e_a) if (n_p > 0 and n_a > 0) else float('nan')
+        se = float('nan')
+        if n_p > 1 and n_a > 1 and not (np.isnan(v_p) or np.isnan(v_a)):
+            se = float(np.sqrt(v_p / n_p + v_a / n_a))
         out[d] = {
             'contribution': contrib,
+            'se': se,
             'e_present': e_p,
             'e_absent': e_a,
             'n_present': n_p,
@@ -1178,6 +1165,13 @@ ARCHETYPE_ORDER = [
     ARCHETYPE_UNCLASSIFIED,
 ]
 
+# The banded scheme splits utility into three levels, so its codes are a
+# superset of the two-level ones and need their own display order.
+BANDED_ARCHETYPE_ORDER = [
+    "HH", "HL", "MH", "ML", "LH", "LL",
+    ARCHETYPE_UNCLASSIFIED,
+]
+
 
 def _assign_archetype(u_high: bool, s_high: bool, util_nan: bool) -> str:
     """
@@ -1187,6 +1181,14 @@ def _assign_archetype(u_high: bool, s_high: bool, util_nan: bool) -> str:
     if util_nan:
         return ARCHETYPE_UNCLASSIFIED
     return ("H" if u_high else "L") + ("H" if s_high else "L")
+
+
+def _assign_banded_archetype(u_level: str, s_high: bool, util_nan: bool) -> str:
+    """As `_assign_archetype`, but utility carries a middle level: "ML" = middle
+    utility, low stability."""
+    if util_nan:
+        return ARCHETYPE_UNCLASSIFIED
+    return u_level + ("H" if s_high else "L")
 
 
 def _zero_anchored_axis(ax, which: str, values: List[float]) -> None:
@@ -1234,6 +1236,16 @@ def _finite_median(values: List[float]) -> float:
     return float(np.median(finite)) if finite else float('nan')
 
 
+def _finite_mean_sd(values: List[float]) -> Tuple[float, float]:
+    """(mean, sample sd) over the finite values. The sd is NaN with fewer than
+    two of them, which leaves the middle band undefined rather than zero-width."""
+    finite = [v for v in values if not np.isnan(v)]
+    if not finite:
+        return float('nan'), float('nan')
+    sd = float(np.std(finite, ddof=1)) if len(finite) > 1 else float('nan')
+    return float(np.mean(finite)), sd
+
+
 def classify_detector_archetypes(
     mean_marginal: Dict[str, Dict[str, float]],
     survival: Dict[str, List[float]],
@@ -1243,11 +1255,18 @@ def classify_detector_archetypes(
 ) -> Dict[str, Dict[str, Any]]:
     """
     Classify each detector into a functional archetype from the intersection of
-    the two active axes (Utility × Stability). Reports BOTH a relative
-    (median-split) and an absolute (fixed-cutoff) scheme side by side.
+    the two active axes (Utility × Stability). Reports three schemes side by
+    side: relative (median split), absolute (fixed cutoff) and banded.
+
+    Banded is the one the explanation reads. Utility carries a middle level
+    because it is the noisier axis: its standard error is about 38% of the
+    spread it has to resolve, against 12% for stability, so there is a range of
+    utilities the pool does not separate. Stability has no such range and stays
+    two-level — forcing a band onto it leaves most of the pool classified on
+    neither axis.
 
     Axis scalars (per detector):
-      utility        = mean_marginal[d]['contribution']  (Axis 1b only; LOFO excluded)
+      utility        = mean_marginal[d]['contribution']
       stability_mean = mean(survival[d])  (the Stability axis)
 
     A detector is "stable-high" when its mean survival is above the threshold.
@@ -1256,7 +1275,8 @@ def classify_detector_archetypes(
 
     Returns {detector: {utility, stability_mean, stability_trend,
                         "relative": {u_high,s_high,archetype},
-                        "absolute": {u_high,s_high,archetype}}}.
+                        "absolute": {u_high,s_high,archetype},
+                        "banded":   {u_level,s_high,archetype}}}.
     """
     util = {d: mean_marginal.get(d, {}).get('contribution', float('nan')) for d in algorithm_list}
     stab_mean, stab_trend = {}, {}
@@ -1267,6 +1287,8 @@ def classify_detector_archetypes(
 
     med_u = _finite_median(list(util.values()))
     med_s = _finite_median(list(stab_mean.values()))
+    mean_u, sd_u = _finite_mean_sd(list(util.values()))
+    mean_s, _ = _finite_mean_sd(list(stab_mean.values()))
 
     out: Dict[str, Dict[str, Any]] = {}
     for d in algorithm_list:
@@ -1286,10 +1308,27 @@ def classify_detector_archetypes(
                 "archetype": _assign_archetype(u_high, s_high, util_nan),
             }
 
+        # A detector exactly on a band edge stays in the middle: the edges are
+        # estimates, so the level that claims less is the right one to give.
+        if util_nan or np.isnan(mean_u) or np.isnan(sd_u):
+            u_level = "M"
+        elif u > mean_u + sd_u:
+            u_level = "H"
+        elif u < mean_u - sd_u:
+            u_level = "L"
+        else:
+            u_level = "M"
+        s_high_b = (not np.isnan(sm)) and (not np.isnan(mean_s)) and (sm > mean_s)
+
         out[d] = {
             "utility": u,
             "stability_mean": sm, "stability_trend": st,
             "relative": schemes["relative"], "absolute": schemes["absolute"],
+            "banded": {
+                "u_level": u_level, "s_high": s_high_b,
+                "archetype": _assign_banded_archetype(u_level, s_high_b,
+                                                      util_nan),
+            },
         }
     return out
 
@@ -1308,7 +1347,6 @@ def _ga_plot_rcparams() -> None:
 
 
 def plot_ga_utility(
-    lofo: Dict[str, float],
     mean_marginal: Dict[str, Dict[str, float]],
     best_ensemble: List[str],
     algorithm_list: List[str],
@@ -1316,62 +1354,49 @@ def plot_ga_utility(
     entity: str,
 ) -> None:
     """
-    Two-panel bar chart for Axis 1.
-      Top    — LOFO marginal for each detector in best_ensemble.
-               Bars are coloured by sign: green = removal hurts fitness (the
-               detector is pulling weight); red = removal helps (its removal
-               would actually improve fitness).
-      Bottom — mean marginal contribution across evaluated subsets for ALL
-               detectors. NaN values are drawn as faded grey bars at zero.
+    The utility axis with its uncertainty and its class boundaries.
+
+    Detectors are sorted by mean marginal contribution, each bar carries its
+    standard error, and the middle band (mean ± sd across detectors) is shaded.
+    Read together the three say why the axis has a middle class: the error bars
+    are large against the spread the band has to cut, so a detector inside it is
+    not separable from the pool rather than merely average.
 
     Saves to results/GA_Ens/{dataset}/{entity}/ga_selection_utility_{dataset}_{entity}.png.
     """
     _ga_plot_rcparams()
-    fig, (ax_top, ax_bot) = plt.subplots(
-        2, 1, figsize=(max(8, 0.55 * len(algorithm_list) + 4), 7),
-        gridspec_kw={"height_ratios": [1, 1]},
-    )
+    raw = {d: mean_marginal.get(d, {}).get('contribution', float('nan'))
+           for d in algorithm_list}
+    ordered = sorted(algorithm_list,
+                     key=lambda d: (np.isnan(raw[d]),
+                                    -(0.0 if np.isnan(raw[d]) else raw[d])))
+    vals = [raw[d] for d in ordered]
+    errs = [mean_marginal.get(d, {}).get('se', float('nan')) for d in ordered]
+    chosen = set(best_ensemble)
+    mean_u, sd_u = _finite_mean_sd(list(raw.values()))
 
-    # Top: LOFO on best_ensemble
-    if best_ensemble:
-        vals = [lofo.get(d, float('nan')) for d in best_ensemble]
-        colours = []
-        for v in vals:
-            if np.isnan(v):
-                colours.append("#888888")
-            elif v >= 0:
-                colours.append("#2ca02c")
-            else:
-                colours.append("#d62728")
-        x = np.arange(len(best_ensemble))
-        ax_top.bar(x, [0.0 if np.isnan(v) else v for v in vals], color=colours)
-        ax_top.set_xticks(x)
-        ax_top.set_xticklabels(list(best_ensemble),
-                               rotation=30, ha="right")
-        ax_top.axhline(0, color="black", linewidth=0.6)
-        ax_top.set_ylabel("fitness(best) − fitness(best \\ detector)")
-        ax_top.set_title(
-            f"LOFO on best ensemble: {best_ensemble}")
-        ax_top.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
-    else:
-        ax_top.text(0.5, 0.5, "best_ensemble is empty",
-                    ha="center", va="center", transform=ax_top.transAxes)
-
-    # Bottom: mean marginal contribution for ALL detectors
-    raw = [mean_marginal.get(d, {}).get('contribution', float('nan'))
-           for d in algorithm_list]
-    bot_vals = [0.0 if np.isnan(v) else v for v in raw]
-    bot_colours = ["#cccccc" if np.isnan(v) else
-                   ("#2ca02c" if v >= 0 else "#d62728") for v in raw]
-    xb = np.arange(len(algorithm_list))
-    ax_bot.bar(xb, bot_vals, color=bot_colours)
-    ax_bot.set_xticks(xb)
-    ax_bot.set_xticklabels(list(algorithm_list),
-                           rotation=30, ha="right")
-    ax_bot.axhline(0, color="black", linewidth=0.6)
-    ax_bot.set_ylabel("E[fit | present] − E[fit | absent]")
-    ax_bot.set_title("Mean marginal contribution across evaluated subsets")
-    ax_bot.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+    fig, ax = plt.subplots(figsize=(max(8, 0.45 * len(algorithm_list) + 4), 5))
+    x = np.arange(len(ordered))
+    colours = ["#cccccc" if np.isnan(v) else
+               ("#2ca02c" if v >= 0 else "#d62728") for v in vals]
+    ax.bar(x, [0.0 if np.isnan(v) else v for v in vals], color=colours,
+           yerr=[0.0 if np.isnan(e) else e for e in errs],
+           error_kw=dict(ecolor="#333333", elinewidth=0.9, capsize=2.5))
+    if not (np.isnan(mean_u) or np.isnan(sd_u)):
+        ax.axhspan(mean_u - sd_u, mean_u + sd_u, color="#4c72b0", alpha=0.10,
+                   zorder=0)
+        for edge in (mean_u - sd_u, mean_u + sd_u):
+            ax.axhline(edge, color="#4c72b0", linestyle="--", linewidth=0.9,
+                       alpha=0.8)
+        ax.text(0.995, mean_u, "middle band  (mean ± sd)", transform=
+                ax.get_yaxis_transform(), ha="right", va="center", fontsize=8,
+                color="#4c72b0", alpha=0.9)
+    ax.set_xticks(x)
+    ax.set_xticklabels([f"{d}*" if d in chosen else d for d in ordered],
+                       rotation=30, ha="right")
+    ax.axhline(0, color="black", linewidth=0.6)
+    ax.set_ylabel("E[fit | present] − E[fit | absent]")
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
 
     plt.tight_layout(pad=1.2)
     directory = results_dir("GA_Ens", dataset, entity)
@@ -1386,7 +1411,7 @@ def plot_ga_utility(
 def _plot_ga_survival_impl(
     survival_rates: Dict[str, List[float]],
     bold_set: set,
-    title: str,
+    title: Optional[str],
     save_path: str,
 ) -> None:
     """Shared rendering for survival-rate plots. `bold_set` controls which
@@ -1412,7 +1437,8 @@ def _plot_ga_survival_impl(
     ax.set_xlabel("Generation")
     ax.set_ylabel("P(d, g)  —  survival rate")
     ax.set_ylim(-0.02, 1.05)
-    ax.set_title(title)
+    if title:
+        ax.set_title(title)
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
     ax.legend(loc="upper left", ncol=1, frameon=False,
               bbox_to_anchor=(1.01, 1), borderaxespad=0)
@@ -1447,14 +1473,13 @@ def plot_ga_survival(
     _plot_ga_survival_impl(
         survival_rates,
         bold_set=in_best,
-        title=("Axis 2 · Evolutionary survival per detector "
-               "(bold = members of best ensemble)"),
+        title=None,
         save_path=f"{directory}/ga_selection_survival_{dataset}_{entity}.png",
     )
     _plot_ga_survival_impl(
         survival_rates,
         bold_set=set(survival_rates.keys()),   # every detector bold
-        title="Axis 2 · Evolutionary survival per detector (all detectors)",
+        title=None,
         save_path=f"{directory}/ga_selection_survival_all_{dataset}_{entity}.png",
     )
 
@@ -1524,149 +1549,308 @@ def _spread_annotations(fig, annotations, max_passes: int = 80) -> None:
             ann.arrow_patch.set_alpha(0.6)
 
 
+ARCHETYPE_COLOURS = {
+    "HH": "#2ca02c", "MH": "#1f77b4", "LH": "#17becf",
+    "HL": "#ff7f0e", "ML": "#9467bd", "LL": "#d62728",
+    ARCHETYPE_UNCLASSIFIED: "#888888",
+}
+
+
+def _archetype_axes(ax, util, stab, algorithm_list, mean_u, sd_u, mean_s,
+                    band: bool) -> None:
+    """Shared frame for the two utility x stability scatters.
+
+    The axes CROSS AT (0, 0) rather than at the corner of a box. Utility is a
+    fitness difference, so a detector that lowers mean fitness is genuinely
+    negative, and the crossing point moves right to give it somewhere to sit.
+    """
+    if band and not (np.isnan(mean_u) or np.isnan(sd_u)):
+        ax.axvspan(mean_u - sd_u, mean_u + sd_u, color="#4c72b0", alpha=0.10,
+                   zorder=0)
+        for edge in (mean_u - sd_u, mean_u + sd_u):
+            ax.axvline(edge, color="#4c72b0", linestyle="--", linewidth=0.9,
+                       alpha=0.8)
+    if not np.isnan(mean_s):
+        ax.axhline(mean_s, color="grey", linestyle="--", linewidth=0.8,
+                   alpha=0.7)
+    ax.spines["left"].set_position(("data", 0.0))
+    ax.spines["bottom"].set_position(("data", 0.0))
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_linewidth(1.1)
+        ax.spines[spine].set_color("black")
+    # With the vertical spine inside the plot, the two "0" labels land on top of
+    # each other at the crossing. The x axis keeps its own, since that is the one
+    # a reader is checking a sign against.
+    if min(util.values(), default=0.0) < 0:
+        ax.yaxis.set_major_formatter(
+            FuncFormatter(lambda v, _pos: "" if abs(v) < 1e-12 else f"{v:g}"))
+        ax.yaxis.set_label_coords(-0.02, 0.5)
+    ax.set_xlabel("Utility  (mean marginal contribution)")
+    ax.set_ylabel("Stability  (mean survival rate)")
+    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
+    edges = [mean_u - sd_u, mean_u + sd_u] if band else []
+    _zero_anchored_axis(ax, "x", [util[d] for d in algorithm_list] + edges)
+    _zero_anchored_axis(ax, "y", [stab[d] for d in algorithm_list] + [mean_s])
+
+
+def _scatter_common(archetypes, algorithm_list):
+    util = {d: archetypes[d]["utility"] for d in algorithm_list}
+    stab = {d: archetypes[d]["stability_mean"] for d in algorithm_list}
+    mean_u, sd_u = _finite_mean_sd(list(util.values()))
+    mean_s, _ = _finite_mean_sd(list(stab.values()))
+    unclassified = sorted(
+        {d for d in algorithm_list
+         if archetypes[d].get("banded", {}).get("archetype")
+         == ARCHETYPE_UNCLASSIFIED})
+    return util, stab, mean_u, sd_u, mean_s, unclassified
+
+
+def _finish_scatter(fig, ax, annotations, algorithm_list, unclassified,
+                    handles, labels, dataset, entity, stem) -> None:
+    # After the limits are final: a nudge computed against one set of axis
+    # limits is wrong once `_zero_anchored_axis` moves them.
+    _spread_annotations(fig, annotations)
+    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.5),
+               frameon=False)
+    if unclassified:
+        fig.text(0.5, -0.02, "Unclassified (no marginal-contribution data): "
+                 + ", ".join(unclassified), ha="center", fontsize=9, alpha=0.8)
+    draw_abbreviation_key(fig, algorithm_list,
+                          y=-0.06 if unclassified else -0.02)
+    plt.tight_layout(pad=1.2)
+    directory = results_dir("GA_Ens", dataset, entity)
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/{stem}_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
 def plot_ga_archetypes(
     archetypes: Dict[str, Dict[str, Any]],
+    best_ensemble: List[str],
     algorithm_list: List[str],
     dataset: str,
     entity: str,
 ) -> None:
     """
-    Scatter of the axis intersection that drives the archetypes, on the
-    RELATIVE (median-split) scheme.
+    Utility x stability, coloured by archetype.
 
-      x = utility (mean marginal contribution), y = stability (mean survival rate)
-      colour       = assigned archetype (shared categorical palette)
-      dashed lines = the median utility / stability thresholds
+      x = utility (mean marginal contribution), y = stability (mean survival)
+      colour       = the detector's archetype
+      filled point = in the chosen ensemble, hollow = not
+      dashed line  = the stability cut
 
-    The absolute (fixed-cutoff) scheme is still computed and still reported in
-    the .txt, but is no longer drawn: its cutoffs (0.0 and 0.5) are not anchored
-    to anything in a given run, so a second panel invited a comparison between a
-    data-driven split and an arbitrary one.
+    The colour already carries the archetype, so the utility band is not drawn
+    here. `plot_ga_bands` is the same scatter with the band and without the
+    per-archetype colour, for a reader checking where the cuts fall.
 
-    Both axes start at ZERO and step in equal, round increments. Letting
-    matplotlib choose meant a run whose utilities spanned 0.001 got an axis
-    starting at 0.0008, which reads as a large spread of a small quantity.
-
-    Unclassified detectors (NaN utility) are not plotted; they are listed in
-    a caption.
     Saves to ga_selection_archetypes_{dataset}_{entity}.png.
     """
     _ga_plot_rcparams()
-    # Shared archetype → colour palette.
-    palette = {name: plt.cm.tab10(i / max(len(ARCHETYPE_ORDER), 1))
-               for i, name in enumerate(ARCHETYPE_ORDER)}
+    util, stab, mean_u, sd_u, mean_s, unclassified = _scatter_common(
+        archetypes, algorithm_list)
+    chosen = set(best_ensemble)
 
-    util = {d: archetypes[d]["utility"] for d in algorithm_list}
-    stab = {d: archetypes[d]["stability_mean"] for d in algorithm_list}
-    med_u = _finite_median(list(util.values()))
-    med_s = _finite_median(list(stab.values()))
-    thresholds = {
-        "relative": (med_u, med_s),
-        "absolute": (0.0, 0.5),
-    }
-
-    fig, ax_one = plt.subplots(1, 1, figsize=(8, 6))
-    axes = [ax_one]
-    unclassified = sorted({d for d in algorithm_list
-                           if archetypes[d]["relative"]["archetype"] == ARCHETYPE_UNCLASSIFIED})
-    seen_labels = set()
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
     annotations = []
-
-    for ax, scheme in zip(axes, ("relative",)):
-        tu, ts = thresholds[scheme]
-        for d in algorithm_list:
-            u, s = util[d], stab[d]
-            info = archetypes[d][scheme]
-            if np.isnan(u) or np.isnan(s):
-                continue   # cannot place a point without both coordinates
-            arche = info["archetype"]
-            colour = palette.get(arche, "#888888")
-            label = arche if arche not in seen_labels else None
-            seen_labels.add(arche)
-            ax.scatter([u], [s], s=90, color=colour,
-                       edgecolors=colour, linewidths=1.5,
-                       facecolors=colour, label=label, zorder=3)
-            # SHORTENED, and one of only three figures that are — every point
-            # carries its own name a few characters from its neighbour, and a
-            # full name here collides outright. `draw_abbreviation_key` below
-            # says what the short form stands for.
-            #
-            # Built WITH a leader line, drawn transparent. `_spread_annotations`
-            # reveals it on the labels it has to move far.
-            annotations.append(
-                ax.annotate(abbreviate_detector(d), (u, s),
-                            textcoords="offset points",
-                            xytext=(5, 4), fontsize=8, alpha=0.85,
-                            arrowprops=dict(arrowstyle="-", linewidth=0.5,
-                                            color="grey", alpha=0.0,
-                                            shrinkA=0, shrinkB=2)))
-        if not np.isnan(tu):
-            ax.axvline(tu, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
-        if not np.isnan(ts):
-            ax.axhline(ts, color="grey", linestyle="--", linewidth=0.8, alpha=0.7)
-        # The two axes CROSS AT (0, 0) rather than at the corner of a box.
-        # Utility is a fitness difference, so a detector that lowers mean
-        # fitness is genuinely negative; when one exists the axis extends left
-        # and the crossing point simply moves right, which is what gives those
-        # detectors somewhere to be drawn. Clipping the range at zero to keep it
-        # as the left edge would push them off a figure whose whole job is
-        # placing every detector.
-        ax.spines["left"].set_position(("data", 0.0))
-        ax.spines["bottom"].set_position(("data", 0.0))
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-        for spine in ("left", "bottom"):
-            ax.spines[spine].set_linewidth(1.1)
-            ax.spines[spine].set_color("black")
-        # With the vertical spine inside the plot, the two "0" labels land on
-        # top of each other at the crossing. The x axis keeps its own, since
-        # that is the one a reader is checking a sign against.
-        if min(util.values(), default=0.0) < 0:
-            ax.yaxis.set_major_formatter(
-                FuncFormatter(lambda v, _pos: "" if abs(v) < 1e-12 else f"{v:g}"))
-            # The axis LABEL follows its spine, which has just moved into the
-            # middle of the plot. Pinned to the left edge in axes coordinates:
-            # the tick numbers belong on the spine, but "Stability (mean
-            # survival rate)" printed down the centre reads as an annotation.
-            ax.yaxis.set_label_coords(-0.02, 0.5)
-        ax.set_xlabel("Utility  (mean marginal contribution)")
-        ax.set_ylabel("Stability  (mean survival rate)")
-        # No title: the median-split scheme is stated in the caption and in the
-        # stage's own explanation, and repeating it on the axes says it a third
-        # time to a reader who has already been told twice.
-        ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-        # Origin at zero on both axes, with ticks at a round step. Both the
-        # points and the threshold lines have to fit inside the range, or a
-        # median above every plotted point would be drawn off-canvas.
-        _zero_anchored_axis(ax, "x", [util[d] for d in algorithm_list] + [tu])
-        _zero_anchored_axis(ax, "y", [stab[d] for d in algorithm_list] + [ts])
-
-    # After the limits are final: a nudge computed against one set of axis
-    # limits is wrong once `_zero_anchored_axis` moves them.
-    _spread_annotations(fig, annotations)
+    present = []
+    for d in algorithm_list:
+        u, s = util[d], stab[d]
+        if np.isnan(u) or np.isnan(s):
+            continue
+        code = archetypes[d].get("banded", {}).get("archetype",
+                                                   ARCHETYPE_UNCLASSIFIED)
+        colour = ARCHETYPE_COLOURS.get(code, "#888888")
+        if code not in present:
+            present.append(code)
+        inside = d in chosen
+        ax.scatter([u], [s], s=90, zorder=3,
+                   color=colour if inside else "none",
+                   edgecolors=colour, linewidths=1.5)
+        annotations.append(
+            ax.annotate(abbreviate_detector(d), (u, s),
+                        textcoords="offset points", xytext=(5, 4), fontsize=8,
+                        alpha=0.85,
+                        arrowprops=dict(arrowstyle="-", linewidth=0.5,
+                                        color="grey", alpha=0.0,
+                                        shrinkA=0, shrinkB=2)))
+    _archetype_axes(ax, util, stab, algorithm_list, mean_u, sd_u, mean_s,
+                    band=False)
 
     handles, labels = [], []
-    for ax in axes:
-        h, l = ax.get_legend_handles_labels()
-        for hi, li in zip(h, l):
-            if li not in labels:
-                handles.append(hi)
-                labels.append(li)
-    fig.legend(handles, labels, loc="center left", bbox_to_anchor=(1.0, 0.6),
-               frameon=False, title="Archetype")
-    if unclassified:
-        fig.text(0.5, -0.02, "Unclassified (no marginal-contribution data): "
-                 + ", ".join(unclassified),
-                 ha="center", fontsize=9, alpha=0.8)
+    for code in BANDED_ARCHETYPE_ORDER:
+        if code not in present:
+            continue
+        handles.append(Line2D([], [], marker="o", linestyle="none",
+                              markersize=9,
+                              color=ARCHETYPE_COLOURS.get(code, "#888888")))
+        labels.append(code)
+    for filled, text in ((True, "in the chosen ensemble"),
+                         (False, "not in the chosen ensemble")):
+        handles.append(Line2D([], [], marker="o", linestyle="none",
+                              markersize=9, color="#555555" if filled else "none",
+                              markeredgecolor="#555555", markeredgewidth=1.5))
+        labels.append(text)
+    _finish_scatter(fig, ax, annotations, algorithm_list, unclassified,
+                    handles, labels, dataset, entity, "ga_selection_archetypes")
 
-    # What the shortened point labels stand for. Below the unclassified note
-    # when there is one, so the two never collide.
-    draw_abbreviation_key(fig, algorithm_list, y=-0.06 if unclassified else -0.02)
+
+def plot_ga_bands(
+    archetypes: Dict[str, Dict[str, Any]],
+    best_ensemble: List[str],
+    algorithm_list: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    The same scatter with the cuts drawn instead of the archetype colours.
+
+    The shaded band is the middle utility class and the dashed line is the
+    stability cut, so this is the figure for checking where a detector falls
+    relative to the thresholds rather than which class it landed in.
+
+    Saves to ga_selection_bands_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    util, stab, mean_u, sd_u, mean_s, unclassified = _scatter_common(
+        archetypes, algorithm_list)
+    chosen = set(best_ensemble)
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+    annotations = []
+    for d in algorithm_list:
+        u, s = util[d], stab[d]
+        if np.isnan(u) or np.isnan(s):
+            continue
+        inside = d in chosen
+        ax.scatter([u], [s], s=90, zorder=3,
+                   color="#2ca02c" if inside else "none",
+                   edgecolors="#2ca02c" if inside else "#d62728",
+                   linewidths=1.5)
+        annotations.append(
+            ax.annotate(abbreviate_detector(d), (u, s),
+                        textcoords="offset points", xytext=(5, 4), fontsize=8,
+                        alpha=0.85,
+                        arrowprops=dict(arrowstyle="-", linewidth=0.5,
+                                        color="grey", alpha=0.0,
+                                        shrinkA=0, shrinkB=2)))
+    _archetype_axes(ax, util, stab, algorithm_list, mean_u, sd_u, mean_s,
+                    band=True)
+
+    handles = [Line2D([], [], marker="o", linestyle="none", markersize=9,
+                      color="#2ca02c"),
+               Line2D([], [], marker="o", linestyle="none", markersize=9,
+                      color="none", markeredgecolor="#d62728",
+                      markeredgewidth=1.5)]
+    labels = ["in the chosen ensemble", "not in the chosen ensemble"]
+    _finish_scatter(fig, ax, annotations, algorithm_list, unclassified,
+                    handles, labels, dataset, entity, "ga_selection_bands")
+
+
+def plot_ga_profile(
+    archetypes: Dict[str, Dict[str, Any]],
+    best_ensemble: List[str],
+    algorithm_list: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    How many detectors landed in each archetype, and how many of those the
+    algorithm kept.
+
+    This is the figure that says whether the two axes predict the selection at
+    all: the bars should fall from left to right, and the minority segment on
+    the HH and LL bars is exactly the set of contradictions the explanation has
+    to account for.
+
+    Saves to ga_selection_profile_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    chosen = set(best_ensemble)
+    codes, kept, left = [], [], []
+    for code in BANDED_ARCHETYPE_ORDER:
+        members = [d for d in algorithm_list
+                   if archetypes.get(d, {}).get("banded", {}).get("archetype")
+                   == code]
+        if not members:
+            continue
+        codes.append(code)
+        kept.append(sum(1 for d in members if d in chosen))
+        left.append(sum(1 for d in members if d not in chosen))
+    if not codes:
+        return
+
+    fig, ax = plt.subplots(figsize=(max(6, 1.1 * len(codes) + 2), 4.5))
+    x = np.arange(len(codes))
+    ax.bar(x, kept, color="#2ca02c", label="in the chosen ensemble")
+    ax.bar(x, left, bottom=kept, color="#e6e6e6", edgecolor="#d62728",
+           linewidth=0.8, label="not in the chosen ensemble")
+    tallest = max(k + l for k, l in zip(kept, left))
+    for i, (k, l) in enumerate(zip(kept, left)):
+        total = k + l
+        ax.text(i, total + tallest * 0.03, f"{100.0 * k / total:.0f}%",
+                ha="center", fontsize=9)
+    ax.set_ylim(0, tallest * 1.15)
+    ax.set_xticks(x)
+    ax.set_xticklabels(codes)
+    ax.set_xlabel("Archetype  (utility level, stability level)")
+    ax.set_ylabel("Detectors")
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+    # Below the axes: the tallest bar can stand anywhere, so no corner is safe.
+    ax.legend(frameon=False, loc="upper center", ncol=2,
+              bbox_to_anchor=(0.5, -0.18))
 
     plt.tight_layout(pad=1.2)
     directory = results_dir("GA_Ens", dataset, entity)
     os.makedirs(directory, exist_ok=True)
-    plt.savefig(f"{directory}/ga_selection_archetypes_{dataset}_{entity}.png",
+    plt.savefig(f"{directory}/ga_selection_profile_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_ga_plateau(
+    evaluated_ensembles: Dict[Tuple[str, ...], tuple],
+    near_best: Dict[str, Any],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Every evaluated ensemble's fitness, best first, with the near-best cutoff.
+
+    How flat the top of this curve is decides whether the reported ensemble was
+    a clear winner or one of many the run could not rank apart, which is the
+    whole basis of the fallback.
+
+    Saves to ga_selection_plateau_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    vals = sorted((float(r[2]) for r in evaluated_ensembles.values()
+                   if not np.isnan(float(r[2]))), reverse=True)
+    if not vals:
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    x = np.arange(1, len(vals) + 1)
+    ax.plot(x, vals, color="#4c72b0", linewidth=1.4)
+    cutoff = near_best.get("cutoff", float("nan"))
+    n_near = near_best.get("n_near_best", 0)
+    if not np.isnan(cutoff):
+        ax.axhline(cutoff, color="#d62728", linestyle="--", linewidth=1.0)
+        ax.fill_between(x, cutoff, vals, where=[v >= cutoff for v in vals],
+                        color="#d62728", alpha=0.12, interpolate=True)
+        ax.annotate(f"{n_near} near-best of {len(vals)}",
+                    xy=(max(n_near, 1), cutoff), xytext=(14, -16),
+                    textcoords="offset points", fontsize=9, color="#d62728")
+    ax.set_xlabel("Evaluated ensembles, best first")
+    ax.set_ylabel("Fitness")
+    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+
+    plt.tight_layout(pad=1.2)
+    directory = results_dir("GA_Ens", dataset, entity)
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_plateau_{dataset}_{entity}.png",
                 format="png", dpi=300, bbox_inches="tight")
     plt.close()
 
@@ -1679,11 +1863,9 @@ def explain_ga_selection(
     generation_populations: List[List[List[str]]],
     algorithm_list: List[str],
     population_size: int,
-    evaluate_fitness: Callable[[List[str]], float],
     dataset: str,
     entity: str,
     explain: bool = False,
-    evaluate_fitness_full: Optional[Callable[[List[str]], tuple]] = None,
     base_fit: Optional[np.ndarray] = None,
     y_fit: Optional[np.ndarray] = None,
     base_eval: Optional[np.ndarray] = None,
@@ -1695,7 +1877,7 @@ def explain_ga_selection(
     """
     GA-ensemble selection explainability: explain *why* each detector ended up
     in best_ensemble, along two analytical axes (utility, stability). Produces
-    three plots and a structured text report under
+    six plots and a structured text report under
         results/GA_Ens/{dataset}/{entity}/
 
     Returns a dict with the computed structures when explain=True; None otherwise.
@@ -1705,35 +1887,36 @@ def explain_ga_selection(
     if not best_ensemble:
         return None
 
-    lofo = compute_lofo_utility(best_ensemble, evaluate_fitness)
     mean_marginal = compute_mean_marginal_contribution(evaluated_ensembles, algorithm_list)
     survival = compute_survival_rates(generation_populations, algorithm_list, population_size)
     archetypes = classify_detector_archetypes(
         mean_marginal, survival, algorithm_list)
 
-    # Snapshot before add-one-in runs: it writes the augmented subsets into the
-    # same cache, which would make every detector read as already tried.
-    tried_before = set(evaluated_ensembles.keys())
-    excluded = [d for d in algorithm_list if d not in best_ensemble]
-    add_one_in: Dict[str, Dict[str, float]] = {}
-    redundancy: Dict[str, Dict[str, Any]] = {}
     noise: Dict[str, float] = {}
-    if excluded and evaluate_fitness_full is not None and base_eval is not None:
+    if base_fit is not None and base_eval is not None:
         noise = measure_refit_noise(
             best_ensemble, algorithm_list, base_fit, y_fit, base_eval, y_eval,
             meta_model_type=meta_model_type,
             metric=metric, vus_win=vus_win)
-        add_one_in = compute_add_one_in(
-            best_ensemble, excluded, algorithm_list, evaluate_fitness_full)
-        redundancy = compute_score_redundancy(
-            best_ensemble, excluded, algorithm_list, base_eval)
-        for d in excluded:
-            key = tuple(sorted(set(best_ensemble) | {d}))
-            add_one_in.setdefault(d, {})['tried_exact'] = key in tried_before
+    sigma = noise.get('sigma', float('nan'))
+    # Without the fitting noise there is no cutoff, so a contradiction between
+    # the archetype and the chosen ensemble has nothing to answer it. That is a
+    # silent loss otherwise, since every other part of the stage still works.
+    if np.isnan(sigma):
+        logger.warning("  ⚠ Fitting noise could not be measured; the near-best "
+                       "ensembles are undefined and any contradiction between "
+                       "an archetype and the chosen ensemble will go "
+                       "unexplained.")
 
-    plot_ga_utility(lofo, mean_marginal, best_ensemble, algorithm_list, dataset, entity)
+    near_best = compute_near_best(evaluated_ensembles, best_ensemble,
+                                  algorithm_list, sigma)
+
+    plot_ga_utility(mean_marginal, best_ensemble, algorithm_list, dataset, entity)
     plot_ga_survival(survival, best_ensemble, dataset, entity)
-    plot_ga_archetypes(archetypes, algorithm_list, dataset, entity)
+    plot_ga_archetypes(archetypes, best_ensemble, algorithm_list, dataset, entity)
+    plot_ga_bands(archetypes, best_ensemble, algorithm_list, dataset, entity)
+    plot_ga_profile(archetypes, best_ensemble, algorithm_list, dataset, entity)
+    plot_ga_plateau(evaluated_ensembles, near_best, dataset, entity)
 
     directory = results_dir("GA_Ens", dataset, entity)
     os.makedirs(directory, exist_ok=True)
@@ -1752,26 +1935,18 @@ def explain_ga_selection(
         f.write(f"Distinct subsets evaluated: {n_subsets}\n\n")
 
         # ── Axis 1 ────────────────────────────────────────────────────────
-        backslash_error_text = r"fitness(best) - fitness(best \ d)"
         f.write("--- Axis 1: Utility ---\n")
-        f.write("(1a) LOFO marginal fitness change (final ensemble):\n")
-        f.write(f"      {'detector':<14} {backslash_error_text:>40}\n")
-        f.write("      " + "-" * 56 + "\n")
-        for d in best_ensemble:
-            v = lofo.get(d, float('nan'))
-            s = f"{v:+.4f}" if not np.isnan(v) else "N/A"
-            f.write(f"      {d:<14} {s:>40}\n")
-
-        f.write("\n(1b) Mean marginal contribution across all evaluated subsets:\n")
-        f.write(f"      {'detector':<14} {'E[fit|p]-E[fit|a]':>18} "
+        f.write("Mean marginal contribution across all evaluated subsets:\n")
+        f.write(f"      {'detector':<14} {'E[fit|p]-E[fit|a]':>18} {'se':>10} "
                 f"{'E[fit|p]':>10} {'E[fit|a]':>10} {'#p':>5} {'#a':>5}\n")
-        f.write("      " + "-" * 68 + "\n")
+        f.write("      " + "-" * 79 + "\n")
         for d in algorithm_list:
             mm = mean_marginal[d]
             c = f"{mm['contribution']:+.4f}" if not np.isnan(mm['contribution']) else "N/A"
+            se = f"{mm['se']:.4f}" if not np.isnan(mm.get('se', float('nan'))) else "N/A"
             ep = f"{mm['e_present']:.4f}" if not np.isnan(mm['e_present']) else "N/A"
             ea = f"{mm['e_absent']:.4f}" if not np.isnan(mm['e_absent']) else "N/A"
-            f.write(f"      {d:<14} {c:>18} {ep:>10} {ea:>10} "
+            f.write(f"      {d:<14} {c:>18} {se:>10} {ep:>10} {ea:>10} "
                     f"{mm['n_present']:>5d} {mm['n_absent']:>5d}\n")
 
         # ── Axis 2 ────────────────────────────────────────────────────────
@@ -1788,68 +1963,78 @@ def explain_ga_selection(
             f.write(f"      {d:<14} {np.mean(ys):>8.3f} {ys[0]:>8.3f} "
                     f"{ys[-1]:>8.3f} {(ys[-1] - ys[0]):>+10.3f}\n")
 
-        # ── Synthesis ──────────────────────────────────────────────────────
-        f.write("\n--- Synthesis: why each detector of the best ensemble was selected ---\n")
-        f.write(f"      {'detector':<14} {'LOFO':>10} {'mean marg.':>12} "
-                f"{'last-gen P':>12}\n")
-        f.write("      " + "-" * 50 + "\n")
-        for d in best_ensemble:
-            lv = lofo.get(d, float('nan'))
-            mv = mean_marginal[d]['contribution']
-            last_p = survival[d][-1] if survival[d] else float('nan')
-
-            def _sgn(v):
-                return f"{v:+.4f}" if not np.isnan(v) else "N/A"
-
-            f.write(
-                f"      {d:<14} {_sgn(lv):>10} {_sgn(mv):>12} "
-                f"{(f'{last_p:.3f}' if not np.isnan(last_p) else 'N/A'):>12}\n"
-            )
-
         # ── Functional archetypes ──────────────────────────────────────────
         f.write("\n--- Functional Archetypes (axis intersections) ---\n")
-        f.write("Utility = mean marginal contribution (Axis 1b only; LOFO excluded).\n")
-        f.write("Stability = mean survival rate "
-                "(trend P_last − P_first is shown for context but does not affect classification).\n")
-        f.write("Two threshold schemes reported: relative (median split) | absolute "
-                "(util>0, surv>0.5).\n")
-        f.write("Archetype = the (U,S) high/low pair as a 2-letter code, e.g. "
-                "HL = high utility, low stability.\n\n")
+        f.write("Utility = mean marginal contribution, cut at mean +- sd across "
+                "detectors (H / M / L).\n")
+        f.write("Stability = mean survival rate, cut at the mean across "
+                "detectors (H / L).\n")
+        f.write("Trend P_last - P_first is shown for context but does not "
+                "affect classification.\n")
+        f.write("Archetype = the (U,S) pair as a 2-letter code, e.g. "
+                "ML = middle utility, low stability.\n\n")
         f.write(f"      {'detector':<14} {'util':>9} {'stab':>7} "
-                f"{'trend':>8}  {'archetype[rel]':<16} {'archetype[abs]'}\n")
-        f.write("      " + "-" * 78 + "\n")
+                f"{'trend':>8}  {'archetype':<12} {'in ensemble'}\n")
+        f.write("      " + "-" * 72 + "\n")
 
         def _num(v, fmt="{:+.4f}"):
             return fmt.format(v) if not np.isnan(v) else "N/A"
 
+        chosen = set(best_ensemble)
         for d in algorithm_list:
             a = archetypes[d]
             f.write(
                 f"      {d:<14} {_num(a['utility']):>9} "
-                f"{_num(a['stability_mean'], '{:.3f}'):>7} {_num(a['stability_trend'], '{:+.3f}'):>8}  "
-                f"{a['relative']['archetype']:<16} {a['absolute']['archetype']}\n"
+                f"{_num(a['stability_mean'], '{:.3f}'):>7} "
+                f"{_num(a['stability_trend'], '{:+.3f}'):>8}  "
+                f"{a['banded']['archetype']:<12} "
+                f"{'yes' if d in chosen else 'no'}\n"
             )
 
-        for scheme in ("relative", "absolute"):
-            tally: Dict[str, int] = {}
+        tally: Dict[str, int] = {}
+        for d in algorithm_list:
+            name = archetypes[d]["banded"]["archetype"]
+            tally[name] = tally.get(name, 0) + 1
+        ordered = [(nm, tally[nm]) for nm in BANDED_ARCHETYPE_ORDER if nm in tally]
+        f.write("\n  Tally: "
+                + ", ".join(f"{nm}: {ct}" for nm, ct in ordered) + "\n")
+
+        # ── Near-best ensembles ────────────────────────────────────────────
+        f.write("\n--- Near-best ensembles ---\n")
+        sigma = noise.get('sigma', float('nan'))
+        f.write(f"Fitting noise (sd over {noise.get('repeats', 0)} refits of the "
+                f"chosen ensemble): {_num(sigma, '{:.4f}')}\n")
+        if near_best.get('defined'):
+            f.write(f"Cutoff = best - sqrt(2) * fitting noise = "
+                    f"{near_best['cutoff']:.4f}  "
+                    f"(best {near_best['best_fitness']:.4f})\n")
+            f.write(f"{near_best['n_near_best']} of {near_best['n_evaluated']} "
+                    f"evaluated ensembles are near-best; mean size "
+                    f"{near_best['mean_size']:.1f}, baseline "
+                    f"{near_best['baseline']:.3f}\n\n")
+            f.write(f"      {'detector':<14} {'in near-best':>13} {'share':>8} "
+                    f"{'baseline':>10}  {'disagrees with the ensemble'}\n")
+            f.write("      " + "-" * 76 + "\n")
             for d in algorithm_list:
-                name = archetypes[d][scheme]["archetype"]
-                tally[name] = tally.get(name, 0) + 1
-            ordered = [(nm, tally[nm]) for nm in ARCHETYPE_ORDER if nm in tally]
-            summary = ", ".join(f"{nm}: {ct}" for nm, ct in ordered)
-            f.write(f"\n  Tally [{scheme}]: {summary}\n")
+                st = near_best['detectors'].get(d)
+                if not st:
+                    continue
+                frac = f"{st['count']}/{near_best['n_near_best']}"
+                f.write(f"      {d:<14} {frac:>13} "
+                        f"{st['share']:>8.3f} {near_best['baseline']:>10.3f}  "
+                        f"{'yes' if st['disagrees'] else 'no'}\n")
+        else:
+            f.write("Too few ensembles cleared the cutoff to compare against.\n")
 
     result = {
         "best_ensemble": list(best_ensemble),
-        "lofo": lofo,
         "mean_marginal": mean_marginal,
         "survival": survival,
         "archetypes": archetypes,
         "n_subsets_evaluated": n_subsets,
         "n_generations": n_generations,
-        "add_one_in": add_one_in,
-        "redundancy": redundancy,
         "noise": noise,
+        "near_best": near_best,
     }
 
     # ── Intermediate Representation (grounded LLM input; non-fatal) ─────────
