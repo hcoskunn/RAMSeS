@@ -650,18 +650,18 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
          "text": "After training, a candidate pool is drawn from the generator, "
                  "each candidate scored by the discriminator, and each one's "
                  "ambiguity measured as its distance from the decision "
-                 "threshold tau that separates normal from anomalous:"},
+                 "threshold τ that separates normal from anomalous:"},
         {"formula":
             "C          = { x_k = G(z_k) }, k = 1..K,   z_k ~ N(0, I)\n"
-            "delta_k    = | D(x_k) - tau |\n"
-            "X*_B       = the B candidates minimising delta_k"},
+            "δ_k        = | D(x_k) − τ |\n"
+            "X*_B       = the B candidates minimising δ_k"},
         {"text": "The B most ambiguous candidates are kept. These are the "
                  "borderline cases: plausible enough to belong to the series, "
                  "but sitting where \"normal\" and \"anomalous\" are hardest to "
                  "separate. The same boundary supplies each kept point's label, "
                  "so the injected set contains both near-normal and "
                  "near-anomalous behaviour:"},
-        {"formula": "y(x) = 1 [ D(x) >= tau ]"},
+        {"formula": "y(x) = 1 [ D(x) ≥ τ ]"},
         {"lead": "Temporal integration.",
          "text": "To respect chronology the selected points are interleaved into "
                  "the stream at regular intervals within sliding windows, at an "
@@ -699,19 +699,19 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "of the augmented series:"},
             {"lead": "ambiguity.",
              "text": "How far the discriminator's score for the point sits from "
-                     "the threshold tau. It is the same quantity the injection "
+                     "the threshold τ. It is the same quantity the injection "
                      "step minimised, so 0 marks a point the discriminator "
                      "found maximally hard to place."},
-            {"formula": "ambiguity(x) = | D(x) - tau |"},
+            {"formula": "ambiguity(x) = | D(x) − τ |"},
             {"lead": "is_anomaly.",
              "text": "The label the discriminator's verdict gave the point: 1 "
                      "anomalous, 0 normal. The same boundary that selected it."},
-            {"formula": "is_anomaly(x) = 1 [ D(x) >= tau ]"},
+            {"formula": "is_anomaly(x) = 1 [ D(x) ≥ τ ]"},
             {"lead": "signal_magnitude.",
              "text": "The average size of the generated values across the "
                      "injected point's features, which is how large the "
                      "injected reading is, irrespective of sign."},
-            {"formula": "signal_magnitude(x) = (1/d) * sum_c | x_c |"},
+            {"formula": "signal_magnitude(x) = (1/d) · Σ_c | x_c |"},
             {"lead": "signal_spread.",
              "text": "How much those values differ from one another across "
                      "the injected point's features. A low spread is a "
@@ -722,13 +722,13 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
              "text": "How far the generated point sits from the average of the "
                      "real series around it, averaged over the injected "
                      "point's features."},
-            {"formula": "context_gap(x) = (1/d) * sum_c | x_c - mean(W_c) |"},
+            {"formula": "context_gap(x) = (1/d) · Σ_c | x_c − mean(W_c) |"},
             {"lead": "local_volatility.",
              "text": "The standard deviation of the real series in that same "
                      "neighbourhood, averaged over the injected point's "
                      "features, which is how noisy the stretch the point "
                      "landed in already was."},
-            {"formula": "local_volatility = (1/d) * sum_c std( W_c )"},
+            {"formula": "local_volatility = (1/d) · Σ_c std( W_c )"},
             {"lead": "position.",
              "text": "Where the point falls in the series, from 0 at the start "
                      "to 1 at the end."},
@@ -868,7 +868,7 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "neighbourhood the point landed in, averaged over the "
                      "injected point's features, which is how noisy that "
                      "stretch already was."},
-            {"formula": "local_volatility = (1/d) * sum_c std( W_c )"},
+            {"formula": "local_volatility = (1/d) · Σ_c std( W_c )"},
             {"lead": "position.",
              "text": "Where the point falls in the series, from 0 at the start "
                      "to 1 at the end."},

@@ -921,7 +921,6 @@ def plot_history(history: List[Dict[str, np.ndarray]], models: Dict[str, Any],
 
     ax.set_xlabel('Iteration')
     ax.set_ylabel('Score')
-    ax.set_title('Model Score Trajectories Over Iterations')
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
     ax.legend(loc='upper left', ncol=2, frameon=False)
     plt.tight_layout(pad=1.2)
@@ -1003,7 +1002,7 @@ def plot_estimated_expected_rewards(
             ax.axvline(x=end + 1, color='black', linestyle='--', linewidth=0.9, alpha=0.7)
 
     ax.set_xlabel('Window')
-    ax.set_ylabel('Estimated Expected Reward (mu_k^T * c_t)')
+    ax.set_ylabel(r'Estimated expected reward  $\mu_k^\top c_t$')
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
     # One column, matching plot_ranking_score_trace: two columns of up to 107
     # detectors is wider than the axes it sits beside, and the eye has to track
@@ -1071,7 +1070,6 @@ def plot_selection_states(
     ax_strip.set_ylim(0, 1)
     ax_strip.set_yticks([])
     ax_strip.set_xlabel('Window')
-    ax_strip.set_title('Selection State Timeline')
 
     # Bottom: bar chart of counts with percentage annotations
     bars = ax_bar.bar(
@@ -1408,10 +1406,10 @@ def plot_shap_comparison(
 
     if all_models:
         sel_models = _top_k_models_by_norm(means, len(means))
-        suffix, title = '_all', 'SHAP Comparison Across All Models (at last window)'
+        suffix, title = '_all', None
     else:
         sel_models = _top_k_models_by_norm(means, top_k_models)
-        suffix, title = '', 'SHAP Comparison Across Top Models (at last window)'
+        suffix, title = '', None
     if not sel_models:
         return
 
@@ -1424,7 +1422,7 @@ def plot_shap_comparison(
     )
 
 
-_REWARD_YLABEL = r'Contribution to estimated expected reward  $\mu^\top c_t$'
+_REWARD_YLABEL = r'Contribution to $\mu^\top c_t$'
 
 
 def _plot_per_regime(
@@ -1637,12 +1635,11 @@ def plot_shap_average_all(
         # Every model, ordered by ||mu||^2 for a stable, meaningful legend order.
         sel_models = _top_k_models_by_norm(means, len(means))
         suffix = 'all'
-        title = 'Mean |SHAP| Across All Windows — all models (global importance)'
+        title = None
     else:
         sel_models = _top_k_models_by_estimated_expected_reward(means, contexts, top_k_models)
         suffix = f'top{top_k_models}'
-        title = (f'Mean |SHAP| Across All Windows — top {top_k_models} by '
-                 'estimated expected reward (global importance)')
+        title = None
 
     per_context_feature = _avg_per_context_feature_shap_map(
         means, sel_models, contexts, baseline, n_context_features, absolute=True,

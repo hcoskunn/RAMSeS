@@ -213,7 +213,6 @@ def plot_exclusive_win_importance(per_competitor, feature_names, *, directory: s
     order = np.argsort(means)
     ax.barh([feature_names[i] for i in order], [means[i] for i in order], color="#4477aa")
     ax.set_xlabel("Mean importance across competitor surrogates")
-    ax.set_title(title)
     fig.tight_layout()
     fig.savefig(os.path.join(directory, filename), dpi=300)
     plt.close(fig)

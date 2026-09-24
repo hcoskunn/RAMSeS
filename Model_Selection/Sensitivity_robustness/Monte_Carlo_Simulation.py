@@ -489,25 +489,31 @@ def _mc_dir(dataset, entity) -> str:
 
 def plot_trial_ranks(summary: Dict[str, Any], dataset, entity,
                      top_k: int = BUMP_CHART_MODELS) -> None:
-    """Rank of each detector in each trial; crossing lines are unsettled places."""
+    """Rank of each detector in each trial; crossing lines are unsettled places.
+
+    Two versions: the top `top_k` by final placing, where the lines are still
+    followable, and every detector, where they are not but nothing is hidden.
+    """
     _mc_explain_rcparams()
     models, ranks = summary["model_names"], summary["ranks"]
-    shown = summary["order"][:top_k]
     n_trials = summary["n_trials"]
     x = np.arange(1, n_trials + 1)
-    fig, ax = plt.subplots(figsize=(max(6.0, 1.4 * n_trials + 3), 6))
-    for name in shown:
-        y = ranks[:, models.index(name)]
-        ax.plot(x, y, marker='o', linewidth=1.8, markersize=5, label=name)
-    ax.set_xlabel("Trial")
-    ax.set_ylabel("Rank by fitness")
-    ax.set_xticks(x)
-    ax.invert_yaxis()
-    ax.legend(loc='upper left', frameon=False, bbox_to_anchor=(1.01, 1),
-              borderaxespad=0, fontsize=8)
-    fig.savefig(f"{_mc_dir(dataset, entity)}/{dataset}_{entity}_MonteCarlo_trial_ranks.png",
-                dpi=200, bbox_inches='tight')
-    plt.close(fig)
+    for shown, stem in ((summary["order"][:top_k], "trial_ranks"),
+                        (summary["order"], "trial_ranks_all")):
+        fig, ax = plt.subplots(figsize=(max(6.0, 1.4 * n_trials + 3), 6))
+        for name in shown:
+            y = ranks[:, models.index(name)]
+            ax.plot(x, y, marker='o', linewidth=1.8, markersize=5, label=name)
+        ax.set_xlabel("Trial")
+        ax.set_ylabel("Rank by fitness")
+        ax.set_xticks(x)
+        ax.invert_yaxis()
+        ax.legend(loc='upper left', frameon=False, bbox_to_anchor=(1.01, 1),
+                  borderaxespad=0, fontsize=8 if stem == "trial_ranks" else 6,
+                  ncol=1 if len(shown) <= 30 else 2)
+        fig.savefig(f"{_mc_dir(dataset, entity)}/{dataset}_{entity}_MonteCarlo_{stem}.png",
+                    dpi=200, bbox_inches='tight')
+        plt.close(fig)
 
 
 def plot_trial_scores(summary: Dict[str, Any], matrix: np.ndarray, tag: str,

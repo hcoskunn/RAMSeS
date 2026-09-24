@@ -398,11 +398,18 @@ def _monte_carlo(ds, ent):
     for path in _ls(d, "*_MonteCarlo_trial_ranks.png"):
         headline.append(_fig(
             path, "Rank in each trial",
-            "Where each detector placed in every noise draw."))
+            "Where each detector placed in every noise draw, for the "
+            "best-placed few. Lines that cross are places the trials did not "
+            "settle."))
     for path in _ls(d, "*_MonteCarlo_trial_fitness.png"):
         headline.append(_fig(
             path, "Fitness in each trial",
             "Every trial's fitness beside the mean the ranking is built from."))
+    for path in _ls(d, "*_MonteCarlo_trial_ranks_all.png"):
+        gallery.append(_fig(
+            path, "Rank in each trial, all detectors",
+            "The same placings with every detector drawn, so nothing is left "
+            "out of the comparison."))
     # Browse-only: the terms the fitness above combines, so a reader can see
     # which one moved between trials.
     for pattern, title in (("*_MonteCarlo_trial_F1.png", "F1"),
@@ -465,6 +472,9 @@ def _off_by(ds, ent):
     # specific to this stage.
     for entry in dedupe_timestamped(_ls(d, "Data_vs_DataWithAnomalies_*.png")):
         gallery.append(_fig(entry["path"], "Injected borderline points",
+                            "The series with the synthetic points this stage "
+                            "added, drawn beside the original so the "
+                            "perturbation is visible.",
                             timestamp=entry["timestamp"], n_older=entry["n_older"]))
     return headline, gallery
 
@@ -508,6 +518,9 @@ def _gan(ds, ent):
         newest = max(injected, key=lambda e: e["timestamp"] or "")
         hidden = sum(e["n_older"] + 1 for e in injected) - 1
         gallery.append(_fig(newest["path"], "Injected borderline points",
+                            "The series with the synthetic points this stage "
+                            "added, drawn beside the original so the "
+                            "perturbation is visible.",
                             timestamp=newest["timestamp"], n_older=hidden))
     # `*Misclassified*.png` is written by this stage on every run and listed by
     # neither card — the same treatment off-by's copy gets. It plots true against
