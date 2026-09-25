@@ -7,7 +7,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter
+from matplotlib.patches import Patch
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 import numpy as np
 from loguru import logger
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
@@ -15,7 +16,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 
 from Utils.pipeline_spec import (abbreviate_detector, combine_metrics,
-                                 DEFAULT_DECISION_METRICS, metrics_required)
+                                 DEFAULT_DECISION_METRICS, DETECTOR_GROUPS,
+                                 family_of, GROUP_LABELS, group_of,
+                                 metrics_required)
 from Utils.plot_labels import draw_abbreviation_key
 
 from Metrics.metrics import prauc, f1_score, vus_score, vus_window
@@ -724,7 +727,10 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
     # iteration, before fitness evaluation, so it reflects the population OF
     # that generation rather than the next one's offspring.
     generation_populations: List[List[List[str]]] = []
-    
+    # Per-generation fitness for the convergence figure, recorded after each
+    # generation is scored.
+    generation_fitness: List[Dict[str, float]] = []
+
     # Prepare training data for meta-model
     logger.info(f"  → Evaluating all {len(algorithm_list)} models on TRAINING data (for meta-model training)...")
     start_train = time_module.time()
@@ -806,6 +812,16 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
         fitness_scores = [result[2] for result in fitness_results]
         f1_scores = [result[0] for result in fitness_results]
         pr_aucs = [result[1] for result in fitness_results]
+
+        if explain:
+            finite = [s for s in fitness_scores if not np.isnan(s)]
+            generation_fitness.append({
+                'generation': generation + 1,
+                'best': max(finite) if finite else float('nan'),
+                'mean': float(np.mean(finite)) if finite else float('nan'),
+                'worst': min(finite) if finite else float('nan'),
+                'n_evaluated': len(finite),
+            })
 
         print(f"Fitness Scores: {fitness_scores}")
 
@@ -933,7 +949,8 @@ def genetic_algorithm(dataset, entity, train_data, test_data, algorithm_list, tr
                              base_fit=base_model_predictions_train, y_fit=y_true_train,
                              base_eval=base_model_predictions_test, y_eval=y_true_test,
                              meta_model_type=meta_model_type,
-                             metric=metric, vus_win=vus_win)
+                             metric=metric, vus_win=vus_win,
+                             generation_fitness=generation_fitness)
 
         explain_ga_combination(best_ensemble, algorithm_list,
                                base_model_predictions_train, base_model_predictions_test,
@@ -1024,6 +1041,56 @@ def measure_refit_noise(
         return empty
     sigma = float(np.std(evals, ddof=1)) if len(evals) > 1 else 0.0
     return {'eps': 2.0 * sigma, 'sigma': sigma, 'repeats': len(evals)}
+
+
+def compute_solo_fitness(
+    detectors: List[str],
+    algorithm_list: List[str],
+    base_eval: np.ndarray,
+    y_eval: np.ndarray,
+    metric: str = DEFAULT_DECISION_METRICS,
+    vus_win: Optional[int] = None,
+) -> Dict[str, Dict[str, float]]:
+    """
+    What each detector scores on its own, with no meta-learner.
+
+    The detector's own scores are thresholded directly, which is the baseline a
+    reader actually has: run this detector and nothing else. The F1 and PR-AUC
+    definitions are the ones the ensemble's fitness uses, so the two are
+    comparable; only the threshold grid differs, since raw detector scores are
+    not probabilities and do not share the meta-learner's [0, 1] range.
+
+    Returns {detector: {'f1', 'fitness'}}, skipping any that fail to evaluate.
+    """
+    out: Dict[str, Dict[str, float]] = {}
+    y = np.asarray(y_eval).flatten()
+    needed = metrics_required(metric)
+    for d in detectors:
+        if d not in algorithm_list:
+            continue
+        try:
+            scores = np.asarray(base_eval, dtype=float)[:, algorithm_list.index(d)]
+            lo, hi = float(np.nanmin(scores)), float(np.nanmax(scores))
+            if not np.isfinite(lo) or not np.isfinite(hi):
+                continue
+            best_f1 = 0.0
+            for t in np.linspace(lo, hi, 50):
+                f1 = f1_score((scores >= t).astype(int), y)[0]
+                if f1 > best_f1:
+                    best_f1 = float(f1)
+            pr_auc = prauc(y, scores)
+            vus = (vus_score(scores, y, vus_win)
+                   if 'vus' in needed and vus_win is not None else float('nan'))
+            fit = combine_metrics(metric, {'f1': best_f1, 'pr_auc': pr_auc,
+                                           'vus': vus})
+            if np.isnan(fit):
+                fit = best_f1
+        except Exception:
+            continue
+        if np.isnan(fit):
+            continue
+        out[d] = {'f1': best_f1, 'fitness': float(fit)}
+    return out
 
 
 def compute_near_best(
@@ -1868,6 +1935,189 @@ def plot_ga_plateau(
     plt.close()
 
 
+def plot_ga_convergence(
+    generation_fitness: List[Dict[str, float]],
+    near_best: Dict[str, Any],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Best-so-far and population-mean fitness per generation.
+
+    The plateau figure ranks the subsets the run evaluated; this one says when
+    they were found, and so whether the budget or the pool limited the answer.
+
+    Saves to ga_selection_convergence_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    rows = [g for g in (generation_fitness or [])
+            if not np.isnan(float(g.get('best', float('nan'))))]
+    if len(rows) < 2:
+        return
+
+    gens = [int(g['generation']) for g in rows]
+    best = [float(g['best']) for g in rows]
+    mean = [float(g['mean']) for g in rows]
+    running = list(np.maximum.accumulate(best))
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.plot(gens, running, color="#2ca02c", linewidth=1.8, label="best so far")
+    ax.plot(gens, best, color="#4c72b0", linewidth=1.0, linestyle="--",
+            marker="o", markersize=3, label="best in generation")
+    ax.plot(gens, mean, color="#9467bd", linewidth=1.2, label="population mean")
+
+    sigma = near_best.get("sigma", float("nan"))
+    if not np.isnan(sigma) and sigma > 0:
+        # The band the run cannot see inside: this close to the final answer,
+        # the refitting noise alone could produce the difference.
+        top = running[-1]
+        ax.axhspan(top - math.sqrt(2.0) * sigma, top, color="#d62728",
+                   alpha=0.10, zorder=0)
+        ax.axhline(top - math.sqrt(2.0) * sigma, color="#d62728",
+                   linestyle="--", linewidth=0.9, alpha=0.8)
+
+    # The FIRST generation to reach the final best is the last one that changed
+    # the outcome; everything after it is budget spent for nothing.
+    settled = min(i for i, v in enumerate(running) if v == running[-1])
+    if settled < len(gens) - 1:
+        ax.axvline(gens[settled], color="grey", linestyle=":", linewidth=1.0)
+        ax.annotate(f"final best reached at generation {gens[settled]}",
+                    xy=(gens[settled], running[-1]), xytext=(6, -14),
+                    textcoords="offset points", fontsize=9, color="grey")
+
+    ax.set_xlabel("Generation")
+    ax.set_ylabel("Fitness")
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+    ax.legend(frameon=False, loc="lower right")
+
+    plt.tight_layout(pad=1.2)
+    directory = results_dir("GA_Ens", dataset, entity)
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_convergence_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_ga_solo(
+    solo: Dict[str, Dict[str, float]],
+    best_ensemble: List[str],
+    best_fitness: float,
+    near_best: Dict[str, Any],
+    dataset: str,
+    entity: str,
+    top_n: int = 12,
+) -> None:
+    """
+    Each detector's standalone fitness against the chosen ensemble's.
+
+    Every other figure in this stage compares detectors with each other; this
+    one compares the ensemble with the baseline of running one detector.
+
+    Saves to ga_selection_solo_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    rows = sorted(((d, v['fitness']) for d, v in (solo or {}).items()),
+                  key=lambda kv: -kv[1])[:max(1, top_n)]
+    if not rows or np.isnan(best_fitness):
+        return
+
+    chosen = set(best_ensemble)
+    names = [d for d, _ in rows][::-1]
+    vals = [v for _, v in rows][::-1]
+    colours = ["#2ca02c" if d in chosen else "#bdbdbd" for d in names]
+
+    fig, ax = plt.subplots(figsize=(8, max(3.2, 0.34 * len(names) + 1.8)))
+    y = np.arange(len(names))
+    ax.barh(y, vals, color=colours)
+    ax.axvline(best_fitness, color="#d62728", linestyle="--", linewidth=1.2)
+
+    sigma = near_best.get("sigma", float("nan"))
+    if not np.isnan(sigma) and sigma > 0:
+        ax.axvspan(best_fitness - math.sqrt(2.0) * sigma, best_fitness,
+                   color="#d62728", alpha=0.10, zorder=0)
+
+    gain = best_fitness - vals[-1]
+    ax.annotate(f"ensemble {best_fitness:.4f}  ({gain:+.4f} vs best single)",
+                xy=(best_fitness, len(names) - 0.4), xytext=(-6, 0),
+                textcoords="offset points", fontsize=9, color="#d62728",
+                ha="right", va="center")
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(names)
+    ax.set_xlabel("Fitness of the detector on its own")
+    ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
+    handles = [Patch(facecolor="#2ca02c", label="in the chosen ensemble"),
+               Patch(facecolor="#bdbdbd", label="not in it")]
+    # Below the axes: the bars run to the right edge, so no corner inside the
+    # plot is reliably free of them.
+    ax.legend(handles=handles, frameon=False, loc="upper center", ncol=2,
+              bbox_to_anchor=(0.5, -0.12 - 1.2 / max(4, len(names))))
+
+    plt.tight_layout(pad=1.2)
+    directory = results_dir("GA_Ens", dataset, entity)
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_solo_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+def plot_ga_composition(
+    best_ensemble: List[str],
+    algorithm_list: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Which detector groups the chosen ensemble drew from, against the pool.
+
+    A group the pool offered and the ensemble passed over entirely is what the
+    archetype figures cannot show, being keyed on detectors rather than kinds.
+
+    Saves to ga_selection_composition_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    chosen = set(best_ensemble)
+    groups: Dict[str, List[int]] = {}
+    for d in algorithm_list:
+        g = group_of(family_of(d))
+        if g is None:
+            continue
+        counts = groups.setdefault(g, [0, 0])
+        counts[0] += 1
+        if d in chosen:
+            counts[1] += 1
+    if not groups:
+        return
+
+    order = [g for g in DETECTOR_GROUPS if g in groups]
+    pool = [groups[g][0] for g in order]
+    kept = [groups[g][1] for g in order]
+    labels = [GROUP_LABELS.get(g, g) for g in order]
+
+    fig, ax = plt.subplots(figsize=(max(6, 1.6 * len(order) + 2), 4.5))
+    x = np.arange(len(order))
+    ax.bar(x, pool, color="#e6e6e6", edgecolor="#9e9e9e", linewidth=0.8,
+           label="in the pool")
+    ax.bar(x, kept, color="#4c72b0", label="in the chosen ensemble")
+    for i, (p, k) in enumerate(zip(pool, kept)):
+        ax.text(i, p + max(pool) * 0.03, f"{k}/{p}", ha="center", fontsize=9)
+    ax.set_ylim(0, max(pool) * 1.15)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("Detectors")
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+    ax.legend(frameon=False, loc="upper center", ncol=2,
+              bbox_to_anchor=(0.5, -0.12))
+
+    plt.tight_layout(pad=1.2)
+    directory = results_dir("GA_Ens", dataset, entity)
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_selection_composition_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
 # ── Orchestrator + report ───────────────────────────────────────────────────
 
 def explain_ga_selection(
@@ -1886,11 +2136,12 @@ def explain_ga_selection(
     meta_model_type: str = 'rf',
     metric: str = DEFAULT_DECISION_METRICS,
     vus_win: Optional[int] = None,
+    generation_fitness: Optional[List[Dict[str, float]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     GA-ensemble selection explainability: explain *why* each detector ended up
     in best_ensemble, along two analytical axes (utility, stability). Produces
-    six plots and a structured text report under
+    a structured text report and the stage's figures under
         results/GA_Ens/{dataset}/{entity}/
 
     Returns a dict with the computed structures when explain=True; None otherwise.
@@ -1924,12 +2175,24 @@ def explain_ga_selection(
     near_best = compute_near_best(evaluated_ensembles, best_ensemble,
                                   algorithm_list, sigma)
 
+    solo: Dict[str, Dict[str, float]] = {}
+    if base_eval is not None and y_eval is not None:
+        solo = compute_solo_fitness(
+            algorithm_list, algorithm_list, base_eval, y_eval,
+            metric=metric, vus_win=vus_win)
+
+    best_key = tuple(sorted(best_ensemble))
+    best_fitness = float(evaluated_ensembles.get(best_key, (0, 0, float('nan')))[2])
+
     plot_ga_utility(mean_marginal, best_ensemble, algorithm_list, dataset, entity)
     plot_ga_survival(survival, best_ensemble, dataset, entity)
     plot_ga_archetypes(archetypes, best_ensemble, algorithm_list, dataset, entity)
     plot_ga_bands(archetypes, best_ensemble, algorithm_list, dataset, entity)
     plot_ga_profile(archetypes, best_ensemble, algorithm_list, dataset, entity)
     plot_ga_plateau(evaluated_ensembles, near_best, dataset, entity)
+    plot_ga_convergence(generation_fitness or [], near_best, dataset, entity)
+    plot_ga_solo(solo, best_ensemble, best_fitness, near_best, dataset, entity)
+    plot_ga_composition(best_ensemble, algorithm_list, dataset, entity)
 
     directory = results_dir("GA_Ens", dataset, entity)
     os.makedirs(directory, exist_ok=True)
@@ -2039,6 +2302,119 @@ def explain_ga_selection(
         else:
             f.write("Too few ensembles cleared the cutoff to compare against.\n")
 
+        # The rule the IR applies, written down at run time rather than left
+        # to be re-derived: the archetype expects HH in and LL out.
+        f.write("\n--- Contradictions between archetype and decision ---\n")
+        contradictions = []
+        for d in algorithm_list:
+            code = archetypes[d]["banded"]["archetype"]
+            inside = d in chosen
+            if code == "HH" and not inside:
+                contradictions.append((d, code, "excluded"))
+            elif code == "LL" and inside:
+                contradictions.append((d, code, "included"))
+        covered = [c for c in contradictions
+                   if near_best.get("defined")
+                   and near_best["detectors"].get(c[0], {}).get("disagrees")]
+        n_classified = sum(1 for d in algorithm_list
+                           if archetypes[d]["banded"]["archetype"] in ("HH", "LL"))
+        f.write(f"Decisive detectors (HH or LL): {n_classified} of "
+                f"{len(algorithm_list)}\n")
+        f.write(f"Contradictions: {len(contradictions)}  "
+                f"(covered by the near-best ensembles: {len(covered)}, "
+                f"unexplained: {len(contradictions) - len(covered)})\n")
+        if contradictions:
+            f.write(f"\n      {'detector':<14} {'archetype':>10} "
+                    f"{'decision':>10}  {'covered'}\n")
+            f.write("      " + "-" * 48 + "\n")
+            for d, code, decision in contradictions:
+                is_cov = any(c[0] == d for c in covered)
+                f.write(f"      {d:<14} {code:>10} {decision:>10}  "
+                        f"{'yes' if is_cov else 'no'}\n")
+
+        # ── Search convergence ─────────────────────────────────────────────
+        if generation_fitness:
+            f.write("\n--- Search convergence ---\n")
+            f.write(f"      {'generation':>10} {'best':>10} {'mean':>10} "
+                    f"{'worst':>10} {'best so far':>12}\n")
+            f.write("      " + "-" * 56 + "\n")
+            running = float('-inf')
+            for g in generation_fitness:
+                running = max(running, float(g['best']))
+                f.write(f"      {int(g['generation']):>10d} "
+                        f"{_num(g['best'], '{:.4f}'):>10} "
+                        f"{_num(g['mean'], '{:.4f}'):>10} "
+                        f"{_num(g['worst'], '{:.4f}'):>10} "
+                        f"{running:>12.4f}\n")
+            bests = [float(g['best']) for g in generation_fitness]
+            peak = max(bests)
+            settled = min(i for i, v in enumerate(
+                np.maximum.accumulate(bests)) if v == peak)
+            f.write(f"Best fitness last improved at generation "
+                    f"{int(generation_fitness[settled]['generation'])} of "
+                    f"{len(generation_fitness)}.\n")
+
+        # ── Solo detectors ─────────────────────────────────────────────────
+        if solo:
+            f.write("\n--- Each detector on its own ---\n")
+            f.write("The detector's own scores thresholded directly, with no "
+                    "meta-learner: the baseline of running one detector and "
+                    "nothing else.\n")
+            ranked = sorted(solo.items(), key=lambda kv: -kv[1]['fitness'])
+            f.write(f"\n      {'detector':<14} {'fitness':>10} {'F1':>10}"
+                    f"  {'in ensemble'}\n")
+            f.write("      " + "-" * 50 + "\n")
+            for d, v in ranked:
+                f.write(f"      {d:<14} {v['fitness']:>10.4f} {v['f1']:>10.4f}"
+                        f"  {'yes' if d in chosen else 'no'}\n")
+            top_d, top_v = ranked[0]
+            if not np.isnan(best_fitness):
+                f.write(f"\nBest alone: {top_d} at {top_v['fitness']:.4f}.  "
+                        f"Chosen ensemble: {best_fitness:.4f}  "
+                        f"({best_fitness - top_v['fitness']:+.4f}).\n")
+
+            # ── Naive baseline explanation ─────────────────────────────────
+            #
+            # The explanation anyone would give without this stage: the
+            # ensemble holds the detectors that score best alone. Scored the
+            # same way the archetypes are, so the two error counts compare.
+            f.write("\n--- Naive baseline explanation ---\n")
+            f.write("Predicting that the ensemble holds the k best detectors "
+                    "by standalone fitness, k being the ensemble size, and "
+                    "counting where that disagrees with the chosen ensemble.\n")
+            k = len(chosen)
+            predicted = {d for d, _ in ranked[:k]}
+            scored = [d for d in algorithm_list if d in solo]
+            naive_err = sum(1 for d in scored
+                            if (d in predicted) != (d in chosen))
+            decisive = [d for d in scored
+                        if archetypes[d]["banded"]["archetype"] in ("HH", "LL")]
+            naive_dec = sum(1 for d in decisive
+                            if (d in predicted) != (d in chosen))
+            arch_dec = sum(1 for d in decisive
+                           if (archetypes[d]["banded"]["archetype"] == "HH")
+                           != (d in chosen))
+            f.write(f"\n      over all {len(scored)} scored detectors      : "
+                    f"naive baseline {naive_err} wrong\n")
+            f.write(f"      over the {len(decisive)} decisive (HH or LL) : "
+                    f"naive baseline {naive_dec} wrong, "
+                    f"archetypes {arch_dec} wrong\n")
+            f.write("The second line is the like-for-like comparison: the "
+                    "archetypes commit only on the decisive detectors, so the "
+                    "baseline is scored on those same detectors.\n")
+
+        # ── Composition ────────────────────────────────────────────────────
+        f.write("\n--- Ensemble composition by detector group ---\n")
+        f.write(f"      {'group':<20} {'in pool':>8} {'chosen':>8} {'share':>8}\n")
+        f.write("      " + "-" * 46 + "\n")
+        for g in DETECTOR_GROUPS:
+            members = [d for d in algorithm_list if group_of(family_of(d)) == g]
+            if not members:
+                continue
+            took = sum(1 for d in members if d in chosen)
+            f.write(f"      {GROUP_LABELS.get(g, g):<20} {len(members):>8d} "
+                    f"{took:>8d} {took / len(members):>8.2f}\n")
+
     result = {
         "best_ensemble": list(best_ensemble),
         "mean_marginal": mean_marginal,
@@ -2048,6 +2424,9 @@ def explain_ga_selection(
         "n_generations": n_generations,
         "noise": noise,
         "near_best": near_best,
+        "solo": solo,
+        "best_fitness": best_fitness,
+        "generation_fitness": list(generation_fitness or []),
     }
 
     # ── Intermediate Representation (grounded LLM input; non-fatal) ─────────
@@ -2599,6 +2978,69 @@ _ALE_SUPPORT_LABEL = {"low_consistency": "low consistency",
                       "weak_influence": "weak influence"}
 
 
+def plot_ga_combination_agreement(
+    ranks: Dict[str, Dict[str, int]],
+    feature_names: List[str],
+    dataset: str,
+    entity: str,
+) -> None:
+    """
+    Where the three attribution methods disagree about a detector's rank.
+
+    The Markov chain merges them into one order, and a merged order looks
+    equally confident whether its sources agreed or not.
+
+    Saves to ga_combination_agreement_{dataset}_{entity}.png.
+    """
+    _ga_plot_rcparams()
+    methods = [m for m in ("SHAP_abs", "PFI", "ALE", "Markov") if m in ranks]
+    if len(methods) < 2 or not feature_names:
+        return
+    labels = {"SHAP_abs": "mean |SHAP|", "PFI": "PFI", "ALE": "ALE",
+              "Markov": "Markov"}
+
+    n = len(feature_names)
+    fig, ax = plt.subplots(figsize=(max(6, 1.7 * len(methods) + 2),
+                                    max(4, 0.28 * n + 1.8)))
+    x = np.arange(len(methods))
+    # Coloured by the merged rank, so a line can be followed across without a
+    # legend of 17 names.
+    cmap = plt.get_cmap("viridis")
+    final = ranks.get("Markov") or ranks[methods[0]]
+    for f_ in feature_names:
+        ys = [ranks[m][f_] for m in methods]
+        ax.plot(x, ys, color=cmap((final[f_] - 1) / max(1, n - 1)),
+                linewidth=1.3, marker="o", markersize=3.5, alpha=0.85)
+    for f_ in feature_names:
+        ax.annotate(abbreviate_detector(f_), xy=(0, ranks[methods[0]][f_]),
+                    xytext=(-6, 0), textcoords="offset points", fontsize=8,
+                    ha="right", va="center")
+        ax.annotate(abbreviate_detector(f_),
+                    xy=(len(methods) - 1, ranks[methods[-1]][f_]),
+                    xytext=(6, 0), textcoords="offset points", fontsize=8,
+                    ha="left", va="center")
+
+    spread = max(max(ranks[m][f_] for m in methods)
+                 - min(ranks[m][f_] for m in methods) for f_ in feature_names)
+    ax.set_title("")
+    ax.set_xticks(x)
+    ax.set_xticklabels([labels.get(m, m) for m in methods])
+    ax.set_ylabel("Rank  (1 = most important)")
+    ax.set_ylim(n + 0.6, 0.4)
+    ax.set_xlim(-0.6, len(methods) - 0.4)
+    ax.grid(True, axis="y", linestyle="--", linewidth=0.5, alpha=0.5)
+    ax.annotate(f"maximum rank spread: {spread}",
+                xy=(0.5, 1.02), xycoords="axes fraction", ha="center",
+                fontsize=9, color="#555555")
+
+    plt.tight_layout(pad=1.2)
+    directory = results_dir("GA_Ens", dataset, entity)
+    os.makedirs(directory, exist_ok=True)
+    plt.savefig(f"{directory}/ga_combination_agreement_{dataset}_{entity}.png",
+                format="png", dpi=300, bbox_inches="tight")
+    plt.close()
+
+
 def plot_ga_combination_ale(
     ale: Dict[str, Dict[str, Any]],
     signs: Dict[str, str],
@@ -2844,6 +3286,11 @@ def explain_ga_combination(
     shap_abs_rank, shap_signed_rank = _ranks(shap_abs), _ranks(shap_signed)
     pfi_rank, ale_rank = _ranks(pfi_imp), _ranks(ale_total)
 
+    plot_ga_combination_agreement(
+        {"SHAP_abs": shap_abs_rank, "PFI": pfi_rank, "ALE": ale_rank,
+         "Markov": _ranks(markov_scores)},
+        feature_names, dataset, entity)
+
     directory = results_dir("GA_Ens", dataset, entity)
     os.makedirs(directory, exist_ok=True)
     report_path = os.path.join(
@@ -2932,6 +3379,22 @@ def explain_ga_combination(
                 groups.append((r, [f_]))
         f.write("\nFinal ranking (Markov): "
                 + " > ".join(f"{r}.{' = '.join(fs)}" for r, fs in groups) + "\n")
+
+        # ── Method agreement ───────────────────────────────────────────────
+        markov_rank = _ranks(markov_scores)
+        f.write("\n--- Agreement between the attribution methods ---\n")
+        f.write("Rank spread is the widest gap between the three methods for "
+                "one detector, so a large value means the merged order is "
+                "resolving a disagreement rather than reporting a consensus.\n")
+        f.write(f"\n      {'detector':<14} {'|SHAP|':>8} {'PFI':>6} {'ALE':>6} "
+                f"{'Markov':>8} {'spread':>8}\n")
+        f.write("      " + "-" * 54 + "\n")
+        for f_ in sorted(feature_names, key=lambda x: markov_rank[x]):
+            trio = [shap_abs_rank[f_], pfi_rank[f_], ale_rank[f_]]
+            f.write(f"      {f_:<14} {shap_abs_rank[f_]:>8} {pfi_rank[f_]:>6} "
+                    f"{ale_rank[f_]:>6} {markov_rank[f_]:>8} "
+                    f"{max(trio) - min(trio):>8}\n")
+
         f.write("\nNote: three magnitude measures feed the ranking. mean|SHAP| = the size of the "
                 "detector's influence on the meta-learner's output (label-free, measured on a "
                 "fixed 200-row sample whereas PFI and ALE use every row); PFI = the fitness drop "

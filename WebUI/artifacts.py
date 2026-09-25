@@ -775,14 +775,14 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "binary while position and local_volatility are "
                      "continuous, so the binary property starts at a "
                      "disadvantage against them."},
-            {"text": "Each tree also reports a held-out, cross-validated "
-                     "accuracy alongside the accuracy on the points it was "
-                     "fitted to, because the second can look strong purely from "
-                     "memorising a small set of wins. A comparison resting on "
-                     "fewer exclusive wins than there are cross-validation folds "
-                     "is flagged, since the held-out estimate is not stable "
-                     "there. Only the prediction side is explained: correctness "
-                     "is defined by thresholded predictions, and PR-AUC has no "
+            {"text": "Each tree also reports a held-out, cross-validated F1 "
+                     "alongside the accuracy on the points it was fitted to, "
+                     "because the second can look strong purely from memorising "
+                     "a small set of wins. A comparison resting on fewer "
+                     "exclusive wins than there are cross-validation folds is "
+                     "flagged, since the held-out estimate is not stable there. "
+                     "Only the prediction side is explained: correctness is "
+                     "defined by thresholded predictions, and PR-AUC has no "
                      "per-point notion of right or wrong."},
         )},
     )},
@@ -911,14 +911,14 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "binary while position and local_volatility are "
                      "continuous, so the binary property starts at a "
                      "disadvantage against them."},
-            {"text": "Each tree also reports a held-out, cross-validated "
-                     "accuracy alongside the accuracy on the points it was "
-                     "fitted to, because the second can look strong purely from "
-                     "memorising a small set of wins. A comparison resting on "
-                     "fewer exclusive wins than there are cross-validation folds "
-                     "is flagged, since the held-out estimate is not stable "
-                     "there. Only the prediction side is explained: correctness "
-                     "is defined by thresholded predictions, and PR-AUC has no "
+            {"text": "Each tree also reports a held-out, cross-validated F1 "
+                     "alongside the accuracy on the points it was fitted to, "
+                     "because the second can look strong purely from memorising "
+                     "a small set of wins. A comparison resting on fewer "
+                     "exclusive wins than there are cross-validation folds is "
+                     "flagged, since the held-out estimate is not stable there. "
+                     "Only the prediction side is explained: correctness is "
+                     "defined by thresholded predictions, and PR-AUC has no "
                      "per-point notion of right or wrong."},
         )},
     )},

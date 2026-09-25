@@ -151,15 +151,33 @@ def _ga_selection(ds, ent):
             path, "Utility",
             "Mean marginal contribution per detector, sorted, each bar showing "
             "how precisely it was measured. The shaded band is the middle "
-            "class, and bars whose error reaches into it are detectors the run "
-            "cannot separate from the pool. Ensemble members are marked with a "
-            "star."))
+            "class. Ensemble members are marked with a star."))
     for path in _ls(d, "ga_selection_plateau_*.png"):
         gallery.append(_fig(
             path, "Near-best ensembles",
             "Every evaluated ensemble by fitness, best first. The line marks "
-            "how close to the best an ensemble had to score for this run to be "
-            "unable to rank it apart from the winner."))
+            "how close to the best an ensemble had to score to be considered "
+            "near-best."))
+    for path in _ls(d, "ga_selection_convergence_*.png"):
+        gallery.append(_fig(
+            path, "Search convergence",
+            "Best and mean fitness in each generation, with the running best "
+            "across generations. The shaded region is the near-best "
+            "threshold."))
+    for path in _ls(d, "ga_selection_solo_*.png"):
+        gallery.append(_fig(
+            path, "Single-detector fitness against the ensemble",
+            "Fitness of each detector evaluated as a one-member ensemble, so "
+            "the meta-learner and the fitness definition are those the chosen "
+            "ensemble was scored under. The dashed line is the chosen "
+            "ensemble's fitness and the shaded region is the near-best "
+            "threshold."))
+    for path in _ls(d, "ga_selection_composition_*.png"):
+        gallery.append(_fig(
+            path, "Group composition of the pool and the ensemble",
+            "Number of detectors in the candidate pool from each family, "
+            "together with the number of detectors included in the ensemble "
+            "from each family."))
     survival = _variants(d, ["ga_selection_survival_*[!l].png", "ga_selection_survival_all_*.png"],
                          ["Ensemble highlighted", "All detectors"])
     survival = [f for f in survival if "_all_" not in f["name"]] + \
@@ -199,7 +217,13 @@ def _ga_combination(ds, ent):
             "caption": "How each detector moves the meta-learner, over that "
                        "detector's own score range.",
             "variants": variants, "default": 0})
-    return headline, []
+    gallery = []
+    for path in _ls(d, "ga_combination_agreement_*.png"):
+        gallery.append(_fig(
+            path, "Detector rank across attribution methods",
+            "Each detector's rank under the three attribution methods and "
+            "under the merged order."))
+    return headline, gallery
 
 
 # Every grouped-bar context feature figure in both Thompson stages plots a subset —
@@ -411,6 +435,12 @@ def _monte_carlo(ds, ent):
             path, "Rank in each trial, all detectors",
             "The same placings with every detector drawn, so nothing is left "
             "out of the comparison."))
+    for path in _ls(d, "*_MonteCarlo_margin_vs_spread.png"):
+        gallery.append(_fig(
+            path, "Fitness gap against trial-to-trial spread",
+            "For each neighbouring pair in the ranking, the gap between their "
+            "mean fitness against the larger of the two detectors' spreads "
+            "across trials."))
     # Browse-only: the terms the fitness above combines, so a reader can see
     # which one moved between trials.
     for pattern, title in (("*_MonteCarlo_trial_F1.png", "F1"),
@@ -464,6 +494,11 @@ def _off_by(ds, ent):
     # Browse-only. The importance plot answers a question about the whole
     # comparison rather than about this entity's decision, so it reads as
     # background to the trees above rather than as a headline of its own.
+    for path in _ls(d, "*_off_by_point_wins.png"):
+        gallery.append(_fig(path, "Exclusive wins per competitor",
+                            "Injected points the winner gets right and the "
+                            "rival does not, with the held-out F1 of the "
+                            "surrogate that produced that rival's rule."))
     for path in _ls(d, "*_off_by_point_importance.png"):
         gallery.append(_fig(path, "Which point properties separate the winner",
                             "Mean importance across the per-competitor "
@@ -505,6 +540,11 @@ def _gan(ds, ent):
             "title": f"Where {winner} uniquely wins",
             "variants": trees, "default": 0, "select_label": "Compared against",
         })
+    for path in _ls(d, "*_gan_point_wins.png"):
+        gallery.append(_fig(path, "Exclusive wins per competitor",
+                            "Injected points the winner gets right and the "
+                            "rival does not, with the held-out F1 of the "
+                            "surrogate that produced that rival's rule."))
     for path in _ls(d, "*_gan_point_importance.png"):
         gallery.append(_fig(path, "Which point properties separate the winner",
                             "Mean importance across the per-competitor "

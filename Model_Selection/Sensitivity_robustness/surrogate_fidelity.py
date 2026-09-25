@@ -19,6 +19,11 @@ the exported tree / rule text used for the human-readable explanation), but
 the *fidelity number* used to judge whether the explanation is accurate
 should be this held-out estimate, reported alongside it.
 
+The classifier helper scores F1, not accuracy: its targets are rare-event
+ones, where accuracy mostly measures the imbalance. Measured over the existing
+surrogates, median accuracy was 0.82 against a majority-class baseline of 0.78,
+and half did not beat that baseline at all.
+
 Both helpers degrade gracefully on the small samples typical of this layer
 (a handful of noise levels x repeats, or a modest number of injected
 points): they shrink the fold count to what the data can support and fall
@@ -50,10 +55,12 @@ def _resolve_fold_plan(n_samples: int, requested_splits: int, min_class_count: i
 
 def held_out_classifier_fidelity(X, y, max_depth: int = 3, random_state: int = 42,
                                  n_splits: int = 5) -> Dict[str, Any]:
-    """Cross-validated accuracy of DecisionTreeClassifier(max_depth) on (X, y).
+    """Cross-validated F1 on the positive class for DecisionTreeClassifier(max_depth).
 
-    Grounds the surrogate's reported fidelity in held-out performance rather
-    than the in-sample fit alone (see module docstring / Molnar 2022).
+    Scored on pooled out-of-fold predictions rather than averaged per fold:
+    under leave-one-out a fold holds a single point, where F1 is degenerate.
+    Pooling leaves no per-fold spread to report, so `n_positive` is returned
+    instead — it is what actually bounds the estimate here.
     """
     X = np.asarray(X, dtype=float)
     if X.ndim == 1:
@@ -62,19 +69,22 @@ def held_out_classifier_fidelity(X, y, max_depth: int = 3, random_state: int = 4
     n = len(y)
     classes = sorted(Counter(y).items())
     min_class_count = min(c for _, c in classes) if classes else 0
+    n_positive = int(np.sum(np.asarray(y) == 1))
 
     if len(classes) < 2:
-        return {"feasible": False, "cv_accuracy": float("nan"), "cv_accuracy_std": float("nan"),
-                "n_splits": 0, "method": "n/a",
-                "note": "single-class target — held-out accuracy is undefined."}
+        return {"feasible": False, "cv_f1": float("nan"), "n_positive": n_positive,
+                "positive_rate": float("nan"), "n_splits": 0, "method": "n/a",
+                "note": "single-class target — held-out F1 is undefined."}
 
     n_splits_used, method = _resolve_fold_plan(n, n_splits, min_class_count)
     if method == "infeasible":
-        return {"feasible": False, "cv_accuracy": float("nan"), "cv_accuracy_std": float("nan"),
-                "n_splits": 0, "method": "n/a",
+        return {"feasible": False, "cv_f1": float("nan"), "n_positive": n_positive,
+                "positive_rate": float("nan"), "n_splits": 0, "method": "n/a",
                 "note": f"too few samples (n={n}) for any held-out estimate."}
 
-    from sklearn.model_selection import StratifiedKFold, KFold, LeaveOneOut, cross_val_score
+    from sklearn.model_selection import (StratifiedKFold, KFold, LeaveOneOut,
+                                         cross_val_predict)
+    from sklearn.metrics import f1_score
     from sklearn.tree import DecisionTreeClassifier
 
     clf = DecisionTreeClassifier(max_depth=max_depth, random_state=random_state)
@@ -85,10 +95,11 @@ def held_out_classifier_fidelity(X, y, max_depth: int = 3, random_state: int = 4
     else:
         cv = LeaveOneOut()
 
-    scores = cross_val_score(clf, X, y, cv=cv, scoring="accuracy")
-    return {"feasible": True, "cv_accuracy": float(np.mean(scores)),
-            "cv_accuracy_std": float(np.std(scores)), "n_splits": n_splits_used, "method": method,
-            "note": ""}
+    predicted = cross_val_predict(clf, X, y, cv=cv)
+    return {"feasible": True,
+            "cv_f1": float(f1_score(y, predicted, pos_label=1, zero_division=0)),
+            "n_positive": n_positive, "positive_rate": float(n_positive) / n,
+            "n_splits": n_splits_used, "method": method, "note": ""}
 
 
 def held_out_regressor_fidelity(X, y, max_depth: int = 3, random_state: int = 42,

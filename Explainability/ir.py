@@ -56,7 +56,7 @@ HEAD_REQUIRED = 3
 
 # Support gate for per-rule confidence: the fidelity estimate is stratified
 # 5-fold CV, and with fewer positives than folds the CV cannot place one
-# positive per fold, so the held-out accuracy for that rule is undefined or
+# positive per fold, so the held-out F1 for that rule is undefined or
 # unstable. Anchored to the fold count on purpose — not a magic number.
 N_CV_FOLDS = 5
 
@@ -123,14 +123,21 @@ def make_atom(atom_id: str, atom_type: str, subject: str, value: Any, text: str,
     return atom
 
 
-def fidelity_grade(cv_acc: Any) -> str:
-    """Closed enum for held-out surrogate fidelity."""
-    if _is_nan(cv_acc):
+def fidelity_grade(cv_f1: Any, positive_rate: Any = None) -> str:
+    """Closed enum for held-out surrogate fidelity, scored as F1.
+
+    F1's chance level rises with the positive rate, so a score that does not
+    clear its own target's rate grades low whatever the bands say.
+    """
+    if _is_nan(cv_f1):
         return NOT_AVAILABLE
-    a = float(cv_acc)
-    if a >= 0.8:
+    f = float(cv_f1)
+    if not _is_nan(positive_rate) and positive_rate is not None:
+        if f <= float(positive_rate):
+            return "low"
+    if f >= 0.6:
         return "high"
-    if a >= 0.6:
+    if f >= 0.35:
         return "medium"
     return "low"
 
@@ -2236,8 +2243,9 @@ def _build_exclusive_win_ir(stage: str, prefix: str, dataset: str, entity: str,
 
         conf[f"surrogate_vs_{k}"] = {
             "train_accuracy": _val(info.get("train_accuracy"), 3),
-            "cv_accuracy": _val(info.get("cv_accuracy"), 3),
-            "grade": fidelity_grade(info.get("cv_accuracy")),
+            "cv_f1": _val(info.get("cv_f1"), 3),
+            "positive_rate": _val(rate, 4),
+            "grade": fidelity_grade(info.get("cv_f1"), rate),
             "support": sup,
         }
         if sup == "low":

@@ -5,10 +5,13 @@ from typing import Any, Dict, List, Optional
 from Metrics.metrics import (range_based_precision_recall_f1_auc,
                              rank_key, vus_score, vus_window)
 from Utils.model_selection_utils import evaluate_model, ScoringTimeout
-from Utils.pipeline_spec import (DEFAULT_DECISION_METRICS, combine_metrics,
-                                 decision_metric_formula, metrics_required)
+from Utils.pipeline_spec import (abbreviate_detector, DEFAULT_DECISION_METRICS,
+                                 combine_metrics, decision_metric_formula,
+                                 metrics_required)
 from loguru import logger
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from Explainability import ir
 from Utils.paths import results_dir
 
@@ -516,6 +519,60 @@ def plot_trial_ranks(summary: Dict[str, Any], dataset, entity,
         plt.close(fig)
 
 
+def plot_margin_vs_spread(summary: Dict[str, Any], dataset, entity) -> None:
+    """Each neighbouring pair's fitness gap against the two detectors' spread.
+
+    The ranking asserts an order for every pair; where the gap falls short of
+    the spread, that pair's order is not resolved across trials.
+    """
+    _mc_explain_rcparams()
+    order = summary["order"]
+    means, spreads = summary["means"], summary["spreads"]
+    if len(order) < 2:
+        return
+
+    gaps, spread_of, labels = [], [], []
+    for a, b in zip(order, order[1:]):
+        gap = abs(means[a] - means[b])
+        # The bar to clear is what BOTH members move across trials, so the
+        # larger of the two spreads.
+        sp = max(spreads.get(a, 0.0), spreads.get(b, 0.0))
+        if np.isnan(gap) or np.isnan(sp):
+            continue
+        gaps.append(gap)
+        spread_of.append(sp)
+        labels.append(f"{abbreviate_detector(a)} / {abbreviate_detector(b)}")
+    if not gaps:
+        return
+
+    # One row per pair rather than a scatter: the pairs cluster tightly on both
+    # quantities, and in a scatter their labels land on top of each other.
+    n = len(gaps)
+    fig, ax = plt.subplots(figsize=(7.5, max(3.0, 0.34 * n + 1.4)))
+    y = np.arange(n)[::-1]
+    colours = ["#2ca02c" if g > s else "#d62728" for g, s in zip(gaps, spread_of)]
+    ax.barh(y, gaps, color=colours, height=0.55, zorder=2)
+    ax.scatter(spread_of, y, marker='|', s=260, color="#333333", zorder=3,
+               linewidth=1.6)
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=8)
+    ax.set_xlabel("Fitness")
+    ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.5)
+    handles = [Patch(facecolor="#2ca02c", label="gap exceeds spread"),
+               Patch(facecolor="#d62728", label="gap does not exceed spread"),
+               Line2D([], [], color="#333333", marker='|', linestyle='none',
+                      markersize=11, markeredgewidth=1.6,
+                      label="larger of the pair's two spreads")]
+    ax.legend(handles=handles, frameon=False, loc="upper center", ncol=3,
+              bbox_to_anchor=(0.5, -0.10 - 0.9 / max(4, n)), fontsize=8)
+
+    fig.savefig(f"{_mc_dir(dataset, entity)}/"
+                f"{dataset}_{entity}_MonteCarlo_margin_vs_spread.png",
+                dpi=200, bbox_inches='tight')
+    plt.close(fig)
+
+
 def plot_trial_scores(summary: Dict[str, Any], matrix: np.ndarray, tag: str,
                       xlabel: str, dataset, entity) -> None:
     """One row per detector: its score in every trial, beside the mean the ranking uses."""
@@ -574,6 +631,7 @@ def explain_monte_carlo(per_trial: Dict[str, Any],
     summary["noise_level"] = noise_level
 
     plot_trial_ranks(summary, dataset, entity)
+    plot_margin_vs_spread(summary, dataset, entity)
     plot_trial_scores(summary, summary["fitness"], "fitness",
                       f"Fitness ({fitness_formula})", dataset, entity)
     parts = {"f1": per_trial["F1"], "pr_auc": per_trial["PR"], "vus": per_trial["VUS"]}

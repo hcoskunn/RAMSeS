@@ -190,9 +190,11 @@ class TestSurrogates(unittest.TestCase):
         self.assertGreater(info["n_exclusive_wins"], 0)
         # Held-out fidelity must be reported alongside the in-sample fit — a
         # clean single-feature split like this one should generalize well.
-        self.assertIn("cv_accuracy", info)
-        self.assertFalse(np.isnan(info["cv_accuracy"]))
-        self.assertGreater(info["cv_accuracy"], 0.8)
+        self.assertIn("cv_f1", info)
+        self.assertFalse(np.isnan(info["cv_f1"]))
+        self.assertGreater(info["cv_f1"], 0.8)
+        # F1 only means something beside its own chance level.
+        self.assertGreater(info["cv_f1"], info["exclusive_win_rate"])
 
     def test_winner_without_predictions_infeasible(self):
         correct = np.ones((5, 2), dtype=bool)
@@ -246,7 +248,7 @@ class TestOrchestrator(unittest.TestCase):
                     self.assertTrue(os.path.exists(os.path.join(out, fname)), fname)
                 with open(os.path.join(out, "TEST_e1_off_by_explainability.txt")) as fh:
                     report_txt = fh.read()
-                self.assertIn("held-out accuracy", report_txt.lower())
+                self.assertIn("held-out f1", report_txt.lower())
                 # Intermediate Representation JSON is emitted alongside.
                 import json
                 ir_path = os.path.join("results", "explanations_ir", "TEST", "e1",

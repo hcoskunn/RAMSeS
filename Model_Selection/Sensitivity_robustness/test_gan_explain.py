@@ -360,8 +360,9 @@ class TestSurrogates(unittest.TestCase):
         self.assertGreater(info["train_accuracy"], 0.95)
         top = max(info["feature_importances"].items(), key=lambda kv: kv[1])[0]
         self.assertEqual(top, "ambiguity")
-        self.assertFalse(np.isnan(info["cv_accuracy"]))
-        self.assertGreater(info["cv_accuracy"], 0.8)
+        self.assertFalse(np.isnan(info["cv_f1"]))
+        self.assertGreater(info["cv_f1"], 0.8)
+        self.assertGreater(info["cv_f1"], info["exclusive_win_rate"])
 
     def test_winner_without_predictions_infeasible(self):
         res = gt.train_gan_point_surrogates(self._table(np.ones((4, 2), dtype=bool)), "ZZ")
@@ -413,7 +414,7 @@ class TestOrchestrator(unittest.TestCase):
                     self.assertTrue(os.path.exists(os.path.join(out, fname)), fname)
                 with open(os.path.join(out, "TEST_e1_gan_explainability.txt")) as fh:
                     report_txt = fh.read()
-                self.assertIn("held-out accuracy", report_txt.lower())
+                self.assertIn("held-out f1", report_txt.lower())
                 # Intermediate Representation JSON is emitted alongside.
                 import json
                 ir_path = os.path.join("results", "explanations_ir", "TEST", "e1",

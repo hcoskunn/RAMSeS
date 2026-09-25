@@ -145,7 +145,7 @@ def train_exclusive_win_surrogates(table, winner, max_depth: int = 3,
         clf.fit(X, y_int)
         importances = {fn: float(im) for fn, im in zip(feature_names, clf.feature_importances_)}
         # train_accuracy is the in-sample fit used to generate the exported
-        # rules below; it is not a generalization claim. cv_accuracy is a
+        # rules below; it is not a generalization claim. cv_f1 is a
         # cross-validated fidelity estimate (see surrogate_fidelity.py,
         # grounded in Molnar 2022's point that surrogate fidelity should be
         # assessed as a held-out property, not read off the training fit).
@@ -154,7 +154,7 @@ def train_exclusive_win_surrogates(table, winner, max_depth: int = 3,
         per_competitor[k] = {
             "degenerate": False, "clf": clf, "feature_importances": importances,
             "train_accuracy": float(clf.score(X, y_int)),
-            "cv_accuracy": cv["cv_accuracy"], "cv_accuracy_std": cv["cv_accuracy_std"],
+            "cv_f1": cv["cv_f1"], "cv_n_positive": cv["n_positive"],
             "cv_method": cv["method"], "cv_note": cv["note"],
             "n_exclusive_wins": n_pos, "exclusive_win_rate": rate,
             # These features live on narrow ranges (off-by's boundary_distance in
@@ -218,6 +218,51 @@ def plot_exclusive_win_importance(per_competitor, feature_names, *, directory: s
     plt.close(fig)
 
 
+def plot_exclusive_win_counts(per_competitor, winner, *, directory: str,
+                              filename: str) -> None:
+    """How many injected points the winner took from each rival, and alone.
+
+    The rule figures say what separated the winner; this says how much there
+    was to separate. A rival with no bar matched it on every point.
+    """
+    rows = []
+    for k in sorted(per_competitor):
+        info = per_competitor[k]
+        rows.append((k, int(info.get("n_exclusive_wins", 0) or 0),
+                     info.get("cv_f1", float("nan")),
+                     bool(info.get("degenerate"))))
+    if not rows:
+        return
+    rows.sort(key=lambda r: r[1])
+
+    names = [r[0] for r in rows]
+    counts = [r[1] for r in rows]
+    explain_rcparams()
+    fig, ax = plt.subplots(figsize=(8, max(3.2, 0.32 * len(names) + 1.8)))
+    y = np.arange(len(names))
+    colours = ["#cccccc" if r[3] else "#4477aa" for r in rows]
+    ax.barh(y, counts, color=colours)
+
+    # Each rival's fidelity printed where its rule is: a tall bar whose
+    # surrogate did not generalise is one to take no rule from.
+    widest = max(counts) if counts else 0
+    for i, r in enumerate(rows):
+        cv = r[2]
+        if r[3] or cv is None or np.isnan(cv):
+            continue
+        ax.annotate(f"held-out F1 {cv:.2f}", xy=(r[1], i), xytext=(4, 0),
+                    textcoords="offset points", fontsize=8, va="center",
+                    color="#555555")
+    ax.set_xlim(0, max(1, widest) * 1.28)
+    ax.set_yticks(y)
+    ax.set_yticklabels(names)
+    ax.set_xlabel(f"Injected points {winner} gets right and the rival does not")
+    ax.grid(True, axis="x", linestyle="--", linewidth=0.5, alpha=0.6)
+    fig.tight_layout()
+    fig.savefig(os.path.join(directory, filename), dpi=300)
+    plt.close(fig)
+
+
 def explain_exclusive_win_stage(
     point_records, adjusted_y_pred_dict, true_labels, ranked_names,
     model_names, dataset, entity, explain: bool = False, *,
@@ -276,6 +321,11 @@ def explain_exclusive_win_stage(
                                 table["feature_names"])
                    for k, info in per_competitor.items()]
         plot_importance_fn(per_competitor, dataset, entity, table["feature_names"])
+        plot_exclusive_win_counts(
+            per_competitor, winner,
+            directory=explain_dir_fn(dataset, entity),
+            filename=f"{dataset}_{entity}_"
+                     f"{tree_prefix.replace('_tree_', '_wins')}.png")
         # Whatever an earlier run left here describes a different outcome —
         # a different winner, or the same winner against differently-spelled
         # competitors — and the picker cannot tell the two apart. Pruned
@@ -314,12 +364,19 @@ def explain_exclusive_win_stage(
                     f.write(f"    {info['rules_text']}\n\n")
                     continue
                 f.write(f"Surrogate train accuracy (in-sample fit): {info['train_accuracy']:.3f}\n")
-                cv_acc = info.get("cv_accuracy", float('nan'))
-                if not np.isnan(cv_acc):
-                    f.write(f"Surrogate held-out accuracy ({info.get('cv_method', 'cv')}, "
-                            f"{info.get('cv_accuracy_std', float('nan')):.3f} std): {cv_acc:.3f}\n")
+                cv_f1 = info.get("cv_f1", float('nan'))
+                if not np.isnan(cv_f1):
+                    rate = float(info.get("exclusive_win_rate", float('nan')))
+                    # 2r/(1+r) is what "call every point a win" scores: a
+                    # feature-blind rule's F1 is 2pr/(p+r) at flag rate p,
+                    # which peaks at p = 1. Anything below it explains nothing.
+                    trivial = 2.0 * rate / (1.0 + rate) if rate > 0 else 0.0
+                    f.write(f"Surrogate held-out F1 ({info.get('cv_method', 'cv')}, "
+                            f"{info.get('cv_n_positive', 0)} positives): {cv_f1:.3f}"
+                            f"  ({trivial:.3f} is the best F1 without using the "
+                            f"features, at a {rate:.3f} positive rate)\n")
                 elif info.get("cv_note"):
-                    f.write(f"Surrogate held-out accuracy: not estimated ({info['cv_note']})\n")
+                    f.write(f"Surrogate held-out F1: not estimated ({info['cv_note']})\n")
                 imps = sorted(info["feature_importances"].items(), key=lambda kv: kv[1], reverse=True)
                 f.write("Feature importances: "
                         + ", ".join(f"{fn} {im:.2f}" for fn, im in imps if im > 0) + "\n")

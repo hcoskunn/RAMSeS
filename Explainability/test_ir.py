@@ -135,7 +135,7 @@ def _off_by_result(n_wins=8):
             "per_competitor": {
                 "B": {"degenerate": False, "clf": None,
                       "feature_importances": {"boundary_distance": 0.9, "local_std": 0.1},
-                      "train_accuracy": 1.0, "cv_accuracy": 0.75,
+                      "train_accuracy": 1.0, "cv_f1": 0.75,
                       "n_exclusive_wins": n_wins, "exclusive_win_rate": n_wins / 40.0,
                       "rules_text": "..."},
                 "C": {"degenerate": True, "clf": None, "feature_importances": {},
@@ -256,9 +256,17 @@ class TestCore(unittest.TestCase):
 
     def test_fidelity_grade(self):
         self.assertEqual(ir.fidelity_grade(0.9), "high")
-        self.assertEqual(ir.fidelity_grade(0.7), "medium")
+        self.assertEqual(ir.fidelity_grade(0.45), "medium")
         self.assertEqual(ir.fidelity_grade(0.3), "low")
         self.assertEqual(ir.fidelity_grade(float("nan")), ir.NOT_AVAILABLE)
+
+    def test_fidelity_grade_demotes_a_score_at_its_own_chance_level(self):
+        """The same F1 grades high or low depending on the positive rate."""
+        self.assertEqual(ir.fidelity_grade(0.62), "high")
+        self.assertEqual(ir.fidelity_grade(0.62, 0.65), "low")
+        self.assertEqual(ir.fidelity_grade(0.62, 0.20), "high")
+        # No rate supplied means no guard, not a demotion.
+        self.assertEqual(ir.fidelity_grade(0.62, float("nan")), "high")
 
     def test_support_grade_anchored_to_folds(self):
         self.assertEqual(ir.support_grade(ir.N_CV_FOLDS), "adequate")
