@@ -921,6 +921,7 @@ def plot_history(history: List[Dict[str, np.ndarray]], models: Dict[str, Any],
 
     ax.set_xlabel('Iteration')
     ax.set_ylabel('Score')
+    ax.set_title('Model score trajectories over iterations')
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.7)
     ax.legend(loc='upper left', ncol=2, frameon=False)
     plt.tight_layout(pad=1.2)
@@ -1070,6 +1071,7 @@ def plot_selection_states(
     ax_strip.set_ylim(0, 1)
     ax_strip.set_yticks([])
     ax_strip.set_xlabel('Window')
+    ax_strip.set_title('Selection state timeline')
 
     # Bottom: bar chart of counts with percentage annotations
     bars = ax_bar.bar(
@@ -1406,10 +1408,10 @@ def plot_shap_comparison(
 
     if all_models:
         sel_models = _top_k_models_by_norm(means, len(means))
-        suffix, title = '_all', None
+        suffix, title = '_all', 'SHAP comparison across all models (at last window)'
     else:
         sel_models = _top_k_models_by_norm(means, top_k_models)
-        suffix, title = '', None
+        suffix, title = '', 'SHAP comparison across the top models (at last window)'
     if not sel_models:
         return
 

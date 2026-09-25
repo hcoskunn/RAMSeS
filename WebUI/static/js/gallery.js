@@ -18,6 +18,7 @@ function refs() {
     box: $("#lightbox"),
     img: $("#lightbox-img"),
     title: $("#lightbox-title"),
+    caption: $("#lightbox-caption"),
     input: $("#lightbox-index"),
     total: $("#lightbox-total"),
     prev: $("#lightbox-prev"),
@@ -31,12 +32,16 @@ function totalCount() {
 }
 
 function show() {
-  const { img, title, input, total, prev, next } = refs();
+  const { img, title, caption, input, total, prev, next } = refs();
   const item = items[index];
   if (!item) return;
   img.src = item.src;
   img.alt = item.title || "";
   title.textContent = item.title || item.name || "";
+  // The gallery is the only place these figures are ever seen, so the caption
+  // written for each one has to come with it: the bar above carries the title,
+  // this carries the sentence that used to be the figure's own.
+  caption.textContent = item.caption || "";
   const count = totalCount();
   // Not written while the field has focus: overwriting what someone is halfway
   // through typing is how a jump to 173 becomes a jump to 1.

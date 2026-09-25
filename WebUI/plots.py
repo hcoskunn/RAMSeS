@@ -130,7 +130,8 @@ def _ga_selection(ds, ent):
             path, "Utility × stability",
             "Where each detector sits on the two axes that explain its "
             "selection, coloured by the archetype the two levels make. Filled "
-            "points are in the chosen ensemble. Both axes start at zero."))
+            "points are in the chosen ensemble, and the dashed lines are the "
+            "three cuts the levels come from. Both axes start at zero."))
         break
     for path in _ls(d, "ga_selection_profile_*.png"):
         gallery.append(_fig(
@@ -465,7 +466,9 @@ def _off_by(ds, ent):
     # background to the trees above rather than as a headline of its own.
     for path in _ls(d, "*_off_by_point_importance.png"):
         gallery.append(_fig(path, "Which point properties separate the winner",
-                            "Feature importance across all pairwise comparisons."))
+                            "Mean importance across the per-competitor "
+                            "surrogates, so the tallest bar is the point "
+                            "property that best explains the winner's edge."))
     # `*Misclassified*.png` is still written by the off-by stage on every run —
     # it is simply not listed, and the GAN card does not list its copy either.
     # The injected-points figure beside it is the one that says something
@@ -504,7 +507,9 @@ def _gan(ds, ent):
         })
     for path in _ls(d, "*_gan_point_importance.png"):
         gallery.append(_fig(path, "Which point properties separate the winner",
-                            "Feature importance across all pairwise comparisons."))
+                            "Mean importance across the per-competitor "
+                            "surrogates, so the tallest bar is the point "
+                            "property that best explains the winner's edge."))
     # Only the newest, across every stem rather than one per stem.
     #
     # These names begin with the dataset as it was typed on the command line, and

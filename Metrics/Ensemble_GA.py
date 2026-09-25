@@ -1564,12 +1564,18 @@ def _archetype_axes(ax, util, stab, algorithm_list, mean_u, sd_u, mean_s,
     fitness difference, so a detector that lowers mean fitness is genuinely
     negative, and the crossing point moves right to give it somewhere to sit.
     """
-    if band and not (np.isnan(mean_u) or np.isnan(sd_u)):
-        ax.axvspan(mean_u - sd_u, mean_u + sd_u, color="#4c72b0", alpha=0.10,
-                   zorder=0)
-        for edge in (mean_u - sd_u, mean_u + sd_u):
-            ax.axvline(edge, color="#4c72b0", linestyle="--", linewidth=0.9,
-                       alpha=0.8)
+    edges = []
+    if not (np.isnan(mean_u) or np.isnan(sd_u)):
+        edges = [mean_u - sd_u, mean_u + sd_u]
+        if band:
+            ax.axvspan(edges[0], edges[1], color="#4c72b0", alpha=0.10,
+                       zorder=0)
+        # Grey without the shading, so the cuts read the same as the stability
+        # line above and do not compete with the blue an archetype may carry.
+        for edge in edges:
+            ax.axvline(edge, color="#4c72b0" if band else "grey",
+                       linestyle="--", linewidth=0.9,
+                       alpha=0.8 if band else 0.7)
     if not np.isnan(mean_s):
         ax.axhline(mean_s, color="grey", linestyle="--", linewidth=0.8,
                    alpha=0.7)
@@ -1590,7 +1596,6 @@ def _archetype_axes(ax, util, stab, algorithm_list, mean_u, sd_u, mean_s,
     ax.set_xlabel("Utility  (mean marginal contribution)")
     ax.set_ylabel("Stability  (mean survival rate)")
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.5)
-    edges = [mean_u - sd_u, mean_u + sd_u] if band else []
     _zero_anchored_axis(ax, "x", [util[d] for d in algorithm_list] + edges)
     _zero_anchored_axis(ax, "y", [stab[d] for d in algorithm_list] + [mean_s])
 
@@ -1640,11 +1645,11 @@ def plot_ga_archetypes(
       x = utility (mean marginal contribution), y = stability (mean survival)
       colour       = the detector's archetype
       filled point = in the chosen ensemble, hollow = not
-      dashed line  = the stability cut
+      dashed lines = the two utility cuts and the stability cut
 
-    The colour already carries the archetype, so the utility band is not drawn
-    here. `plot_ga_bands` is the same scatter with the band and without the
-    per-archetype colour, for a reader checking where the cuts fall.
+    The colour already carries the archetype, so the middle band is marked by
+    its two edges rather than shaded. `plot_ga_bands` is the same scatter with
+    the band filled in and without the per-archetype colour.
 
     Saves to ga_selection_archetypes_{dataset}_{entity}.png.
     """
@@ -1840,9 +1845,17 @@ def plot_ga_plateau(
         ax.axhline(cutoff, color="#d62728", linestyle="--", linewidth=1.0)
         ax.fill_between(x, cutoff, vals, where=[v >= cutoff for v in vals],
                         color="#d62728", alpha=0.12, interpolate=True)
+        # The flatter the plateau the closer the cutoff sits to the best, so
+        # the room above it is made rather than assumed: the label always goes
+        # over the line, and the axes are extended when that would not fit.
+        lo, hi = ax.get_ylim()
+        needed = lo + (cutoff - lo) / 0.88
+        if needed > hi:
+            ax.set_ylim(lo, needed)
         ax.annotate(f"{n_near} near-best of {len(vals)}",
-                    xy=(max(n_near, 1), cutoff), xytext=(14, -16),
-                    textcoords="offset points", fontsize=9, color="#d62728")
+                    xy=(max(n_near, 1), cutoff), xytext=(14, 6),
+                    textcoords="offset points", fontsize=9, color="#d62728",
+                    va="bottom")
     ax.set_xlabel("Evaluated ensembles, best first")
     ax.set_ylabel("Fitness")
     ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
