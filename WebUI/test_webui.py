@@ -32,6 +32,19 @@ except ImportError:
     HAS_FLASK = False
 
 
+
+def _strip_js_comments(src: str) -> str:
+    """`src` with /* */ and // comments removed.
+
+    The assertions below ban DOM constructs, not vocabulary. The prose in
+    configure.js explains at length why the detector pool stopped using
+    checkboxes, so a bare substring check on the source would fail on the
+    explanation for the very rule it is enforcing.
+    """
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return re.sub(r"//[^\n]*", "", src)
+
+
 # ── Fixture builders ─────────────────────────────────────────────────────────
 
 def _ir(stage, **kw):
@@ -2295,28 +2308,29 @@ class TestRoutes(ArtifactTreeCase):
             html = self.client.get(path).get_data(as_text=True)
             self.assertEqual(html.count("js/dom.js"), 0, path)
 
-    # Commented out: `renderDetectors` no longer exists in configure.js, so the
-    # split that locates the pool raises before any assertion runs.
-    # def test_the_detector_pool_has_no_checkboxes(self):
-    #     """Detector, family and group all say "chosen" the same way.
-#
-    #     The chips used to be a <label> wrapping a checkbox while the group
-    #     buttons filled and the family buttons showed nothing, so one screen had
-    #     three notations for one idea. They are all buttons with aria-pressed
-    #     now. `selectedDetectors` was always the only thing `currentBody` reads,
-    #     so the DOM is purely a reflection of it — but a reintroduced checkbox
-    #     would still be a second source of truth waiting to disagree.
-    #     """
-    #     js = (Path(__file__).parent / "static" / "js" / "configure.js").read_text()
-    #     pool = js.split("function renderDetectors")[1].split("function renderTrainingBanner")[0]
-    #     self.assertNotIn("checkbox", pool,
-    #                      "detector chips must be buttons, not checkboxes")
-    #     self.assertIn('"data-detector"', pool)
-    #     self.assertIn('"aria-pressed"', pool)
-    #     # Nothing may drive the selection through input elements any more.
-    #     self.assertNotIn('$$("#detectors input")', js)
-    #     # The stage chips keep theirs: those are an ordinary multi-select.
-    #     self.assertIn('$$("#stages input:checked")', js)
+    def test_the_detector_pool_has_no_checkboxes(self):
+        """Detector, family and group all say "chosen" the same way.
+
+        The chips used to be a <label> wrapping a checkbox while the group
+        buttons filled and the family buttons showed nothing, so one screen had
+        three notations for one idea. They are all buttons with aria-pressed
+        now. `selectedDetectors` was always the only thing `currentBody` reads,
+        so the DOM is purely a reflection of it — but a reintroduced checkbox
+        would still be a second source of truth waiting to disagree.
+        """
+        js = (Path(__file__).parent / "static" / "js" / "configure.js").read_text()
+        # renderDetectors was split into renderGroupButtons / syncGroupButtons /
+        # syncDetectorButtons / familyParams / refreshDetectors, which occupy the
+        # stretch from the first of them up to the training banner.
+        pool = js.split("function renderGroupButtons")[1].split("function renderTrainingBanner")[0]
+        self.assertNotIn("checkbox", _strip_js_comments(pool),
+                         "detector chips must be buttons, not checkboxes")
+        self.assertIn('"data-detector"', pool)
+        self.assertIn('"aria-pressed"', pool)
+        # Nothing may drive the selection through input elements any more.
+        self.assertNotIn('$$("#detectors input")', js)
+        # The stage chips keep theirs: those are an ordinary multi-select.
+        self.assertIn('$$("#stages input:checked")', js)
 
     def test_chosen_chips_and_group_buttons_share_one_style(self):
         """`.is-on` is what fills a group button; the chips must use the same

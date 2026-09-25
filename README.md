@@ -43,11 +43,15 @@ The framework provides an end-to-end pipeline for data loading, model training, 
 ```text
 RAMSeS/
 ├── app.py                              # Main pipeline entrypoint
-├── requirements.txt                    # Python dependencies
-├── environment.yml                     # Conda environment specification
+├── run_full_testbed.py                 # Batch runner over a testbed file list
+├── run_testbed_comprehensive.py        # Batch runner + comprehensive reporting
+├── requirements.txt                    # Python dependencies (requirements-server.txt for deployment)
+├── environment.yml                     # Conda environment (environment.full.yml pins transitives)
 ├── LICENSE                             # Apache 2.0 license
 │
 ├── Algorithms/                         # Base anomaly detector implementations
+│   ├── base_model.py                   # PyMADModel interface every detector implements
+│   ├── pyod_model.py                   # Adapter for PyOD estimators
 │   ├── abod.py                         # Angle-Based Outlier Detection
 │   ├── alad.py                         # Adversarial Learned Anomaly Detection
 │   ├── anomaly_transformer.py          # Transformer-based detector
@@ -58,49 +62,103 @@ RAMSeS/
 │   ├── lof.py                          # Local Outlier Factor
 │   ├── lstmvae.py                      # LSTM Variational Autoencoder
 │   ├── mean_deviation.py               # Mean Deviation
+│   ├── mtad_gat.py                     # Multivariate TSAD via Graph Attention
 │   ├── nearest_neighbors.py            # k-Nearest Neighbors
 │   ├── rnn.py                          # Recurrent Neural Network
 │   ├── running_mean.py                 # Running Mean
-│   └── sos.py                          # Stochastic Outlier Selection
+│   ├── sos.py                          # Stochastic Outlier Selection
+│   ├── chronos_detector.py             # Chronos foundation-model detector
+│   ├── series2graph_detector.py        # Series2Graph (fetched, not vendored — see below)
+│   ├── windowed.py                     # Windowing wrapper shared by the detectors
+│   └── tsb_ad/                         # Vendored TSB-AD detector suite (Apache 2.0)
 │
 ├── Configs/                            # Configuration files
-│   ├── config.yml                      # Default configuration
-│   └── custom_config.yml               # Custom configuration template
+│   ├── config.yml                      # Default configuration (read by Utils and the WebUI)
+│   └── custom_config.yml               # Testbed configuration (run_full_testbed.py default)
 │
 ├── Datasets/                           # Data loading utilities
 │   ├── dataset.py                      # Dataset class definitions
 │   └── load.py                         # Data loader implementations
+├── Loaders/                            # Entity/tensor loaders feeding the trainers
 │
-├── Metrics/                            # Evaluation and GA components
-│   ├── Ensemble_GA.py                  # Genetic Algorithm for ensemble optimization
-│   ├── metrics.py                      # Performance metrics (F1, PR-AUC, etc.)
-│   └── ranking_metrics.py              # Ranking evaluation utilities
+├── Model_Training/                     # Model training and management
+│   ├── train.py                        # Training orchestration
+│   ├── trainer.py                      # Training logic
+│   ├── entities.py                     # Entity/dataset record types
+│   └── hyperparameter_grids.py         # Hyperparameter configurations
+├── Model_Optimization/                 # Hyperparameter search over the grids
 │
 ├── Model_Selection/                    # Model selection algorithms
 │   ├── Thompson_Sampling.py            # Linear Thompson Sampling + sliding windows
 │   ├── rank_aggregation.py             # Markov-chain rank aggregation
 │   ├── inject_anomalies.py             # Synthetic anomaly injection
+│   ├── anomaly_parameters.py           # Injection parameter definitions
 │   └── Sensitivity_robustness/
 │       ├── GAN_test.py                 # GAN-based robustness testing
 │       ├── Monte_Carlo_Simulation.py   # Monte Carlo noise stress tests
 │       └── off_by_threshold_testing.py # Borderline sensitivity analysis
 │
-├── Model_Training/                     # Model training and management
-│   ├── train.py                        # Training orchestration
-│   ├── trainer.py                      # Training logic
-│   └── hyperparameter_grids.py         # Hyperparameter configurations
+├── Metrics/                            # Evaluation and GA components
+│   ├── Ensemble_GA.py                  # Genetic Algorithm for ensemble optimization
+│   ├── Ensemble_Genetics.py            # GA operators and fitness plumbing
+│   ├── metrics.py                      # Performance metrics (F1, PR-AUC, etc.)
+│   └── ranking_metrics.py              # Ranking evaluation utilities
+├── distributions/                      # Mallows / Plackett-Luce rank distributions
+├── vus/                                # Volume-Under-Surface metrics + robustness eval
+│
+├── Explainability/                     # Grounded natural-language explanations
+│   ├── ir.py                           # Intermediate Representation: facts as JSON "atoms"
+│   ├── llm.py                          # LLM client
+│   ├── narrate.py                      # Renders the IR into prose
+│   └── verifier.py                     # Scores narratives for hallucination/omission
+│                                       #   against the IR they were generated from
+│
+├── WebUI/                              # Local Flask UI: configure, watch, explain
+│   ├── server.py                       # Routes, JSON API, SSE progress stream
+│   ├── jobs.py                         # Drives app.py as a subprocess
+│   ├── artifacts.py                    # Reads pipeline output off disk
+│   └── static/, templates/             # Front-end assets
+│                                       # Run with: python -m WebUI  (localhost only)
+│
+├── Controller/, Services/, dao/        # Layered access to stored runs (mdata/mmodel/mevaluation)
+├── db/tsad.db                          # SQLite store backing the above
 │
 ├── Utils/                              # Utility functions
 │   ├── utils.py                        # CLI argument parsing, misc utilities
 │   ├── config.py                       # Configuration file parser
 │   ├── plotting.py                     # Visualization utilities
+│   ├── pipeline_spec.py                # Detector/family definitions shared by UI and pipeline
 │   └── results_formatter.py            # Results formatting and export
 │
-└── testbed/                            # Batch evaluation configurations
-    └── file_list/                      # CSV files listing datasets for batch runs
-        ├── test_single.csv             # Single dataset test
-        ├── test_m_skab.csv             # SKAB multivariate datasets
-        └── test_u_ucr_anomaly_archive.csv  # UCR univariate datasets
+├── testbed/file_list/                  # CSV files listing datasets for batch runs
+│   ├── test_single.csv                 # Single dataset test
+│   ├── test_m_skab.csv                 # SKAB multivariate datasets
+│   └── test_u_ucr_anomaly_archive.csv  # UCR univariate datasets
+│
+└── Misc/                               # One-off analysis and plotting scripts
+```
+
+### Directories that are not in version control
+
+These are generated, fetched, or working data. All are gitignored; none are
+needed to read or run the code, and several are large.
+
+| Path | |
+|---|---|
+| `Mononito/` | **Symlink** to the dataset/checkpoint archive (~61 GB). See [Datasets](#-datasets). |
+| `myresults/`, `results/`, `output/`, `Outputs/`, `testbed_results/` | Pipeline output, written per run |
+| `saved_models/` | Checkpoints for one SMD entity; nothing in the codebase loads them |
+| `logs/`, `dataset_lists/` | Run logs and generated dataset manifests |
+| `docs/` | Working notes — `docs/guides/` is current, `docs/archive/` is historical. See `docs/README.md`. |
+| `archive/` | Retired result trees, plots and code kept for reference |
+| `demo_paper_prep/` | Demo-paper drafts and reference PDFs |
+
+`Algorithms/tsb_ad/models/Series2Graph.py` is fetched rather than committed —
+it is patent-encumbered and licensed for research use only, unlike the
+Apache-2.0 TSB-AD code vendored around it:
+
+```bash
+python -m Algorithms.tsb_ad.fetch_series2graph
 ```
 
 ---
@@ -132,10 +190,20 @@ RAMSeS uses the **Mononito** time-series repository ([arXiv:2210.01078](https://
    └── trained_models/  # Created during training
    ```
 
-3. **Update configuration** in `Configs/config.yml`:
+3. **Symlink it into the repo** (recommended) so the relative paths baked into
+   the code — e.g. `Model_Training/train.py`'s `save_dir='Mononito/trained_models'`
+   — keep working, and the bulk data stays out of the repo tree:
+   ```bash
+   ln -s /path/to/Mononito Mononito   # Mononito/ is gitignored
+   ```
+
+4. **Update configuration** in `Configs/config.yml`. These values are used
+   verbatim (they are *not* resolved against the repo root), so use absolute
+   paths. Pointing them at the symlink means a future data move only requires
+   re-pointing the symlink:
    ```yaml
-   dataset_path: "/path/to/Mononito/datasets"
-   trained_model_path: "/path/to/Mononito/trained_models"
+   dataset_path: "/path/to/RAMSeS/Mononito/datasets"
+   trained_model_path: "/path/to/RAMSeS/Mononito/trained_models"
    ```
 
 > **Licensing Note:** Please follow the original dataset licenses and cite the appropriate papers when using these datasets.
@@ -159,7 +227,7 @@ cd RAMSeS
 
 # Create and activate conda environment
 conda env create -f environment.yml
-conda activate ..
+conda activate RAMS
 
 # Verify installation
 python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
@@ -184,14 +252,28 @@ python -c "import torch; print('PyTorch version:', torch.__version__)"
 ```
 
 ### Key Dependencies
-- **PyTorch** 2.5+ (with optional CUDA support)
-- **TensorFlow** 2.18+ (CPU version)
-- **scikit-learn** 1.7+ (ML algorithms)
-- **PyOD** 2.0+ (outlier detection)
+- **PyTorch** 2.5 (with optional CUDA support)
+- **TensorFlow** 2.18 (CPU version)
+- **scikit-learn** 1.7 (ML algorithms)
+- **PyOD** 3.6 (outlier detection)
 - **NumPy**, **Pandas**, **Matplotlib** (data processing & visualization)
 - **loguru** (structured logging)
+- **Flask** 3.1 (serves the local WebUI)
 
-See `requirements.txt` for the complete dependency list.
+All 26 dependencies are pinned in `requirements.txt`; `environment.yml`
+installs from it, so the conda and pip routes cannot drift apart.
+
+### On a machine without a GPU
+
+Use `requirements-server.txt` instead. It swaps `tensorflow` for
+`tensorflow-cpu` (230 MB against 616 MB; TensorFlow is used by the GAN
+robustness stage alone) and takes torch from PyTorch's CPU index, avoiding
+~5 GB of `nvidia-*` CUDA runtime that a GPU-less box cannot use. Its header
+documents the reasoning and the exact two-command install.
+
+Do not install both files into one environment: `requirements.txt` brings
+`tensorflow` and `requirements-server.txt` brings `tensorflow-cpu`, and the two
+distributions overwrite each other's `tensorflow` package.
 
 ---
 
@@ -223,7 +305,7 @@ RAMSeS automatically trains missing models on first run:
 
 ```bash
 python app.py \
-  --config Configs/config.yml \
+  -c Configs/config.yml \
   --dataset SKAB \
   --entity 5
 ```
@@ -239,7 +321,7 @@ Execute the complete RAMSeS pipeline:
 
 ```bash
 python app.py \
-  --config Configs/config.yml \
+  -c Configs/config.yml \
   --dataset SKAB \
   --entity 5 \
   --parallel false
@@ -287,17 +369,80 @@ Final Choice:
 
 ---
 
+## 🖥️ Web UI
+
+An optional local UI for configuring a run, watching it live, and reading the
+explanation it produces:
+
+```bash
+python -m WebUI              # http://127.0.0.1:5000
+python -m WebUI --port 8080  # different port
+```
+
+It drives `app.py` as a subprocess and reads the artifacts off disk, so it never
+imports the pipeline, torch or matplotlib — the server starts instantly and does
+not hold the pipeline's working set. Flask and the standard library are its only
+dependencies.
+
+> **Bound to localhost by design.** There is no authentication, and the app
+> spawns processes with user-supplied arguments. Do not bind it to a public
+> interface.
+
+---
+
 ## 🎯 Configuration Options
 
 ### Command-Line Arguments
 
 ```bash
 python app.py \
-  --config <path>           # Path to config file (default: Configs/config.yml)
-  --dataset <name>          # Dataset name (e.g., SKAB, SMD, UCR)
-  --entity <id>             # Entity ID within dataset
-  --parallel <true|false>   # Enable parallel model selection
+  -c, --config_file_path <path>   # Config file (default: Configs/config.yml)
+  --dataset <name>                # Dataset name (e.g. SKAB, SMD, UCR)
+  --entity <id>                   # Entity ID within the dataset
+  --detectors <list>              # Comma-separated detectors to select among,
+                                  #   e.g. 'LOF_1,NN_2,CBLOF_3'. Only the families
+                                  #   of the named detectors are trained. Untrained
+                                  #   ones are skipped with a warning; at least two
+                                  #   must remain. Default: all of them.
+  --stages <list>                 # Sub-stages to run: ga, thompson, gan, offby,
+                                  #   montecarlo, plus 'robustness' (= gan,offby,
+                                  #   montecarlo) and 'all' (default). Any strict
+                                  #   subset stops after those stages — no rank
+                                  #   aggregation, final decision or online phase —
+                                  #   and runs sequentially.
+  --overwrite <true|false>        # Retrain base detectors even when checkpoints
+                                  #   exist; overrides `overwrite` in the config.
+                                  #   Training dominates runtime, so 'false' is
+                                  #   much faster.
+  --anomaly_type <name>           # Synthetic anomaly injected at stage 4: spikes
+                                  #   (default), contextual, flip, speedup, noise,
+                                  #   cutoff, scale, wander, average
+  --anomaly_rate <float>          # Target fraction of timesteps labelled anomalous,
+                                  #   in (0, 1]. For 'spikes' this is the per-timestep
+                                  #   injection probability; for other types it sizes
+                                  #   the injected segment. Omit for per-type defaults.
+  --decision_metric <list>        # Metrics the fitness function is built from: f1,
+                                  #   pr_auc (both by default), vus. Each may carry a
+                                  #   weight ('f1:0.5,pr_auc:0.3,vus:0.2'); unweighted
+                                  #   metrics count equally and weights are normalised.
+                                  #   The weighted mean is what the GA, Thompson
+                                  #   Sampling and the final ensemble-vs-single
+                                  #   comparison all maximise.
+  --parallel <true|false>         # Enable parallel model selection
+  --skip_gan                      # Skip GAN robustness testing (faster; debugging)
+  --explain                       # Write explainability reports and plots.
+                                  #   OFF by default.
+  --llm_model <name>              # Model for LLM narration after an --explain run
+                                  #   (default: qwen2.5:14b-instruct)
+  --llm_base_url <url>            # OpenAI-compatible endpoint for narration
+                                  #   (default: http://localhost:11434/v1, i.e. Ollama).
+                                  #   Narration is skipped with a warning if no
+                                  #   server is reachable.
 ```
+
+> Use `--config_file_path` (or `-c`), not `--config`. The short form works today
+> only because argparse accepts unambiguous prefixes, and it would break the
+> moment a second `--config*` option is added.
 
 ### Online Mode (Adaptive Selection)
 
@@ -305,7 +450,7 @@ Enable online learning and adaptive model selection:
 
 ```bash
 python app.py \
-  --config Configs/config.yml \
+  -c Configs/config.yml \
   --dataset SKAB \
   --entity 5 \
   --enable_online \
@@ -331,36 +476,83 @@ python app.py \
 
 ## 🧩 Available Algorithms
 
-RAMSeS includes the following base detectors:
+RAMSeS ships **34 detector families**, expanded into **107 configured detector
+instances** (`LOF_1`, `LOF_2`, … — the same algorithm at different
+hyperparameters, which is what gives the ensemble something to combine). Both
+lists are defined once, in `Utils/pipeline_spec.py`; `DETECTOR_FAMILIES` and
+`ALL_DETECTORS` there are the authority if this table drifts.
 
-**Statistical Methods:**
-- `LOF` — Local Outlier Factor
-- `CBLOF` — Cluster-Based Local Outlier Factor
-- `COF` — Connectivity-Based Outlier Factor
-- `KDE` — Kernel Density Estimation
-- `NN` — k-Nearest Neighbors (Nearest Neighbors)
-- `SOS` — Stochastic Outlier Selection
+**Proximity and density** — `LOF`, `NN` (k-Nearest Neighbors), `CBLOF`, `COF`,
+`ABOD`, `KDE`, `SOS`, `LUNAR`
 
-**Classical Methods:**
-- `MD` — Mean Deviation
-- `RM` — Running Mean
-- `ABOD` — Angle-Based Outlier Detection
+**Linear, statistical and classical** — `PCA`, `OCSVM`, `MCD`, `IFOREST`,
+`HBOS`, `MD` (Mean Deviation), `RM` (Running Mean), `SpectralResidual`,
+`POLY` (univariate only), `KMEANSAD`
 
-**Deep Learning Methods:**
-- `LSTMVAE` — LSTM Variational Autoencoder
-- `RNN` — Recurrent Neural Network
-- `DGHL` — Deep Generative Hierarchical Learning
-- `ALAD` — Adversarial Learned Anomaly Detection
-- `AnomalyTransformer` — Transformer-based detector
+**Deep reconstruction and forecasting** — `AutoEncoder`, `RNN`, `LSTMVAE`,
+`LSTMAD`, `DGHL`, `DONUT`, `OmniAnomaly`, `USAD`, `TRANAD`, `FITS`
 
-**Configuration in `Configs/config.yml`:**
-```yaml
-model_architectures: 'all'  # Train all available algorithms
-# OR specify subset:
-model_architectures: 'LOF,CBLOF,NN,LSTMVAE'
+**Transformer and foundation models** — `TIMESNET`, `OFA`, `TIMESFM`, `CHRONOS`
+
+**Graph-based** — `Series2Graph`, `MTADGAT`
+
+Training is per **family**, not per instance: selecting one untrained detector
+trains its whole hyperparameter grid (`Utils.pipeline_spec.families_for`). That
+is the difference between a short run and a long one.
+
+Fourteen families run through TSB-AD's whole-series interface rather than PyOD
+(`TSBAD_FAMILIES`); most are vendored under `Algorithms/tsb_ad/`, but `CHRONOS`
+and `MTADGAT` live in `Algorithms/`, and `Series2Graph` must be fetched
+separately because it is patent-encumbered:
+
+```bash
+python -m Algorithms.tsb_ad.fetch_series2graph
 ```
 
-Each algorithm can have multiple instances with different hyperparameters (e.g., `LOF_1`, `LOF_2`, `LOF_3`) for diversity in ensemble construction.
+**Choosing a subset:**
+```yaml
+# Configs/config.yml
+model_architectures: 'all'            # every family
+model_architectures: 'LOF,CBLOF,NN'   # or a comma-separated subset
+```
+or per run, without editing the config:
+```bash
+python app.py --detectors LOF_1,CBLOF_3,NN_2 --dataset SKAB --entity 5
+```
+
+---
+
+## 🧪 Running the Tests
+
+```bash
+python -m pip install pytest     # test-only; not in requirements.txt
+./run_tests.sh                   # everything
+./run_tests.sh Utils WebUI       # only these paths
+```
+
+Three things the script handles that a bare `pytest` invocation does not:
+
+**One process per test module.** `Model_Selection/test_thompson_sampling.py`
+and `Model_Selection/test_rank_aggregation.py` install fake `Metrics`, `Metrics.Ensemble_GA`
+and `Metrics.metrics` entries into `sys.modules` at import time, so they can
+exercise the module under test without pulling in the pipeline. Any test
+sharing that interpreter afterwards receives the stubs instead of the real
+package — running the suite in a single pytest process makes
+`test_reward_domain` fail with "Metrics is not a package".
+
+**`PYTHONPATH` = repo root plus each file's own directory.** The suite mixes
+dotted imports (`from Metrics.metrics import ...`) with bare ones
+(`from Thompson_Sampling import ...`), so neither path alone satisfies it.
+
+**`MPLBACKEND=Agg`.** On a headless machine matplotlib's Qt backend aborts with
+"Could not find the Qt platform plugin xcb".
+
+Expected: **16 modules, ~650 tests and subtests, all passing.**
+
+If you see a wall of `ModuleNotFoundError` for `torchinfo`, `arch`, `timesfm`
+or `dill`, or `Invalid model name: SpectralResidual`, the environment has
+drifted from `requirements.txt` rather than the code being broken — reinstall
+it (see [Installation](#-installation)).
 
 ---
 
@@ -402,7 +594,7 @@ Each algorithm can have multiple instances with different hyperparameters (e.g.,
 ```bash
 # Set non-interactive backend before running
 export MPLBACKEND=Agg
-python app.py --config Configs/config.yml --dataset SKAB --entity 5
+python app.py -c Configs/config.yml --dataset SKAB --entity 5
 ```
 
 Or add to your Python script:
