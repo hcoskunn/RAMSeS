@@ -271,49 +271,29 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
             {"text": "where S ranges over the distinct subsets the GA evaluated, "
                      "G is the number of generations and P the size of the "
                      "population in each generation."},
-        )},
-        {"id": "ga-middle-class", "title": "Why utility has a middle class",
-         "blocks": (
-            {"text": "The two axes are cut against the same statistic, the mean "
-                     "across the detector pool, but they are not cut the same "
-                     "way. Stability is split in two, above the mean or below "
-                     "it. Utility is split in three, with a middle band one "
-                     "standard deviation either side of the mean, and a detector "
-                     "inside that band is called neither high nor low."},
-            {"text": "The reason is that the two axes are measured to different "
-                     "precisions. Utility is estimated from a few hundred subset "
-                     "evaluations, and its standard error is typically around a "
-                     "third of the spread it has to resolve. Stability is a "
-                     "frequency over every individual in every generation, and "
-                     "its standard error is closer to a tenth of that spread. So "
-                     "there is a range of utilities the run genuinely cannot "
-                     "separate, and the middle class says exactly that rather "
-                     "than forcing a verdict. There is no matching range on the "
-                     "stability axis, and giving it a band as well left most of "
-                     "the pool undetermined on both axes at once."},
+            {"text": "Both axes are cut at the mean across the detector pool. "
+                     "Utility is split into three levels, with a medium band one "
+                     "standard deviation either side of the mean. Stability is "
+                     "split into two, above the mean or below it. Stability has "
+                     "no medium level because a detector in the middle of both "
+                     "axes would carry no information about the decision."},
+            {"formula": "utility level   = H if utility > μ_u + σ_u,  "
+                        "L if utility < μ_u − σ_u,  else M\n"
+                        "stability level = H if stability > μ_s,  else L"},
             {"text": "A detector's archetype is the pair of levels written as "
-                     "two letters, so ML is middle utility and low stability. "
-                     "The reading depends on what the algorithm did with the "
-                     "detector as well as on the pair itself. A middle-utility, "
-                     "low-stability detector that was kept was kept because of "
-                     "its middle utility despite its low stability, and the "
-                     "same detector left out was left out because of its middle "
-                     "utility and its low stability."},
+                     "two letters, so ML is medium utility and low stability."},
         )},
         {"id": "ga-near-best",
-         "title": "When the archetype and the ensemble disagree", "blocks": (
-            {"text": "Two of the six archetypes make a prediction. A detector "
-                     "high on both axes is expected in the ensemble and one low "
-                     "on both is expected out of it, and the algorithm sometimes "
-                     "does the opposite. The explanation answers those cases "
-                     "rather than passing over them."},
-            {"text": "The meta-learner is not seeded, so fitting it a second "
-                     "time on the same data gives a slightly different model and "
-                     "a slightly different fitness. That spread is the fitting "
-                     "noise, and it is measured directly by refitting the chosen "
-                     "ensemble thirty times. It sets the resolution of every "
-                     "fitness comparison in the run, because a difference "
-                     "smaller than it carries nothing about the detectors."},
+         "title": "Near-best ensembles", "blocks": (
+            {"text": "A detector high on both axes is expected in the ensemble "
+                     "and one low on both is expected out of it. For the rare "
+                     "cases where the search did the opposite, the stage "
+                     "produces a second explanation."},
+            {"text": "Fitting the meta-learner a second time on the same subset "
+                     "gives a slightly different model and a slightly different "
+                     "fitness. That spread is the fitting noise, and it is "
+                     "measured directly by refitting the chosen ensemble thirty "
+                     "times."},
             {"text": "The near-best ensembles are the ones that scored so close "
                      "to the best that the gap between them is smaller than the "
                      "fitting noise. The reported ensemble is one of them, not "
@@ -322,9 +302,7 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "the rest of the near-best ensembles did with it, and "
                      "compares that share against the baseline, the share the "
                      "detector would reach by chance given how large those "
-                     "ensembles are. If the near-best ensembles point the other "
-                     "way, the archetype was describing them and the reported "
-                     "ensemble was one arbitrary draw."},
+                     "ensembles are."},
             {"formula": "cutoff   = best fitness − √2 · fitting noise\n"
                         "baseline = mean size of the near-best ensembles / |pool|"},
             {"text": "The √2 is there because each fitness was measured once, so "
@@ -937,8 +915,6 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                  "The scores across trials are averaged, and the detectors are ranked "
                  "by that average. The final Monte Carlo ranking is forwarded to the "
                  "robustness aggregation."},
-        {"text": "The noise level is the standard deviation of the injected "
-                 "Gaussian noise, and it is the same in every trial."},
     ), "subsections": (
         {"id": "mc-explained", "title": "Reading the ranking from its trials", "blocks": (
             {"text": "The explanation is built from the same five trials the "

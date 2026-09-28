@@ -1178,7 +1178,7 @@ def compute_mean_marginal_contribution(
 
     `se` is the standard error of that difference. It is what says whether two
     detectors' utilities are separable at all, which is why the utility axis
-    carries a middle class and the stability axis does not.
+    carries a medium level and the stability axis does not.
     """
     out: Dict[str, Dict[str, float]] = {}
     for d in algorithm_list:
@@ -1251,7 +1251,7 @@ def _assign_archetype(u_high: bool, s_high: bool, util_nan: bool) -> str:
 
 
 def _assign_banded_archetype(u_level: str, s_high: bool, util_nan: bool) -> str:
-    """As `_assign_archetype`, but utility carries a middle level: "ML" = middle
+    """As `_assign_archetype`, but utility carries a medium level: "ML" = medium
     utility, low stability."""
     if util_nan:
         return ARCHETYPE_UNCLASSIFIED
@@ -1305,7 +1305,7 @@ def _finite_median(values: List[float]) -> float:
 
 def _finite_mean_sd(values: List[float]) -> Tuple[float, float]:
     """(mean, sample sd) over the finite values. The sd is NaN with fewer than
-    two of them, which leaves the middle band undefined rather than zero-width."""
+    two of them, which leaves the medium band undefined rather than zero-width."""
     finite = [v for v in values if not np.isnan(v)]
     if not finite:
         return float('nan'), float('nan')
@@ -1325,7 +1325,7 @@ def classify_detector_archetypes(
     the two active axes (Utility × Stability). Reports three schemes side by
     side: relative (median split), absolute (fixed cutoff) and banded.
 
-    Banded is the one the explanation reads. Utility carries a middle level
+    Banded is the one the explanation reads. Utility carries a medium level
     because it is the noisier axis: its standard error is about 38% of the
     spread it has to resolve, against 12% for stability, so there is a range of
     utilities the pool does not separate. Stability has no such range and stays
@@ -1375,7 +1375,7 @@ def classify_detector_archetypes(
                 "archetype": _assign_archetype(u_high, s_high, util_nan),
             }
 
-        # A detector exactly on a band edge stays in the middle: the edges are
+        # A detector exactly on a band edge stays medium: the edges are
         # estimates, so the level that claims less is the right one to give.
         if util_nan or np.isnan(mean_u) or np.isnan(sd_u):
             u_level = "M"
@@ -1424,8 +1424,8 @@ def plot_ga_utility(
     The utility axis with its uncertainty and its class boundaries.
 
     Detectors are sorted by mean marginal contribution, each bar carries its
-    standard error, and the middle band (mean ± sd across detectors) is shaded.
-    Read together the three say why the axis has a middle class: the error bars
+    standard error, and the medium band (mean ± sd across detectors) is shaded.
+    Read together the three say why the axis has a medium level: the error bars
     are large against the spread the band has to cut, so a detector inside it is
     not separable from the pool rather than merely average.
 
@@ -1455,7 +1455,7 @@ def plot_ga_utility(
         for edge in (mean_u - sd_u, mean_u + sd_u):
             ax.axhline(edge, color="#4c72b0", linestyle="--", linewidth=0.9,
                        alpha=0.8)
-        ax.text(0.995, mean_u, "middle band  (mean ± sd)", transform=
+        ax.text(0.995, mean_u, "medium band  (mean ± sd)", transform=
                 ax.get_yaxis_transform(), ha="right", va="center", fontsize=8,
                 color="#4c72b0", alpha=0.9)
     ax.set_xticks(x)
@@ -1714,7 +1714,7 @@ def plot_ga_archetypes(
       filled point = in the chosen ensemble, hollow = not
       dashed lines = the two utility cuts and the stability cut
 
-    The colour already carries the archetype, so the middle band is marked by
+    The colour already carries the archetype, so the medium band is marked by
     its two edges rather than shaded. `plot_ga_bands` is the same scatter with
     the band filled in and without the per-archetype colour.
 
@@ -1779,7 +1779,7 @@ def plot_ga_bands(
     """
     The same scatter with the cuts drawn instead of the archetype colours.
 
-    The shaded band is the middle utility class and the dashed line is the
+    The shaded band is the medium utility level and the dashed line is the
     stability cut, so this is the figure for checking where a detector falls
     relative to the thresholds rather than which class it landed in.
 
@@ -2248,7 +2248,7 @@ def explain_ga_selection(
         f.write("Trend P_last - P_first is shown for context but does not "
                 "affect classification.\n")
         f.write("Archetype = the (U,S) pair as a 2-letter code, e.g. "
-                "ML = middle utility, low stability.\n\n")
+                "ML = medium utility, low stability.\n\n")
         f.write(f"      {'detector':<14} {'util':>9} {'stab':>7} "
                 f"{'trend':>8}  {'archetype':<12} {'in ensemble'}\n")
         f.write("      " + "-" * 72 + "\n")

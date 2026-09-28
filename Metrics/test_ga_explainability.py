@@ -884,7 +884,7 @@ class TestExplainGASelection(unittest.TestCase):
                     out, "ga_selection_explainability_TEST_e1.txt")).read()
                 # The report follows the archetype scheme the explanation reads.
                 self.assertIn("Near-best ensembles", report)
-                self.assertIn("ML = middle utility, low stability", report)
+                self.assertIn("ML = medium utility, low stability", report)
                 self.assertNotIn("LOFO", report)
             finally:
                 os.chdir(cwd)

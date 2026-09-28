@@ -143,15 +143,15 @@ def _ga_selection(ds, ent):
         gallery.append(_fig(
             path, "Where the cuts fall",
             "The same two axes with the thresholds drawn instead of the "
-            "archetype colours. The shaded band is the middle utility class, "
+            "archetype colours. The shaded band is the medium utility level, "
             "one standard deviation either side of the pool mean, and the "
             "dashed line is the stability cut at the pool mean."))
     for path in _ls(d, "ga_selection_utility_*.png"):
         gallery.append(_fig(
             path, "Utility",
             "Mean marginal contribution per detector, sorted, each bar showing "
-            "how precisely it was measured. The shaded band is the middle "
-            "class. Ensemble members are marked with a star."))
+            "how precisely it was measured. The shaded band is the medium "
+            "level. Ensemble members are marked with a star."))
     for path in _ls(d, "ga_selection_plateau_*.png"):
         gallery.append(_fig(
             path, "Near-best ensembles",

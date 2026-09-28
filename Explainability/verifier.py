@@ -237,7 +237,7 @@ def _per_subject_allowed(ir_doc: Dict[str, Any]) -> Tuple[
             code = value
         elif isinstance(value, dict) and isinstance(value.get("archetype"), str):
             code = value["archetype"]
-        # Utility carries a middle level, stability does not.
+        # Utility carries a medium level, stability does not.
         if not (code and len(code) == 2 and code[0] in "HML"
                 and code[1] in "HL"):
             code = None
