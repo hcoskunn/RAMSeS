@@ -98,6 +98,13 @@ class LLMClient:
             # Qwen3-generation models think by default: without this the
             # reasoning block alone exhausts the timeout.
             "reasoning_effort": "none",
+            # qwen3.5's manifest sets presence_penalty 1.5. A narrator bound to
+            # an IR must restate a fact verbatim when the IR repeats one, so
+            # penalising repetition penalises faithfulness: it welded two streak
+            # atoms into one clause and rebound "its" to the wrong detector.
+            "presence_penalty": 0,
+            "frequency_penalty": 0,
+            "repeat_penalty": 1.0,
             "stream": False,
         }
         if self.transport is not None:
