@@ -539,7 +539,7 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual(
             by_id["tsr.winner.channels"]["text"],
             "context feature 0 (60.0%), context feature 2 (26.7%), and context feature 1 (13.3%) "
-            "contributed the majority of A's score.")
+            "account for 100.0% of A's score.")
         # No concentration atom: "the top 3 context features are N% of the score" is a
         # restatement of the shares just given, and the narrator turned it into
         # editorial ("indicating the remaining six contributed less
@@ -951,7 +951,7 @@ class TestBuilders(unittest.TestCase):
         res["noise"] = {"sigma": 0.02, "eps": 0.04, "repeats": 30}
         res["near_best"] = {
             "defined": True, "n_near_best": 8, "n_evaluated": 40,
-            "baseline": 0.25,
+            "expected_share": 0.25,
             "detectors": {det: {"count": 5, "share": 0.625, "says_in": True,
                                 "disagrees": decision == "excluded"}},
         }
@@ -965,7 +965,7 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("high utility and high stability", atom["text"])
         self.assertIn("yet it was left out of the ensemble", atom["text"])
         self.assertIn("It is in 5 of the 8 near-best ensembles", atom["text"])
-        self.assertIn("62% against a baseline of 25%", atom["text"])
+        self.assertIn("62% against an expected share of 25%", atom["text"])
         # Every number the sentence carries is in `value`, or the verifier reads
         # it as invented.
         self.assertEqual(atom["value"]["archetype"], "HH")
@@ -985,7 +985,7 @@ class TestBuilders(unittest.TestCase):
         self.assertIn("low utility and low stability", atom["text"])
         self.assertIn("yet it was kept in the ensemble", atom["text"])
         self.assertIn("It is in 1 of the 8 near-best ensembles", atom["text"])
-        self.assertIn("12% against a baseline of 25%", atom["text"])
+        self.assertIn("12% against an expected share of 25%", atom["text"])
 
     def test_a_contradiction_with_no_near_best_answer_says_so(self):
         res, det = self._contradiction("excluded",
@@ -994,7 +994,7 @@ class TestBuilders(unittest.TestCase):
         doc = ir.build_ga_selection_ir("DS", "e1", res)
         atom = {a["id"]: a for a in doc["evidence"]}[f"ga_sel.contradiction.{det}"]
         self.assertIn("could not determine why", atom["text"])
-        self.assertNotIn("baseline", atom["text"])
+        self.assertNotIn("expected share", atom["text"])
         self.assertIn("ga_sel.caveat.near_best_na",
                       {c["id"] for c in doc["caveats"]})
 

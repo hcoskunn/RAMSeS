@@ -291,26 +291,35 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "produces a second explanation."},
             {"text": "Fitting the meta-learner a second time on the same subset "
                      "gives a slightly different model and a slightly different "
-                     "fitness. That spread is the fitting noise, and it is "
-                     "measured directly by refitting the chosen ensemble thirty "
-                     "times."},
-            {"text": "The near-best ensembles are the ones that scored so close "
-                     "to the best that the gap between them is smaller than the "
-                     "fitting noise. The reported ensemble is one of them, not "
-                     "the only one. So when the archetype and the reported "
-                     "ensemble disagree about a detector, the stage asks what "
-                     "the rest of the near-best ensembles did with it, and "
-                     "compares that share against the baseline, the share the "
-                     "detector would reach by chance given how large those "
-                     "ensembles are."},
-            {"formula": "cutoff   = best fitness − √2 · fitting noise\n"
-                        "baseline = mean size of the near-best ensembles / |pool|"},
-            {"text": "The √2 is there because each fitness was measured once, so "
-                     "the difference between two of them carries √2 times the "
-                     "fitting noise of one. Where too few ensembles clear the "
-                     "cutoff to compare against, the stage says it could not "
-                     "determine why rather than offering a reason it does not "
-                     "have."},
+                     "fitness. That spread is the fitting noise, written σ "
+                     "below, and it is measured directly by refitting the "
+                     "chosen ensemble thirty times."},
+            {"text": "The threshold uses √2 σ rather than σ. What is being "
+                     "measured is the fitness difference between two ensembles, "
+                     "and each of the two values carries the fitting noise. "
+                     "They are fitted independently, so the variances add and "
+                     "the difference carries more noise than either value on "
+                     "its own."},
+            {"formula": "var( fitness(A) − fitness(B) )  =  var( fitness(A) )  +  var( fitness(B) )\n"
+                        "                                =  σ²  +  σ²\n"
+                        "                                =  2σ²\n"
+                        "\n"
+                        "sd( fitness(A) − fitness(B) )   =  √(2σ²)  =  √2 · σ"},
+            {"text": "The near-best ensembles are the ones whose fitness is "
+                     "within √2 σ of the best, so the gap between them is "
+                     "inside one standard deviation of what refitting alone "
+                     "produces. The reported ensemble is one of them, not the "
+                     "only one. So when the archetype and the reported ensemble "
+                     "disagree about a detector, the stage measures how often "
+                     "that detector appears in the near-best ensembles and "
+                     "compares that share against the expected share, the share "
+                     "it would reach by chance given how large those ensembles "
+                     "are."},
+            {"formula": "cutoff         = best fitness − √2 · fitting noise\n"
+                        "expected share = mean size of the near-best ensembles / |pool|"},
+            {"text": "Where too few ensembles clear the cutoff to compare "
+                     "against, the stage says it could not determine why rather "
+                     "than offering a reason it does not have."},
         )},
         {"id": "ga-meta-explained",
          "title": "SHAP, PFI and ALE", "blocks": (
@@ -1041,14 +1050,15 @@ STAGE_TERMS: Dict[str, Tuple[Tuple[str, str], ...]] = {
                     "detector is added to it."),
         ("Stability", "How often the algorithm's population kept the detector, "
                       "averaged over all generations."),
-        ("Fitting noise", "Fitting the meta-learner again on the same data "
+        ("Fitting noise", "Fitting the meta-learner again on the same subset "
                           "gives a slightly different fitness. The fitting "
-                          "noise is how far it moves."),
-        ("Near-best ensembles", "The ensembles that scored so close to the best "
-                                "one that the gap between them is smaller than "
-                                "the fitting noise."),
-        ("Baseline", "The share of the near-best ensembles a detector would "
-                     "appear in by chance alone."),
+                          "noise is the standard deviation of that fitness "
+                          "over 30 refits."),
+        ("Near-best ensembles", "The ensembles whose fitness is within √2 times "
+                                "the fitting noise of the chosen ensemble's."),
+        ("Expected share", "The share of the near-best ensembles a detector "
+                           "would appear in by chance alone, based on the "
+                           "average ensemble size."),
     ),
     "ga_combination": (
         ("SHAP", "How much the meta-learner's anomaly probability moves when a "

@@ -355,8 +355,8 @@ class TestNearBestEnsembles(unittest.TestCase):
         self.assertAlmostEqual(out["cutoff"], 0.85)
         self.assertEqual(out["n_near_best"], 2)
 
-    def test_share_is_read_against_the_baseline_not_a_half(self):
-        # Every near-best ensemble holds 4 of 5 detectors, so the baseline is
+    def test_share_is_read_against_the_expected_share_not_a_half(self):
+        # Every near-best ensemble holds 4 of 5 detectors, so the expected share is
         # 0.8: a detector in 3 of 4 of them (0.75) is BELOW chance, even though
         # it is in most of them.
         pool = ["A", "B", "C", "D", "E"]
@@ -366,7 +366,7 @@ class TestNearBestEnsembles(unittest.TestCase):
                        ("A", "C", "D", "E"): 0.89})
         out = compute_near_best(ev, pool[:4], pool, sigma=0.05, kappa=1.0)
         self.assertTrue(out["defined"])
-        self.assertAlmostEqual(out["baseline"], 0.8)
+        self.assertAlmostEqual(out["expected_share"], 0.8)
         self.assertAlmostEqual(out["detectors"]["B"]["share"], 0.75)
         self.assertFalse(out["detectors"]["B"]["says_in"])
         self.assertTrue(out["detectors"]["A"]["says_in"])    # 1.00 > 0.80

@@ -801,12 +801,15 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
         lead_ch = winner_context_features[:3]
         shares = [(c, 100.0 * float(v) / total) for c, v in lead_ch]
         listed = _oxford([f"{_ch(c)} ({_fmt(p, 1)}%)" for c, p in shares])
+        lead_share = sum(p for _c, p in shares)
         evidence.append(make_atom(
             "tsr.winner.channels", "winner_channels", str(top_model),
             {"channel": lead_ch[0][0], "total": _val(total, 6),
              "per_channel": [(c, _val(v, 6)) for c, v in winner_context_features],
-             "top_shares": [(c, _val(p, 1)) for c, p in shares]},
-            f"{listed} contributed the majority of {top_model}'s score.",
+             "top_shares": [(c, _val(p, 1)) for c, p in shares],
+             "lead_share": _val(lead_share, 1)},
+            f"{listed} account for {_fmt(lead_share, 1)}% of "
+            f"{top_model}'s score.",
             order=10))
         required.append("tsr.winner.channels")
 
@@ -1116,15 +1119,15 @@ def build_ga_selection_ir(dataset: str, entity: str, result: Dict[str, Any]) -> 
                 f"determine why.")
         n_near = near_best["n_near_best"]
         count, share = stat["count"], stat["share"]
-        baseline = near_best["baseline"]
+        expected = near_best["expected_share"]
         base.update(n_near_best=n_near, count=count, share=_val(share, 2),
-                    baseline=_val(baseline, 2),
+                    expected_share=_val(expected, 2),
                     n_evaluated=near_best.get("n_evaluated"))
         return eid, base, (
             f"{d} has {clause}, yet {did}. It is in {count} of the {n_near} "
-            f"near-best ensembles — {_fmt(100 * share, 0)}% against a baseline "
-            f"of {_fmt(100 * baseline, 0)}% — so the reported ensemble is one "
-            f"of several equally supported answers.")
+            f"near-best ensembles — {_fmt(100 * share, 0)}% against an expected "
+            f"share of {_fmt(100 * expected, 0)}% — so the reported ensemble is "
+            f"one of several equally supported answers.")
 
     # ── Included members: grouped by archetype, contradictions called out ──
     inc_groups: Dict[str, List[str]] = {c: [] for c in _GA_SEL_CODES}

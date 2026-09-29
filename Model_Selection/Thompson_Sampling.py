@@ -1054,6 +1054,11 @@ def plot_selection_states(
         "informed_exploration": "#1f77b4",  # blue
     }
     state_order = ["random", "exploitation", "informed_exploration"]
+    state_labels = {
+        "random":               "Random",
+        "exploitation":         "Exploitation",
+        "informed_exploration": "Informed exploration",
+    }
 
     T = len(selection_states)
     counts = {s: selection_states.count(s) for s in state_order}
@@ -1071,11 +1076,11 @@ def plot_selection_states(
     ax_strip.set_ylim(0, 1)
     ax_strip.set_yticks([])
     ax_strip.set_xlabel('Window')
-    ax_strip.set_title('Selection state timeline')
+    ax_strip.set_title('Selection State Timeline')
 
     # Bottom: bar chart of counts with percentage annotations
     bars = ax_bar.bar(
-        state_order,
+        [state_labels[s] for s in state_order],
         [counts[s] for s in state_order],
         color=[state_colours[s] for s in state_order],
     )
@@ -1092,7 +1097,8 @@ def plot_selection_states(
 
     # Legend outside the plot area
     legend_handles = [
-        plt.Rectangle((0, 0), 1, 1, color=state_colours[s], label=s) for s in state_order
+        plt.Rectangle((0, 0), 1, 1, color=state_colours[s],
+                      label=state_labels[s]) for s in state_order
     ]
     fig.legend(
         handles=legend_handles,
@@ -1294,15 +1300,9 @@ def _render_shap_comparison(
     ax.grid(True, axis='y', linestyle='--', linewidth=0.5, alpha=0.6)
     ax.legend(loc='upper left', frameon=False, bbox_to_anchor=(1.01, 1), borderaxespad=0)
 
-    scope = (f"{len(selected)} of {n_context_features_total}" if n_context_features_total
-             else f"{len(selected)}")
-    rule = (f"Context features shown ({scope}): the union over the plotted detectors of "
-            f"each one's {top_n_context_features} largest |values|. A context feature absent "
-            f"here was outside every plotted detector's top {top_n_context_features}, "
-            f"not necessarily zero.")
-    ax.text(0.0, -0.17, ((note + "  ") if note else "") + rule,
-            transform=ax.transAxes, fontsize=7.5, color='dimgrey',
-            va='top', ha='left', wrap=True)
+    if note:
+        ax.text(0.0, -0.17, note, transform=ax.transAxes, fontsize=7.5,
+                color='dimgrey', va='top', ha='left', wrap=True)
 
     plt.tight_layout(pad=1.2)
     os.makedirs(os.path.dirname(save_path), exist_ok=True)

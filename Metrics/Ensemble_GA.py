@@ -1110,11 +1110,11 @@ def compute_near_best(
     two of them carries sqrt(2) times the fitting noise of one — hence the
     default kappa.
 
-    A detector's share of the near-best ensembles is read against the baseline,
-    the share it would reach by chance: those ensembles have some mean size, so
-    a detector with no preference either way appears in mean_size / |pool| of
-    them. Comparing against a flat half instead would read every large ensemble
-    as evidence for every detector in it.
+    A detector's share of the near-best ensembles is read against the expected
+    share, the value it takes when membership is independent of the detector:
+    those ensembles have some mean size, so such a detector appears in
+    mean_size / |pool| of them. Comparing against a flat half instead would read
+    every large ensemble as evidence for every detector in it.
 
     `disagrees` is the only field the explanation acts on: the near-best
     ensembles point one way and the reported one goes the other.
@@ -1128,7 +1128,7 @@ def compute_near_best(
         'defined': False, 'n_near_best': 0,
         'n_evaluated': len(evaluated_ensembles),
         'best_fitness': nan, 'cutoff': nan, 'sigma': float(sigma),
-        'kappa': float(kappa), 'mean_size': nan, 'baseline': nan,
+        'kappa': float(kappa), 'mean_size': nan, 'expected_share': nan,
         'detectors': {},
     }
     if not evaluated_ensembles or not n_pool or np.isnan(sigma):
@@ -1149,16 +1149,16 @@ def compute_near_best(
         return out
 
     mean_size = float(np.mean([len(m) for m in near]))
-    baseline = mean_size / n_pool
+    expected_share = mean_size / n_pool
     chosen = set(best_ensemble)
     detectors: Dict[str, Dict[str, Any]] = {}
     for d in algorithm_list:
         count = sum(1 for m in near if d in m)
         share = count / len(near)
-        says_in = share > baseline
+        says_in = share > expected_share
         detectors[d] = {'count': count, 'share': share, 'says_in': says_in,
                         'disagrees': says_in != (d in chosen)}
-    out.update(defined=True, mean_size=mean_size, baseline=baseline,
+    out.update(defined=True, mean_size=mean_size, expected_share=expected_share,
                detectors=detectors)
     return out
 
@@ -2286,10 +2286,10 @@ def explain_ga_selection(
                     f"(best {near_best['best_fitness']:.4f})\n")
             f.write(f"{near_best['n_near_best']} of {near_best['n_evaluated']} "
                     f"evaluated ensembles are near-best; mean size "
-                    f"{near_best['mean_size']:.1f}, baseline "
-                    f"{near_best['baseline']:.3f}\n\n")
+                    f"{near_best['mean_size']:.1f}, expected share "
+                    f"{near_best['expected_share']:.3f}\n\n")
             f.write(f"      {'detector':<14} {'in near-best':>13} {'share':>8} "
-                    f"{'baseline':>10}  {'disagrees with the ensemble'}\n")
+                    f"{'expected':>10}  {'disagrees with the ensemble'}\n")
             f.write("      " + "-" * 76 + "\n")
             for d in algorithm_list:
                 st = near_best['detectors'].get(d)
@@ -2297,7 +2297,7 @@ def explain_ga_selection(
                     continue
                 frac = f"{st['count']}/{near_best['n_near_best']}"
                 f.write(f"      {d:<14} {frac:>13} "
-                        f"{st['share']:>8.3f} {near_best['baseline']:>10.3f}  "
+                        f"{st['share']:>8.3f} {near_best['expected_share']:>10.3f}  "
                         f"{'yes' if st['disagrees'] else 'no'}\n")
         else:
             f.write("Too few ensembles cleared the cutoff to compare against.\n")
@@ -2996,7 +2996,7 @@ def plot_ga_combination_agreement(
     methods = [m for m in ("SHAP_abs", "PFI", "ALE", "Markov") if m in ranks]
     if len(methods) < 2 or not feature_names:
         return
-    labels = {"SHAP_abs": "mean |SHAP|", "PFI": "PFI", "ALE": "ALE",
+    labels = {"SHAP_abs": "mean |SHAP|", "PFI": "PFI", "ALE": "total |ALE|",
               "Markov": "Markov"}
 
     n = len(feature_names)

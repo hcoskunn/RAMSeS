@@ -228,9 +228,8 @@ def _ga_combination(ds, ent):
 
 # Every grouped-bar context feature figure in both Thompson stages plots a subset —
 # entities here carry 9 to 38 context features — and the bars alone cannot tell a reader
-# whether a missing context feature was small or simply not selected. The rule is stated
-# on the figures themselves too (Thompson_Sampling._render_shap_comparison);
-# this is the same sentence for the page.
+# whether a missing context feature was small or simply not selected. The figures no
+# longer carry this rule themselves, so the card is where it is stated.
 CONTEXT_FEATURE_RULE = ("Context features shown are the union over the plotted detectors of "
                 "each one's 9 largest values; a context feature missing here was "
                 "outside every plotted detector's top 9, not necessarily zero.")
