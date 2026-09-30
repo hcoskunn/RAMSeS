@@ -98,8 +98,11 @@ _STAGE_SUMMARY: Dict[str, Dict[str, Any]] = {
     # it is picked BY TYPE. Taking the narrative's first sentence literally put
     # whatever the narrator opened with on the card, which on nine-source
     # entities is reliably the consensus winner.
+    # source_tie leads: under a shared Borda rank the equality is the answer to
+    # the stage's question, and behind the disclosure button it was invisible
+    # exactly when the per-source sentences read most oddly.
     "rank_aggregation_robust": {"mode": "table", "table": "rank_aggregation",
-                                "lead_types": ("source_role",)},
+                                "lead_types": ("source_tie", "source_role")},
     # rank_aggregation_final is deliberately absent: two sources, a couple of
     # sentences, nothing to hold back.
 }

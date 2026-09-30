@@ -592,10 +592,14 @@ class TestBuilders(unittest.TestCase):
         # narrator drops that clause, and the atom then passed only when the
         # runner-up was named elsewhere by luck — so a run's faithfulness hung
         # on which detector placed second. It stays in `value` and on the plot.
+        # Active voice with the leader as subject, and the leader named rather
+        # than pronouned: the passive "was led by" let the narrator promote the
+        # leader into the subject slot and hand the agent role to the context
+        # features ("B was led by context feature 2").
         self.assertEqual(
             by_id["tsr.regime.0"]["text"],
-            "Streak 0 (windows 10 to 24, 15 windows) was led by B, with "
-            "context feature 2 and context feature 0 raising its score the most.")
+            "In Streak 0 (windows 10 to 24, 15 windows), B led, with "
+            "context feature 2 and context feature 0 raising B's score the most.")
         self.assertEqual(by_id["tsr.regime.0"]["value"]["runner_up"], "A")
         for atom in doc["evidence"]:
             if atom["type"] != "regime":
@@ -1171,24 +1175,27 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual([a for a in robust["evidence"]
                           if a["type"] == "source_verdict"], [])
         self.assertEqual(robust["output"]["top_pick"], "A")
-        self.assertIn("ra_robust.context.sources", robust["required_atom_ids"])
-        ctx = next(a for a in robust["evidence"]
-                   if a["id"] == "ra_robust.context.sources")
-        # The source set, and nothing aimed at the narrator: the clause telling
-        # it the ranked detectors are not sources was printed as prose.
+        # No source-set atom: with 3 sources every one is named by its own role
+        # sentence, so the list only restated them.
+        self.assertNotIn("ra_robust.context.sources", robust["required_atom_ids"])
+        self.assertEqual([a for a in robust["evidence"]
+                          if a["type"] == "stage_context"], [])
+        # Both sources share Borda rank 1, so the equality is one atom of its
+        # own and neither role sentence claims the superlative.
+        tie = next(a for a in robust["evidence"] if a["type"] == "source_tie")
+        self.assertEqual(tie["id"], "ra_robust.sources.tie.1")
         self.assertEqual(
-            ctx["text"],
-            "The 2 sources aggregated into this consensus are the rankings S1, S2.")
-        self.assertIn("S1", ctx["text"])
-        self.assertIn("S2", ctx["text"])
+            tie["text"], "All 2 sources shaped the robustness consensus equally.")
+        self.assertIn("ra_robust.sources.tie.1", robust["required_atom_ids"])
         # Friendly consensus naming + question + glossary footer.
         self.assertIn("robustness consensus", robust["question"])
         role = next(a for a in robust["evidence"]
                     if a["id"] == "ra_robust.source.S1.role")
-        # A source is described by its three ranks and nothing else.
-        self.assertIn("placing", role["text"])
+        # A source is described by its ranks and nothing else.
+        self.assertIn("placed", role["text"])
         self.assertIn("for influence", role["text"])
         self.assertIn("for agreement", role["text"])
+        self.assertNotIn("most", role["text"])
         self.assertNotIn("pattern", role["text"])
         self.assertNotIn("pattern", role["value"])
 

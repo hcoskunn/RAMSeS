@@ -953,6 +953,13 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
         # streak disclosure, and a trailing clause split into a sentence of its
         # own would carry neither the number nor a detector name.
         #
+        # Active voice, leader as subject. "Streak N ... was led by {leader}"
+        # invited the narrator to demote the streak to an adjunct and promote
+        # the leader into the subject slot, which left `was led by` needing an
+        # agent — the context features took it, and three of five sentences
+        # came out as "KDE_1 was led by context feature 4". Doing that
+        # restructuring here, correctly, removes the passive frame to hijack.
+        #
         # No "ahead of {runner_up}" tail. The narrator drops that clause from
         # every streak sentence, and because coverage is conjunctive the atom
         # then only passes when the runner-up happens to be named elsewhere in
@@ -961,11 +968,14 @@ def build_thompson_ranking_ir(dataset: str, entity: str, *, n_windows: int,
         # placed second in streak 0. The runner-up stays in `value`, and the
         # per-streak figure plots it beside the leader, which is where a
         # comparison belongs anyway.
-        text = (f"Streak {idx} (windows {r.get('start')} to {r.get('end')}, "
-                f"{dur} window{'' if dur == 1 else 's'}) was led by {leader}")
+        text = (f"In Streak {idx} (windows {r.get('start')} to {r.get('end')}, "
+                f"{dur} window{'' if dur == 1 else 's'}), {leader} led")
         if top_context_features:
             labels = _oxford([_ch(c) for c, _ in top_context_features[:2]])
-            text += f", with {labels} raising its score the most"
+            # Named, not "its": two streaks whose top features coincide produced
+            # clauses identical but for the opening, and the narrator factored
+            # them, rebinding the pronoun to the wrong detector.
+            text += f", with {labels} raising {leader}'s score the most"
         parts = [text + "."]
 
         rid = f"tsr.regime.{idx}"
@@ -1672,18 +1682,10 @@ def build_rank_aggregation_ir(dataset: str, entity: str, stage_name: str, iterat
         # consensus). Raw LOO/tau scores stay in `value` for provenance; the
         # prose carries only the ranks.
 
-        # Required relational atom: names the source set explicitly. It used to
-        # add that the ranked detectors are NOT sources, which was aimed at the
-        # narrator and got printed as a sentence of its own.
+        # No source-set atom. Naming the sources earned its place when there
+        # were up to 9 of them; with 3, every one is named by its own role
+        # sentence and the list only restated them.
         src_list = sorted(source_names)
-        cid = f"{prefix}.context.sources"
-        evidence.append(make_atom(
-            cid, "stage_context", "sources",
-            {"sources": src_list, "n_sources": len(src_list), "winner": top},
-            f"The {len(src_list)} sources aggregated into this consensus are the "
-            f"rankings {', '.join(src_list)}.",
-            order=5))
-        required.append(cid)
 
         def _borda_key(v: Dict[str, Any]) -> Tuple[float, str]:
             br = v.get("borda_rank")
@@ -1719,6 +1721,38 @@ def build_rank_aggregation_ir(dataset: str, entity: str, stage_name: str, iterat
         # often enough, and "more than any other" is false when two share it.
         alone = (len(ranked) > 1
                  and _borda_key(ranked[0])[0] < _borda_key(ranked[1])[0])
+
+        # A shared Borda rank makes "shaped the consensus [Nth] most" false of
+        # every source that shares it — on SKAB/7 all three sat at rank 1 and
+        # all three claimed "most". Sources in a tie state their influence and
+        # agreement placements only; the tie itself is its own atom, so the
+        # equality is asserted once rather than implied by three superlatives.
+        def _role_order(i: int) -> int:
+            """Presentation order of the i-th source's role sentence."""
+            return 0 if i == 0 else 10 * (i + 1)
+
+        tied_at: Dict[Any, List[Tuple[int, str]]] = {}
+        for i, v in enumerate(ranked):
+            br_v = v.get("borda_rank")
+            if br_v is None or _is_nan(br_v):
+                continue
+            tied_at.setdefault(int(br_v), []).append((i, str(v["source"])))
+        tied_ranks = {br_v for br_v, group in tied_at.items() if len(group) > 1}
+        for br_v in sorted(tied_ranks):
+            group = tied_at[br_v]
+            names = [n for _i, n in group]
+            tid = f"{prefix}.sources.tie.{br_v}"
+            text = (f"All {len(names)} sources shaped the {stage_word} consensus "
+                    f"equally." if len(names) == len(ranked) else
+                    f"{_oxford(names)} tie for shaping the {stage_word} "
+                    f"consensus {_shaped_prefix(br_v)}most.")
+            # Immediately before the first role sentence it covers, so a tie for
+            # second place is not narrated ahead of the source that came first.
+            evidence.append(make_atom(
+                tid, "source_tie", "sources",
+                {"borda_rank": br_v, "sources": names, "n_tied": len(names)},
+                text, order=_role_order(group[0][0]) - 1))
+            required.append(tid)
         lead_src = str(ranked[0].get("source")) if ranked else None
         lead_pick = source_top_picks.get(lead_src, NOT_AVAILABLE)
         lead_tension = (alone and lead_src and top != NOT_AVAILABLE
@@ -1736,10 +1770,15 @@ def build_rank_aggregation_ir(dataset: str, entity: str, stage_name: str, iterat
             # influence and 2 of 6 for agreement, placing 3rd of 6 for
             # influence..."). The components carry their own ordinals and
             # labels, which is what the parenthetical was there to supply.
-            text = (f"{name} shaped the {stage_word} consensus "
-                    f"{_shaped_prefix(br)}most, placing "
-                    f"{_ordinal(loo_rank)} of {n_src} for influence and "
-                    f"{_ordinal(align_rank)} of {n_src} for agreement.")
+            placings = (f"{_ordinal(loo_rank)} of {n_src} for influence and "
+                        f"{_ordinal(align_rank)} of {n_src} for agreement.")
+            # No superlative under a shared Borda rank: the tie atom above
+            # already says these sources shaped the consensus alike.
+            text = (f"{name} placed {placings}"
+                    if br is not None and not _is_nan(br)
+                    and int(br) in tied_ranks else
+                    f"{name} shaped the {stage_word} consensus "
+                    f"{_shaped_prefix(br)}most, placing {placings}")
             rid = f"{prefix}.source.{name}.role"
             evidence.append(make_atom(
                 rid, "source_role", name,
@@ -1751,7 +1790,7 @@ def build_rank_aggregation_ir(dataset: str, entity: str, stage_name: str, iterat
                 # The leading source goes first: it is the answer this stage is
                 # asked for, and with it further down the narrator invents an
                 # opening sentence and then restates the fact verbatim.
-                text, order=0 if i == 0 else 10 * (i + 1)))
+                text, order=_role_order(i)))
             if i < HEAD_REQUIRED:
                 required.append(rid)
 
