@@ -332,14 +332,18 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "probability moves when a detector's actual output is "
                      "revealed in place of its median output, averaged over "
                      "every combination of the other detectors being revealed or "
-                     "held at their medians. Because the ensemble is small, "
-                     "every combination is enumerated exactly rather than "
-                     "sampled. Enumerating them costs 2 to the power of the "
-                     "ensemble size per row, so the rows are what has to be kept "
-                     "in check: SHAP is measured on a fixed sample of 200 test "
-                     "rows, a size at which the ranking was verified stable, "
-                     "rather than multiplying that exponential term by the "
-                     "length of the whole split."},
+                     "held at their medians. Enumerating those combinations "
+                     "costs 2 to the power of the ensemble size per row in both "
+                     "time and memory, which is beyond reach at the ensemble "
+                     "sizes the GA returns, so neither branch below enumerates "
+                     "them."},
+            {"text": "For the random forest, the default meta-learner, TreeSHAP "
+                     "arrives at the value the enumeration would give without "
+                     "enumerating, in polynomial time. It is available only for "
+                     "the random forest here. Every other meta-learner samples "
+                     "the combinations instead, a hundred draws per detector per "
+                     "row, which recovers the same ranking to within a few "
+                     "percent."},
             {"text": "PFI measures how far the run's fitness falls when "
                      "a detector's score column is shuffled, so unlike SHAP and "
                      "ALE it uses the labels and reports reliance on the detector "
@@ -358,7 +362,7 @@ DOC_SECTIONS: Tuple[Dict[str, Any], ...] = (
                      "gives the curve the explanation draws. Because each bin only ever "
                      "asks about rows that occur there, the meta-learner is never "
                      "questioned about a combination of scores the data does not "
-                     "contain. PFI and ALE both use every row of the split."},
+                     "contain."},
             {"text": "The three measures are magnitudes: a detector is ranked on "
                      "the average size of its SHAP value, mean |SHAP|, and on the "
                      "total size of its accumulated ALE effect, total |ALE|, "

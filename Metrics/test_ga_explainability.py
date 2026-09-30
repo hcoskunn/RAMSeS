@@ -1,8 +1,10 @@
 """
 Standalone unit tests for the GA-ensemble selection-explainability layer.
-Mocks the heavy module-level imports of Ensemble_GA.py (sklearn.*, loguru,
-Metrics.metrics, Utils.model_selection_utils) so the pure analysis + plot
-functions can be imported in any env that has numpy + matplotlib.
+Mocks the heavy module-level imports of Ensemble_GA.py (loguru, Metrics.metrics,
+Utils.model_selection_utils) so the pure analysis + plot functions can be
+imported without pulling torch in. sklearn and shap are used for real: the SHAP
+layer dispatches on the meta-learner's class and calls into shap, so stubbing
+either would test a fake instead of the shipped path.
 """
 
 import math
@@ -36,10 +38,6 @@ def _make_mock_module(*names):
 
 _make_mock_module(
     "loguru",
-    "sklearn",
-    "sklearn.ensemble",
-    "sklearn.linear_model",
-    "sklearn.svm",
     "Metrics",
     "Metrics.metrics",
     "Utils",
@@ -53,10 +51,6 @@ class _Logger:
     def error(self, *a, **k): pass
 sys.modules["loguru"].logger = _Logger()
 # Stub the specific classes / callables imported at module top.
-sys.modules["sklearn.ensemble"].RandomForestClassifier = type("RandomForestClassifier", (), {})
-sys.modules["sklearn.ensemble"].GradientBoostingClassifier = type("GradientBoostingClassifier", (), {})
-sys.modules["sklearn.linear_model"].LogisticRegression = type("LogisticRegression", (), {})
-sys.modules["sklearn.svm"].SVC = type("SVC", (), {})
 sys.modules["Metrics.metrics"].prauc = lambda *a, **k: 0.5
 sys.modules["Metrics.metrics"].f1_score = lambda *a, **k: (0.5,) * 7
 sys.modules["Metrics.metrics"].vus_score = lambda *a, **k: 0.5
@@ -90,6 +84,7 @@ from Metrics.Ensemble_GA import (
     explain_ga_selection,
     compute_meta_shap,
     compute_meta_shap_values,
+    meta_shap_values,
     compute_meta_pfi,
     compute_meta_ale,
     ale_signs,
@@ -460,6 +455,47 @@ class TestCombination(unittest.TestCase):
             self.assertAlmostEqual(
                 compute_meta_shap(f, X, baseline, feats, mode="signed")[name],
                 float(phi[:, i].mean()))
+
+    # ── The two fast paths, against the enumeration as oracle ───────────────
+
+    def _oracle_fixture(self, d=6, n=300):
+        rng = np.random.RandomState(5)
+        X = rng.rand(n, d)
+        w = np.zeros(d)
+        w[:4] = [4.0, 3.0, 2.0, 1.0]
+        y = (rng.rand(n) < 1 / (1 + np.exp(-(X @ w - 2.5)))).astype(int)
+        return X, y, np.median(X, axis=0)
+
+    def test_tree_path_reproduces_the_enumeration(self):
+        """A random forest's predict_proba is a mean of per-tree probabilities,
+        so marginalising to the baseline is linear inside each tree and
+        interventional TreeSHAP is exact, not an approximation."""
+        from sklearn.ensemble import RandomForestClassifier
+        X, y, baseline = self._oracle_fixture()
+        rf = RandomForestClassifier(n_estimators=20, random_state=0).fit(X, y)
+        predict_fn = lambda Z: rf.predict_proba(Z)[:, 1]
+
+        exact = compute_meta_shap_values(predict_fn, X[:40], baseline, X.shape[1])
+        got, method = meta_shap_values(rf, predict_fn, X[:40], baseline, X.shape[1])
+        self.assertIn("exact", method)
+        np.testing.assert_allclose(got, exact, atol=1e-6)
+
+    def test_permutation_path_recovers_the_enumeration_ranking(self):
+        """Everything that is not a random forest samples permutations of the
+        same value function, so the values are close and the ranking they feed
+        the aggregation is the one the enumeration would have given."""
+        from sklearn.linear_model import LogisticRegression
+        X, y, baseline = self._oracle_fixture()
+        lr = LogisticRegression(max_iter=1000).fit(X, y)
+        predict_fn = lambda Z: lr.predict_proba(Z)[:, 1]
+
+        exact = compute_meta_shap_values(predict_fn, X[:40], baseline, X.shape[1])
+        got, method = meta_shap_values(lr, predict_fn, X[:40], baseline, X.shape[1])
+        self.assertIn("permutation", method)
+        self.assertEqual(list(np.argsort(-np.abs(got).mean(axis=0))),
+                         list(np.argsort(-np.abs(exact).mean(axis=0))))
+        np.testing.assert_allclose(np.abs(got).mean(axis=0),
+                                   np.abs(exact).mean(axis=0), rtol=0.05)
 
     # ── ALE ─────────────────────────────────────────────────────────────────
 

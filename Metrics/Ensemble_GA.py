@@ -2445,7 +2445,7 @@ def explain_ga_selection(
 #  Explains *how the meta-learner combines* the chosen detectors, by attributing
 #  its output to the per-detector score columns via two methods, then merging
 #  their rankings with a Markov-chain rank aggregation:
-#    • SHAP — exact interventional Shapley (single median baseline), label-free.
+#    • SHAP — interventional Shapley (single median baseline), label-free.
 #    • PFI  — permutation feature importance measured as fitness drop, label-based.
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -2478,13 +2478,10 @@ def compute_meta_shap_values(
     z_j = x_j if j in S else baseline_row[j].
     phi_i(x) = Σ_{S ⊆ F\\{i}} w(|S|) (F(S∪i) − F(S)),  w(s)=s!(d−s−1)!/d!.
 
-    Because d = ensemble size is small, all 2^d subset predictions are
-    enumerated exactly (cheap).
-
-    Returned per row rather than pre-aggregated because the callers want
-    several different summaries of the same numbers — mean|phi| and mean phi
-    at minimum — and the 2^d enumeration is by far the most expensive thing
-    this stage does. Collapsing inside meant it ran twice for identical work.
+    Enumerating every subset costs 2^d predictions per row and caches 2^d
+    arrays of n floats — at d=22 that is 6.7 GB, so the pipeline calls
+    meta_shap_values instead. This stays as the reference implementation whose
+    result the fast paths are tested against.
     """
     d, n = int(n_features), X_explain.shape[0]
     if d == 0 or n == 0:
@@ -2496,7 +2493,6 @@ def compute_meta_shap_values(
                - np.asarray(predict_fn(Z0), float))
         return phi.reshape(n, 1)
 
-    import math
     # Cache F(S) for every subset mask (bitmask over feature indices).
     pred_cache: Dict[int, np.ndarray] = {}
     for mask in range(1 << d):
@@ -2553,6 +2549,59 @@ def compute_meta_shap(
     phi = compute_meta_shap_values(predict_fn, X_explain, baseline_row, d)
     agg = np.abs(phi).mean(axis=0) if mode == "abs" else phi.mean(axis=0)
     return {f: float(agg[i]) for i, f in enumerate(feature_names)}
+
+
+#  Permutations are drawn per explained row, so this budget is per row and does
+#  not have to grow with the length of the split.
+SHAP_EVALS_PER_FEATURE = 100
+
+
+def meta_shap_values(
+    model: Any,
+    predict_fn: Callable[[np.ndarray], np.ndarray],
+    X_explain: np.ndarray,
+    baseline_row: np.ndarray,
+    n_features: int,
+) -> Tuple[np.ndarray, str]:
+    """
+    The per-row Shapley matrix and the name of the method that produced it.
+
+    Same value function compute_meta_shap_values enumerates — interventional,
+    with the single baseline row as the only reference — reached in polynomial
+    time so every row of the split can be explained.
+
+    A random forest's predict_proba is a mean of per-tree probabilities, so
+    marginalising to the baseline is linear within each tree and TreeSHAP is
+    exact: it reproduces the enumeration to 1e-8. That fails for gradient
+    boosting, whose predict_proba is a logistic function of a sum of margins —
+    exact on the margin, 15% off on the probability this stage attributes — so
+    every other meta-learner samples permutations instead, recovering the
+    ranking to about 2%.
+    """
+    import shap
+
+    d, n = int(n_features), X_explain.shape[0]
+    if d == 0 or n == 0:
+        return np.full((n, d), np.nan, dtype=float), "none"
+
+    base = np.asarray(baseline_row, dtype=float).reshape(1, -1)
+    masker = shap.maskers.Independent(base, max_samples=1)
+    if isinstance(model, RandomForestClassifier):
+        explainer = shap.TreeExplainer(
+            model, data=masker, feature_perturbation="interventional",
+            model_output="probability")
+        phi = explainer.shap_values(X_explain, check_additivity=False)
+        phi = phi[..., 1] if np.ndim(phi) == 3 else phi
+        method = "exact (interventional TreeSHAP)"
+    else:
+        safe = lambda Z: np.nan_to_num(np.asarray(predict_fn(np.asarray(Z)), float),
+                                       nan=0.0, posinf=1.0, neginf=0.0)
+        explainer = shap.PermutationExplainer(safe, masker)
+        phi = explainer(X_explain, max_evals=SHAP_EVALS_PER_FEATURE * d,
+                        silent=True).values
+        method = (f"sampled (permutation, {SHAP_EVALS_PER_FEATURE}*d "
+                  f"evaluations per row)")
+    return np.asarray(phi, dtype=float).reshape(n, d), method
 
 
 def score_fn_for(metric=DEFAULT_DECISION_METRICS, vus_win=None):
@@ -3172,7 +3221,6 @@ def explain_ga_combination(
     entity: str,
     meta_model: Any = None,
     predict_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
-    max_explain: int = 200,
     explain: bool = False,
     metric: str = DEFAULT_DECISION_METRICS,
     vus_win: Optional[int] = None,
@@ -3205,7 +3253,7 @@ def explain_ga_combination(
     X_train_f = np.nan_to_num(X_train_f, nan=0.0, posinf=1.0, neginf=0.0)
     X_test_f = np.nan_to_num(X_test_f, nan=0.0, posinf=1.0, neginf=0.0)
 
-    used_source = "injected"
+    used_source, meta_obj = "injected", None
     if predict_fn is None:
         candidate = meta_model
         # Validate the captured model's expected feature width when discoverable.
@@ -3215,7 +3263,7 @@ def explain_ga_combination(
             ok = False
         if ok:
             predict_fn = lambda Z: candidate.predict_proba(Z)[:, 1]
-            used_source = "captured"
+            used_source, meta_obj = "captured", candidate
         else:
             # Defensive fallback: retrain a meta-model of the requested type.
             yt = np.asarray(y_true_train).flatten()
@@ -3227,31 +3275,21 @@ def explain_ga_combination(
             }.get(meta_model_type, train_meta_model_rf)
             model = trainer(X_train_f, yt)
             predict_fn = lambda Z: model.predict_proba(Z)[:, 1]
-            used_source = "retrained_fallback"
+            used_source, meta_obj = "retrained_fallback", model
 
-    # Subsample explained rows for SHAP speed (deterministic).
-    n_test = X_test_f.shape[0]
-    if n_test > max_explain:
-        rng = np.random.RandomState(42)
-        idx = rng.choice(n_test, size=max_explain, replace=False)
-        X_explain = X_test_f[idx]
-    else:
-        X_explain = X_test_f
     # Median, not mean: detector scores are heavy-tailed, so a column mean lands in
     # the upper quartile of every detector at once — a combination no real row has.
     # From the test rows the values are explained on, not the training split.
     baseline_row = (np.median(X_test_f, axis=0) if X_test_f.shape[0] > 0
                     else np.zeros(d))
 
-    # One 2^d enumeration, both summaries. These used to be two identical passes.
-    phi = compute_meta_shap_values(predict_fn, X_explain, baseline_row, d)
+    # One pass over every test row, both summaries taken from it.
+    phi, shap_method = meta_shap_values(meta_obj, predict_fn, X_test_f,
+                                        baseline_row, d)
     shap_abs = {f: float(np.abs(phi[:, i]).mean()) for i, f in enumerate(feature_names)}
     shap_signed = {f: float(phi[:, i].mean()) for i, f in enumerate(feature_names)}
     pfi_imp = compute_meta_pfi(predict_fn, X_test_f, y_true_test, feature_names,
                                score_fn=score_fn_for(metric, vus_win))
-    # ALE on the FULL test set, matching PFI rather than SHAP's subsample: at
-    # ~2*n*d predictions it is an order of magnitude cheaper than the SHAP pass,
-    # so subsampling would buy nothing.
     ale = compute_meta_ale(predict_fn, X_test_f, feature_names, n_bins=ALE_N_BINS)
     ale_total = {f: ale[f]["total_variation"] for f in feature_names}
     ale_net = {f: ale[f]["net"] for f in feature_names}
@@ -3301,6 +3339,7 @@ def explain_ga_combination(
         f.write(f"Best ensemble : {list(best_ensemble)}\n")
         f.write(f"Meta-learner  : {meta_model_type}  (model source: {used_source})\n")
         f.write(f"Features (detector score columns): {d}\n")
+        f.write(f"SHAP method   : {shap_method}\n")
         f.write(f"Baseline meta-learner F1 (best threshold): {baseline_f1:.4f}\n\n")
 
         f.write("--- SHAP |.| (mean |SHAP|: magnitude of contribution; label-free) ---\n")
@@ -3396,8 +3435,7 @@ def explain_ga_combination(
                     f"{max(trio) - min(trio):>8}\n")
 
         f.write("\nNote: three magnitude measures feed the ranking. mean|SHAP| = the size of the "
-                "detector's influence on the meta-learner's output (label-free, measured on a "
-                "fixed 200-row sample whereas PFI and ALE use every row); PFI = the fitness drop "
+                "detector's influence on the meta-learner's output (label-free); PFI = the fitness drop "
                 "when its column is shuffled (label-based); total |ALE| = how far the output moves "
                 "in total as the detector sweeps its own observed range (label-free). A "
                 "Markov-chain rank aggregation over the pairwise preferences of all three gives "
