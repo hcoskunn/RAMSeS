@@ -1175,11 +1175,14 @@ class TestBuilders(unittest.TestCase):
         self.assertEqual([a for a in robust["evidence"]
                           if a["type"] == "source_verdict"], [])
         self.assertEqual(robust["output"]["top_pick"], "A")
-        # No source-set atom: with 3 sources every one is named by its own role
-        # sentence, so the list only restated them.
-        self.assertNotIn("ra_robust.context.sources", robust["required_atom_ids"])
-        self.assertEqual([a for a in robust["evidence"]
-                          if a["type"] == "stage_context"], [])
+        self.assertIn("ra_robust.context.sources", robust["required_atom_ids"])
+        ctx = next(a for a in robust["evidence"]
+                   if a["id"] == "ra_robust.context.sources")
+        # The source set, and nothing aimed at the narrator: the clause telling
+        # it the ranked detectors are not sources was printed as prose.
+        self.assertEqual(
+            ctx["text"],
+            "The 2 sources aggregated into this consensus are the rankings S1, S2.")
         # Both sources share Borda rank 1, so the equality is one atom of its
         # own and neither role sentence claims the superlative.
         tie = next(a for a in robust["evidence"] if a["type"] == "source_tie")

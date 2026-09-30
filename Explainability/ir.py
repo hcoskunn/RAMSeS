@@ -1682,10 +1682,18 @@ def build_rank_aggregation_ir(dataset: str, entity: str, stage_name: str, iterat
         # consensus). Raw LOO/tau scores stay in `value` for provenance; the
         # prose carries only the ranks.
 
-        # No source-set atom. Naming the sources earned its place when there
-        # were up to 9 of them; with 3, every one is named by its own role
-        # sentence and the list only restated them.
+        # Required relational atom: names the source set explicitly. It used to
+        # add that the ranked detectors are NOT sources, which was aimed at the
+        # narrator and got printed as a sentence of its own.
         src_list = sorted(source_names)
+        cid = f"{prefix}.context.sources"
+        evidence.append(make_atom(
+            cid, "stage_context", "sources",
+            {"sources": src_list, "n_sources": len(src_list), "winner": top},
+            f"The {len(src_list)} sources aggregated into this consensus are the "
+            f"rankings {', '.join(src_list)}.",
+            order=5))
+        required.append(cid)
 
         def _borda_key(v: Dict[str, Any]) -> Tuple[float, str]:
             br = v.get("borda_rank")

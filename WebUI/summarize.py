@@ -98,11 +98,10 @@ _STAGE_SUMMARY: Dict[str, Dict[str, Any]] = {
     # it is picked BY TYPE. Taking the narrative's first sentence literally put
     # whatever the narrator opened with on the card, which on nine-source
     # entities is reliably the consensus winner.
-    # source_tie leads: under a shared Borda rank the equality is the answer to
-    # the stage's question, and behind the disclosure button it was invisible
-    # exactly when the per-source sentences read most oddly.
+    # The table ranks the sources at a glance; `full_text` keeps the prose
+    # beside it rather than behind a click, now that 3 sources make it short.
     "rank_aggregation_robust": {"mode": "table", "table": "rank_aggregation",
-                                "lead_types": ("source_tie", "source_role")},
+                                "full_text": True},
     # rank_aggregation_final is deliberately absent: two sources, a couple of
     # sentences, nothing to hold back.
 }
@@ -596,6 +595,10 @@ def summarize(text: str, *, stage: Optional[str] = None,
 
         if spec["mode"] == "table":
             table = _TABLE_BUILDERS[spec["table"]](ir_doc)
+            if table and spec.get("full_text"):
+                # Table plus the whole narrative, no disclosure to click.
+                return {"summary": body, "body": body, "is_full": True,
+                        "mode": "table", "table": table}
             if table:
                 # `lead_first` took the narrative's opening sentence literally.
                 # No stage uses it now that the lead is picked by atom type.

@@ -1268,10 +1268,11 @@ class TestSummaryTables(unittest.TestCase):
                                             "Influence Rank", "Agreement Rank"])
         self.assertEqual(table["rows"][0], [1, "GAN", 1, 1])
         self.assertEqual(table["rows"][1], [2, "Monte Carlo", 5, 2])
-        # The lead answers what this stage is asked — which source shaped the
-        # consensus — and is the narrative's own sentence, not invented copy.
-        # It is picked by atom type, so it holds wherever the narrator put it.
-        self.assertEqual(out["summary"], "GAN shaped the consensus most.")
+        # Table plus the whole narrative: at 3 sources the prose is short
+        # enough to sit beside the table rather than behind a disclosure.
+        self.assertTrue(out["is_full"])
+        self.assertEqual(out["summary"], out["body"])
+        self.assertIn("GAN shaped the consensus most.", out["summary"])
 
     def test_a_source_name_without_an_underscore_still_anchors(self):
         """Sources are named for display now — "GAN", "Off-by-threshold",
@@ -1314,15 +1315,18 @@ class TestSummaryTables(unittest.TestCase):
 
 class TestSummaryTableThroughThePayload(ArtifactTreeCase):
 
-    def test_table_reaches_the_payload_with_the_full_text_behind_it(self):
+    def test_table_reaches_the_payload_beside_the_full_text(self):
         p = artifacts.build_payload(self.DATASET, self.ENTITY)
         ra = next(s for s in p["stages"] if s["key"] == "rank_aggregation_robust")
         self.assertEqual(ra["summary_mode"], "table")
-        self.assertFalse(ra["summary_is_full"])
+        # Nothing held back: the card renders the table and the prose together,
+        # so the frontend pre-expands instead of offering an expand.
+        self.assertTrue(ra["summary_is_full"])
         self.assertEqual([r[1] for r in ra["summary_table"]["rows"]],
                          ["GAN", "Monte Carlo"])
-        # The narrative stays available for the disclosure.
         self.assertIn("Monte Carlo shaped the consensus second most", ra["full"])
+        self.assertIn("Monte Carlo shaped the consensus second most",
+                      ra["summary"])
 
 
 # ── catalog ──────────────────────────────────────────────────────────────────
