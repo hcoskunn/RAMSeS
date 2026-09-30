@@ -205,8 +205,11 @@ def attribute_sentences(narrative: str,
     for sentence in split_sentences(narrative):
         s_names, s_numbers = _tokens(sentence, subject_re)
 
-        hit = _REGIME_RE.search(sentence)
-        anchor = regimes.get(hit.group(1)) if hit else None
+        # Exactly one, not the first of several: a sentence naming every regime
+        # is the roll-up, and anchoring it on the first filed it under regime 0.
+        named = set(_REGIME_RE.findall(sentence))
+        one_regime = len(named) == 1
+        anchor = regimes.get(next(iter(named))) if one_regime else None
         if anchor is None:
             matched = [a for key, a in spans.items() if set(key) <= s_numbers]
             anchor = matched[0] if len(matched) == 1 else None
@@ -222,9 +225,11 @@ def attribute_sentences(narrative: str,
             # context feature 7 contributed most" from a regime led by NN_1
             # whose context feature 7 mattered — both share one name and one
             # number — and the roll-up sentences lost those ties, disappearing
-            # from the summary along with the regimes. A sentence that names a
-            # regime the IR has no atom for still falls back to overlap.
-            if not hit and atom.get("type") == "regime":
+            # from the summary along with the regimes. A sentence naming ONE
+            # regime the IR has no atom for still falls back to overlap; one
+            # naming several must not, or the roll-up reaches a regime here
+            # instead of through the anchor.
+            if not one_regime and atom.get("type") == "regime":
                 continue
             shared = 2 * len(s_names & a_names) + len(s_numbers & a_numbers)
             if not shared:

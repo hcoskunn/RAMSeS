@@ -967,6 +967,31 @@ class TestThompsonRegimeHandling(unittest.TestCase):
         artifacts._attach_narrated_regimes(regimes, ordinal, ir_doc)
         self.assertTrue(all(not r.get("narrated") for r in regimes))
 
+    def test_a_roll_up_naming_every_regime_anchors_to_none_of_them(self):
+        """The narrator writes the summary by enumerating the regimes, so the
+        sentence carries every index. Anchoring on the first filed it under
+        regime 0 — into that regime's panel, and out of the card until
+        orphan-protection restored it, so it read twice.
+        """
+        ir_doc = self._ir()
+        roll_up = ("Thompson Sampling ranked NN_1 first. The run split into 2 "
+                   "regimes: NN_3 led Regime 0 (windows 0 to 4) and NN_1 led "
+                   "Regime 1 (windows 5 to 18).")
+        pairs = dict((s.strip(), a or {})
+                     for s, a in summarize.attribute_sentences(roll_up, ir_doc))
+        summary_sentence = next(s for s in pairs if s.startswith("The run split"))
+        got = pairs[summary_sentence]
+        self.assertNotEqual(got.get("id"), "ts.regime.0")
+        # Whichever atom it scores against, it must not be a regime: that type
+        # is what the summary drops and what the per-regime panels collect.
+        self.assertNotEqual(got.get("type"), "regime")
+        # And so it never reaches a regime's panel.
+        regimes = artifacts._regimes_from_ir(ir_doc)
+        artifacts._attach_narrated_regimes(regimes, roll_up, ir_doc)
+        for regime in regimes:
+            self.assertNotIn("The run split into 2 regimes",
+                             regime.get("narrated") or "")
+
     def test_a_regimes_second_sentence_goes_with_its_regime(self):
         """Resilience, not the primary path: the IR now packs every claim about
         a regime into ONE sentence, so there is normally no second sentence to
